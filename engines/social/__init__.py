@@ -12,25 +12,37 @@ Note: CODS engine has been deprecated and moved to deprecated/cods_system/.
 The PrimitiveSuggester provides direct primitive application without unlock ceremonies.
 """
 
-from engines.social.network_contributor import AgentNetworkContributor
 from engines.social.hypothesis_system import AgentHypothesisSystem
+from engines.social.network_contributor import AgentNetworkContributor
+
 
 # Lazy imports for heavier modules
 def get_viral_package_engine():
-    from engines.social.viral_package_engine import ViralPackageEngine, get_cohort_wisdom, update_sequence_role_reputation
+    from engines.social.viral_package_engine import (
+        ViralPackageEngine,
+        get_cohort_wisdom,
+        update_sequence_role_reputation,
+    )
     return ViralPackageEngine, get_cohort_wisdom, update_sequence_role_reputation
 
 def get_resonance_detector():
-    from engines.social.resonance_detector import ResonanceDetector, should_query_resonance
+    from engines.social.resonance_detector import (
+        ResonanceDetector,
+        should_query_resonance,
+    )
     return ResonanceDetector, should_query_resonance
 
 def get_prestige_engine():
-    from engines.social.prestige_engine import PrestigeEngine, display_prestige_leaderboard
+    from engines.social.prestige_engine import (
+        PrestigeEngine,
+        display_prestige_leaderboard,
+    )
     return PrestigeEngine, display_prestige_leaderboard
 
 def get_primitive_suggester():
     """Get PrimitiveSuggester for direct primitive-to-action mapping."""
-    from engines.social.primitive_suggester import PrimitiveSuggester, get_primitive_suggester as _get
+    from engines.social.primitive_suggester import PrimitiveSuggester
+    from engines.social.primitive_suggester import get_primitive_suggester as _get
     return PrimitiveSuggester, _get
 
 # Backward compatibility stub - raises warning
@@ -40,7 +52,7 @@ def get_cods_engine():
     warnings.warn(
         "get_cods_engine() is deprecated. Use get_primitive_suggester() instead. "
         "CODS files moved to deprecated/cods_system/",
-        DeprecationWarning, 
+        DeprecationWarning,
         stacklevel=2
     )
     # Return stub classes that won't break existing code but won't do anything useful
@@ -55,7 +67,7 @@ def get_cods_engine():
 
 __all__ = [
     'AgentNetworkContributor', 'AgentHypothesisSystem',
-    'get_viral_package_engine', 'get_resonance_detector', 'get_prestige_engine', 
+    'get_viral_package_engine', 'get_resonance_detector', 'get_prestige_engine',
     'get_primitive_suggester',
     'get_cods_engine',  # Deprecated stub for backward compatibility
 ]

@@ -3,6 +3,7 @@
 Remove Unicode emoji characters from Python files to fix Windows cp1252 encoding errors.
 """
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 import re
 from pathlib import Path
@@ -52,11 +53,11 @@ def remove_emojis_from_file(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        
+
         original_content = content
         for emoji, replacement in EMOJI_MAP.items():
             content = content.replace(emoji, replacement)
-        
+
         if content != original_content:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -69,13 +70,13 @@ def remove_emojis_from_file(file_path):
 def main():
     root = Path('.')
     python_files = list(root.rglob('*.py'))
-    
+
     modified_count = 0
     for py_file in python_files:
         if remove_emojis_from_file(py_file):
             print(f"Modified: {py_file}")
             modified_count += 1
-    
+
     print(f"\nTotal files modified: {modified_count}/{len(python_files)}")
 
 if __name__ == '__main__':

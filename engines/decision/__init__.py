@@ -13,31 +13,33 @@ Replaces the 42-rung ladder with 7 ordered phases:
 
 Usage:
     from engines.decision import PhaseExecutor
-    
+
     executor = PhaseExecutor(engine_registry, db)
     decision = executor.decide(game_state, agent_context)
     print(decision.action, decision.reasoning)
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 from engines.decision.phase_contracts import (
-    PhaseError,
-    GameState,
-    AgentContext,
     DecisionContext,  # Accumulating context wrapper
-    OrientContext,
-    GroundTruthContext,
-    ReasonContext,
-    PatternMatch,
-    PatternContext,
-    Proposal,
-    ProposalContext,
+)
+from engines.decision.phase_contracts import (
+    AgentContext,
     FilteredContext,
     FinalDecision,
+    GameState,
+    GroundTruthContext,
+    OrientContext,
+    PatternContext,
+    PatternMatch,
+    PhaseError,
+    Proposal,
+    ProposalContext,
+    ReasonContext,
 )
-
 from engines.decision.phase_executor import PhaseExecutor
 
 __all__ = [

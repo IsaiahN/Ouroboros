@@ -1,27 +1,27 @@
 Agent Classes & Initial States
 Exploiter
-Initial w_B: Low 
+Initial w_B: Low
 
 Role: Maximizes local gain, often at network expense.
 
 Traits: High self-trust, low network trust, short-term optimization.
 
 Pioneer
-Initial w_B: Low to medium 
+Initial w_B: Low to medium
 
 Role: Explores new problem spaces, tolerates high uncertainty.
 
 Traits: High curiosity, low initial knowledge, learns through trial.
 
 Generalist
-Initial w_B: Medium 
+Initial w_B: Medium
 
 Role: Integrates knowledge across domains, translates between specialists.
 
 Traits: Balanced self/network trust, adaptive, communicative.
 
 Optimizer
-Initial w_B: High 
+Initial w_B: High
 
 Role: Refines known solutions, improves efficiency, validates patterns.
 

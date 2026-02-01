@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
@@ -24,12 +25,14 @@ BIOLOGY-INSPIRED: Ant colonies, bacterial quorum sensing, neural exploration/exp
 """
 
 import os
+
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
-import random
 import logging
+import random
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
 from database_interface import DatabaseInterface
 
 # IThread integration for centralized wA/wB management
@@ -180,22 +183,22 @@ class AgentOperatingModeSystem:
                 generation INTEGER NOT NULL,
                 assigned_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
+
                 -- Mode assignment
                 operating_mode TEXT NOT NULL,  -- 'pioneer', 'optimizer', 'generalist'
                 mode_reason TEXT NOT NULL,      -- Why this mode was assigned
-                
+
                 -- Mode parameters applied
                 mutation_multiplier REAL NOT NULL,
                 action_diversity REAL NOT NULL,
                 novelty_seeking REAL NOT NULL,
-                
+
                 -- Performance tracking
                 actions_taken INTEGER DEFAULT 0,
                 score_achieved REAL DEFAULT 0.0,
                 win_achieved BOOLEAN DEFAULT FALSE,
                 mode_effectiveness REAL DEFAULT 0.5,  -- How well this mode worked for this agent
-                
+
                 FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
             )
         """)
@@ -224,7 +227,7 @@ class AgentOperatingModeSystem:
 
         # Index for fast agent mode lookups
         self.db.execute_query("""
-            CREATE INDEX IF NOT EXISTS idx_mode_agent_gen 
+            CREATE INDEX IF NOT EXISTS idx_mode_agent_gen
             ON agent_operating_modes(agent_id, generation)
         """)
 
@@ -239,25 +242,25 @@ class AgentOperatingModeSystem:
     # Balanced = Generalist
     # Very high wA + saturated game = Exploiter (micro-optimize)
     # =========================================================================
-    
+
     def derive_role_from_weights(
-        self, 
-        agent_id: str, 
+        self,
+        agent_id: str,
         game_context: Optional[Dict] = None
     ) -> Optional[str]:
         """
         Derive role from agent's wA/wB weights and context.
-        
+
         Per unified_agent_consciousness_theory.md:
         - High wA + novel context = Pioneer (explore boldly)
         - High wB + has solutions = Optimizer (follow network wisdom)
         - Balanced = Generalist
         - Very high wA + saturated = Exploiter (micro-optimize)
-        
+
         Args:
             agent_id: Agent identifier
             game_context: Optional context with is_novel, has_solutions, is_saturated
-            
+
         Returns:
             Derived role or None if weights not available
         """
@@ -266,24 +269,24 @@ class AgentOperatingModeSystem:
             result = self.db.execute_query("""
                 SELECT self_network_bias FROM agents WHERE agent_id = ?
             """, (agent_id,))
-            
+
             if not result:
                 return None
-            
+
             self_network_bias = result[0].get('self_network_bias')
             if self_network_bias is None:
                 return None
-            
+
             # wA = self_network_bias (trust self), wB = 1 - wA (trust network)
             wA = float(self_network_bias)
             wB = 1.0 - wA
-            
+
             # Get context (defaults if not provided)
             ctx = game_context or {}
             is_novel = ctx.get('is_novel', True)  # Assume novel if unknown
             has_solutions = ctx.get('has_solutions', False)
             is_saturated = ctx.get('is_saturated', False)
-            
+
             # Derive role based on weights + context
             if wA > 0.7 and is_novel:
                 # High self-trust + novel = Pioneer
@@ -303,15 +306,15 @@ class AgentOperatingModeSystem:
             else:
                 # Network-leaning without solutions = Generalist
                 return 'optimizer' if has_solutions else 'generalist'
-                
+
         except Exception as e:
             logger.debug(f"Role derivation from weights failed: {e}")
             return None
-    
+
     def get_game_context_for_role(self, game_id: str) -> Dict[str, Any]:
         """
         Get game context needed for role derivation.
-        
+
         Returns:
             Dict with is_novel, has_solutions, is_saturated
         """
@@ -319,27 +322,27 @@ class AgentOperatingModeSystem:
             # Check if game has any winning sequences
             has_solutions = False
             seq_result = self.db.execute_query("""
-                SELECT COUNT(*) as seq_count 
-                FROM winning_sequences 
+                SELECT COUNT(*) as seq_count
+                FROM winning_sequences
                 WHERE game_id = ? AND is_active = 1
             """, (game_id,))
             if seq_result and seq_result[0].get('seq_count', 0) > 0:
                 has_solutions = True
-            
+
             # Check if game is saturated (optimization improvement < 2% for 5+ gens)
             is_saturated = False
             # Simplified check: if game has 10+ sequences and best hasn't improved recently
             sat_result = self.db.execute_query("""
-                SELECT COUNT(*) as seq_count 
-                FROM winning_sequences 
+                SELECT COUNT(*) as seq_count
+                FROM winning_sequences
                 WHERE game_id = ? AND is_active = 1
             """, (game_id,))
             if sat_result and sat_result[0].get('seq_count', 0) >= 10:
                 is_saturated = True  # Heuristic: many sequences = likely saturated
-            
+
             # Check if game is novel (no successful attempts by any agent)
             is_novel = not has_solutions
-            
+
             return {
                 'is_novel': is_novel,
                 'has_solutions': has_solutions,
@@ -416,7 +419,7 @@ class AgentOperatingModeSystem:
         """
         results = self.db.execute_query(
             """
-            SELECT operating_mode, 
+            SELECT operating_mode,
                    AVG(score_achieved) as avg_score,
                    AVG(score_achieved / NULLIF(actions_taken, 0)) as avg_efficiency,
                    COUNT(*) as attempts
@@ -535,7 +538,7 @@ class AgentOperatingModeSystem:
 
         for agent_id in agents_by_performance:
             stats = agent_stats.get(agent_id, {})
-            
+
             # =========================================================
             # FIX #14: TRY EMERGENT ROLE FROM wA/wB FIRST
             # =========================================================
@@ -544,7 +547,7 @@ class AgentOperatingModeSystem:
             # Fall back to performance-based assignment if derivation fails.
             # =========================================================
             emergent_role = self.derive_role_from_weights(agent_id, game_context)
-            
+
             if emergent_role:
                 # Check if we can accommodate this emergent role (soft quota)
                 # Allow 10% overflow on quotas for emergent roles
@@ -555,7 +558,7 @@ class AgentOperatingModeSystem:
                     'exploiter': target_exploiters
                 }
                 max_for_role = int(target_for_role[emergent_role] * 1.1) + 1  # 10% overflow
-                
+
                 if assigned_modes[emergent_role] < max_for_role:
                     mode = emergent_role
                     reason = f"[EMERGENT] Derived from wA/wB weights (context: novel={game_context.get('is_novel', 'N/A') if game_context else 'N/A'})"
@@ -652,7 +655,7 @@ class AgentOperatingModeSystem:
             f"{assigned_modes['generalist']} generalists, "
             f"{assigned_modes['exploiter']} exploiters"
         )
-        
+
         # FIX #14: Report emergent role count
         if emergent_count > 0:
             logger.info(f"   [FIX14-EMERGENT] {emergent_count} roles derived from wA/wB weights")
@@ -699,7 +702,7 @@ class AgentOperatingModeSystem:
         placeholders = ",".join(["?" for _ in agent_ids])
 
         query = f"""
-            SELECT 
+            SELECT
                 agent_id,
                 AVG(final_score) as avg_score,
                 COUNT(*) as games_played,
@@ -736,7 +739,7 @@ class AgentOperatingModeSystem:
 
         mode_id = f"mode_{uuid.uuid4().hex[:12]}"
         params = self.MODE_PARAMETERS[mode]
-        
+
         # FIX: Set social_rule_adherence based on role per Master Ruleset
         # Exploiters get 50/50 split: sociopathic (0.0-0.3) vs social (0.7-1.0)
         # All other roles get moderate social adherence (0.5-0.8)
@@ -755,7 +758,7 @@ class AgentOperatingModeSystem:
         else:  # generalist
             # Generalists: balanced social adherence
             social_rule_adherence = random.uniform(0.5, 0.8)
-        
+
         # Update agent's social_rule_adherence in agents table
         self.db.execute_query(
             "UPDATE agents SET social_rule_adherence = ? WHERE agent_id = ?",
@@ -819,12 +822,12 @@ class AgentOperatingModeSystem:
     def update_agent_w_B_progress(self, agent_id: str, generation: int):
         """
         Update agent's current_w_B and progress_score for Role Fairness tracking.
-        
+
         CRITICAL: This updates the agent_operating_modes table with current w_B
         from the agents table, and calculates progress since role assignment.
-        
+
         This should be called after gameplay to track growth-based evaluation.
-        
+
         Args:
             agent_id: Agent to update
             generation: Current generation
@@ -833,27 +836,27 @@ class AgentOperatingModeSystem:
         agent = self.db.execute_query("""
             SELECT self_network_bias FROM agents WHERE agent_id = ?
         """, (agent_id,))
-        
+
         if not agent or len(agent) == 0:
             return
-        
+
         current_w_B = agent[0].get('self_network_bias', 0.5) or 0.5
-        
+
         # Get initial_w_B from the mode assignment
         mode_info = self.db.execute_query("""
             SELECT initial_w_B_for_role FROM agent_operating_modes
             WHERE agent_id = ? AND generation = ?
             ORDER BY created_at DESC LIMIT 1
         """, (agent_id, generation))
-        
+
         if not mode_info or len(mode_info) == 0:
             return
-        
+
         initial_w_B = mode_info[0].get('initial_w_B_for_role', 0.5) or 0.5
-        
+
         # Calculate progress score: growth from initial position
         progress_score = current_w_B - initial_w_B
-        
+
         # Update the agent_operating_modes record
         self.db.execute_query("""
             UPDATE agent_operating_modes
@@ -861,7 +864,7 @@ class AgentOperatingModeSystem:
                 progress_score = ?
             WHERE agent_id = ? AND generation = ?
         """, (current_w_B, progress_score, agent_id, generation))
-        
+
         # Log significant progress (positive or negative)
         if abs(progress_score) > 0.1:
             direction = "grew" if progress_score > 0 else "regressed"
@@ -991,7 +994,7 @@ class AgentOperatingModeSystem:
     # 1. Performance history per role (efficiency, win rate)
     # 2. Semantic feedback (frustration, satisfaction from sensation engine)
     # 3. Network contribution (sequences discovered)
-    # 
+    #
     # Agents start with assigned roles, but can:
     # - Develop a preferred_role based on fit scores
     # - Lock into a role when they find a good fit (role_locked=True)
@@ -1001,41 +1004,41 @@ class AgentOperatingModeSystem:
     def get_agent_role(self, agent_id: str, generation: int) -> str:
         """
         Get agent's role for this generation - respects self-determination.
-        
+
         Priority:
         1. Locked role (agent found their niche)
         2. Preferred role (agent wants to try this, if capacity allows)
         3. Assigned role (population quota fallback)
-        
+
         Args:
             agent_id: Agent ID
             generation: Current generation
-            
+
         Returns:
             Role string ('pioneer', 'optimizer', 'generalist', 'exploiter')
         """
         # Get agent's self-determination state
         agent = self.db.execute_query("""
-            SELECT preferred_role, role_locked, role_confidence, 
+            SELECT preferred_role, role_locked, role_confidence,
                    last_role_switch_gen, role_switch_cooldown
             FROM agents WHERE agent_id = ?
         """, (agent_id,))
-        
+
         if not agent:
             return 'generalist'  # Fallback
-        
+
         agent_data = agent[0]
-        
+
         # 1. Locked agents stay in their role (found their niche)
         if agent_data.get('role_locked') and agent_data.get('preferred_role'):
             logger.debug(f"Agent {agent_id[:8]} locked into {agent_data['preferred_role']}")
             return agent_data['preferred_role']
-        
+
         # 2. Agent has a preference and cooldown is over
         if agent_data.get('preferred_role'):
             cooldown = agent_data.get('role_switch_cooldown', 2)
             last_switch = agent_data.get('last_role_switch_gen', 0)
-            
+
             if generation - last_switch >= cooldown:
                 # Check if role has capacity (soft limit)
                 if self._role_has_capacity(agent_data['preferred_role'], generation):
@@ -1044,16 +1047,16 @@ class AgentOperatingModeSystem:
                 elif agent_data.get('role_confidence', 0) > 0.8:
                     logger.info(f"Agent {agent_id[:8]} overflowing into {agent_data['preferred_role']} (high confidence)")
                     return agent_data['preferred_role']
-        
+
         # 3. Fall back to last assigned role or generalist
         last_mode = self.db.execute_query("""
             SELECT operating_mode FROM agent_operating_modes
             WHERE agent_id = ? ORDER BY generation DESC LIMIT 1
         """, (agent_id,))
-        
+
         if last_mode:
             return last_mode[0]['operating_mode']
-        
+
         return 'generalist'
 
     def _role_has_capacity(self, role: str, generation: int) -> bool:
@@ -1061,12 +1064,12 @@ class AgentOperatingModeSystem:
         # Get current distribution
         distribution = self.get_population_mode_distribution(generation)
         total = sum(distribution.values())
-        
+
         if total == 0:
             return True
-        
+
         current_pct = distribution.get(role, 0) / total
-        
+
         # Get target percentage for this role
         target_pcts = {
             'pioneer': self.TARGET_PIONEER_PCT,
@@ -1074,9 +1077,9 @@ class AgentOperatingModeSystem:
             'generalist': self.TARGET_GENERALIST_PCT,
             'exploiter': self.TARGET_EXPLOITER_PCT
         }
-        
+
         target = target_pcts.get(role, 0.25)
-        
+
         # Allow 10% overflow above target
         return current_pct < (target * 1.1)
 
@@ -1084,20 +1087,20 @@ class AgentOperatingModeSystem:
         """
         Get the role most needed for a new agent based on population distribution.
         Called when creating new agents to ensure balanced role distribution.
-        
+
         Args:
             generation: Current generation (for distribution lookup)
-            
+
         Returns:
             Role string ('pioneer', 'optimizer', 'generalist', 'exploiter')
         """
         # Get current distribution
         distribution = self.get_population_mode_distribution(generation)
         total = sum(distribution.values()) or 1
-        
+
         # Calculate current percentages
         current_pcts = {role: count / total for role, count in distribution.items()}
-        
+
         # Get target percentages
         targets = {
             'pioneer': self.TARGET_PIONEER_PCT,
@@ -1105,21 +1108,21 @@ class AgentOperatingModeSystem:
             'generalist': self.TARGET_GENERALIST_PCT,
             'exploiter': self.TARGET_EXPLOITER_PCT
         }
-        
+
         # Find role most below target (largest deficit)
-        deficits = {role: targets[role] - current_pcts.get(role, 0) 
+        deficits = {role: targets[role] - current_pcts.get(role, 0)
                     for role in targets}
-        
+
         needed_role = max(deficits, key=lambda r: deficits[r])
         logger.debug(f"Population needs more {needed_role}s (deficit: {deficits[needed_role]:.2%})")
-        
+
         return needed_role
 
     def update_role_fit_after_game(self, agent_id: str, role: str, game_result: Dict) -> None:
         """
         Update agent's fit score for their current role after each game.
         Called automatically after every game to track role effectiveness.
-        
+
         Args:
             agent_id: Agent ID
             role: Role played during this game
@@ -1129,7 +1132,7 @@ class AgentOperatingModeSystem:
         perf = self.db.execute_query("""
             SELECT * FROM agent_role_performance WHERE agent_id = ? AND role = ?
         """, (agent_id, role))
-        
+
         if perf:
             perf = dict(perf[0])
         else:
@@ -1147,35 +1150,35 @@ class AgentOperatingModeSystem:
                 'role_fit_score': 0.0,
                 'consecutive_good_generations': 0
             }
-        
+
         # Update metrics
         perf['games_played'] += 1
         perf['total_score'] += game_result.get('final_score', 0)
         perf['total_wins'] += 1 if game_result.get('win') else 0
         perf['total_actions'] += game_result.get('actions_taken', 0)
-        
+
         # Track sequence discoveries
         if game_result.get('learned_sequence_id'):
             perf['sequences_discovered'] += 1
-        
+
         # Semantic feedback from sensation engine (exponential moving average)
         if 'frustration_level' in game_result:
-            perf['avg_frustration'] = (perf['avg_frustration'] * 0.9 + 
+            perf['avg_frustration'] = (perf['avg_frustration'] * 0.9 +
                                        game_result['frustration_level'] * 0.1)
-        
+
         if 'satisfaction_level' in game_result:
-            perf['avg_satisfaction'] = (perf['avg_satisfaction'] * 0.9 + 
+            perf['avg_satisfaction'] = (perf['avg_satisfaction'] * 0.9 +
                                         game_result['satisfaction_level'] * 0.1)
-        
+
         # Calculate composite fit score
         games = max(perf['games_played'], 1)
         actions = max(perf['total_actions'], 1)
-        
+
         efficiency = perf['total_score'] / actions  # Score per action
         win_rate = perf['total_wins'] / games
         discovery_rate = perf['sequences_discovered'] / games
         semantic_quality = (1.0 - perf['avg_frustration']) * perf['avg_satisfaction']
-        
+
         # Weighted composite - different roles value different things
         if role == 'pioneer':
             # Pioneers value discovery and exploration
@@ -1208,7 +1211,7 @@ class AgentOperatingModeSystem:
                 semantic_quality * 0.2 +
                 discovery_rate * 0.2
             )
-        
+
         # Save updated performance
         self.db.execute_query("""
             INSERT OR REPLACE INTO agent_role_performance
@@ -1222,7 +1225,7 @@ class AgentOperatingModeSystem:
             perf['avg_frustration'], perf['avg_satisfaction'], perf['role_fit_score'],
             perf.get('consecutive_good_generations', 0)
         ))
-        
+
         # Check for role preference update
         self._update_role_preference(agent_id)
 
@@ -1238,47 +1241,47 @@ class AgentOperatingModeSystem:
             WHERE agent_id = ?
             ORDER BY role_fit_score DESC
         """, (agent_id,))
-        
+
         if not performances or len(performances) == 0:
             return
-        
+
         # Need at least 5 games in a role to consider it
         valid_performances = [p for p in performances if p['games_played'] >= 5]
-        
+
         if not valid_performances:
             return
-        
+
         best = valid_performances[0]
         best_role = best['role']
         best_score = best['role_fit_score']
-        
+
         # Get second best for comparison
         second_best_score = 0.0
         if len(valid_performances) > 1:
             second_best_score = valid_performances[1]['role_fit_score']
-        
+
         # Update preferred role if clearly better (>0.1 difference)
         if best_score > second_best_score + 0.1:
             self.db.execute_query("""
-                UPDATE agents SET 
+                UPDATE agents SET
                     preferred_role = ?,
                     role_confidence = ?
                 WHERE agent_id = ?
             """, (best_role, best_score, agent_id))
-            
+
             logger.debug(f"Agent {agent_id[:8]} prefers {best_role} (fit={best_score:.2f})")
-        
+
         # Check for role lock (found niche)
         self._check_role_lock(agent_id, best_role, best_score, second_best_score)
 
-    def _check_role_lock(self, agent_id: str, best_role: str, 
+    def _check_role_lock(self, agent_id: str, best_role: str,
                          best_score: float, second_best_score: float) -> None:
         """
         Check if agent should lock into their best role.
-        
+
         Lock criteria:
         - Played at least 15 games in preferred role
-        - Fit score > 0.65 
+        - Fit score > 0.65
         - Fit score significantly better than second best (>0.15 difference)
         """
         perf = self.db.execute_query("""
@@ -1286,36 +1289,36 @@ class AgentOperatingModeSystem:
             FROM agent_role_performance
             WHERE agent_id = ? AND role = ?
         """, (agent_id, best_role))
-        
+
         if not perf:
             return
-        
+
         games_in_role = perf[0]['games_played']
         consecutive_good = perf[0].get('consecutive_good_generations', 0)
-        
+
         # Lock conditions
         should_lock = (
             games_in_role >= 15 and
             best_score > 0.65 and
             best_score > second_best_score + 0.15
         )
-        
+
         if should_lock:
             # Get current generation
             gen_result = self.db.execute_query("""
                 SELECT MAX(generation) as gen FROM agent_operating_modes WHERE agent_id = ?
             """, (agent_id,))
             current_gen = gen_result[0]['gen'] if gen_result and gen_result[0]['gen'] else 0
-            
+
             self.db.execute_query("""
-                UPDATE agents SET 
+                UPDATE agents SET
                     preferred_role = ?,
                     role_locked = TRUE,
                     role_lock_generation = ?,
                     role_confidence = ?
                 WHERE agent_id = ?
             """, (best_role, current_gen, best_score, agent_id))
-            
+
             logger.info(f"[ROLE LOCK] Agent {agent_id[:8]} locked into {best_role} "
                        f"(fit={best_score:.2f}, games={games_in_role})")
 
@@ -1323,19 +1326,19 @@ class AgentOperatingModeSystem:
                                       generation: int) -> Tuple[bool, str, float]:
         """
         Attempt a SOFT role transition per Role Fairness Protocol.
-        
+
         CRITICAL: This is about ATP (metabolic), NOT prestige (social).
         Agents are always ALLOWED to try transitions (voluntary choice preserved).
         Success is probabilistic based on fit score.
         Failed transitions incur ATP "learning tax" (10% reduction).
-        
+
         Philosophy: "Fair but free, incentivized but not coerced"
-        
+
         Args:
             agent_id: Agent ID
             desired_role: Role agent wants to switch to
             generation: Current generation
-            
+
         Returns:
             (success, reason, atp_cost) tuple
             - success: Whether transition was successful
@@ -1343,7 +1346,7 @@ class AgentOperatingModeSystem:
             - atp_cost: ATP learning tax (0.0 if success, 0.1 if failure)
         """
         import uuid
-        
+
         # Get agent's current role and w_B
         current_role_info = self.db.execute_query("""
             SELECT operating_mode, initial_w_B_for_role
@@ -1351,58 +1354,58 @@ class AgentOperatingModeSystem:
             WHERE agent_id = ? AND generation = ?
             ORDER BY created_at DESC LIMIT 1
         """, (agent_id, generation))
-        
+
         current_role = 'generalist'
         if current_role_info and len(current_role_info) > 0:
             current_role = current_role_info[0].get('operating_mode', 'generalist')
-        
+
         # Check if already in desired role
         if current_role == desired_role:
             return True, "Already in requested role", 0.0
-        
+
         # Check if agent is locked (still allow attempt but lower success)
         agent = self.db.execute_query("""
             SELECT role_locked, last_role_switch_gen, role_switch_cooldown, self_network_bias
             FROM agents WHERE agent_id = ?
         """, (agent_id,))
-        
+
         if not agent:
             return False, "Agent not found", 0.0
-        
+
         agent_data = agent[0]
         is_locked = agent_data.get('role_locked', False)
         current_w_B = agent_data.get('self_network_bias', 0.5) or 0.5
-        
+
         # Check cooldown (soft enforcement - reduces success probability)
         cooldown = agent_data.get('role_switch_cooldown', 2)
         last_switch = agent_data.get('last_role_switch_gen', 0) or 0
         cooldown_penalty = 0.0
         if generation - last_switch < cooldown:
             cooldown_penalty = 0.3  # 30% success penalty for cooldown violation
-        
+
         # Get agent's fit score for desired role
         fit_result = self.db.execute_query("""
             SELECT role_fit_score FROM agent_role_performance
             WHERE agent_id = ? AND role = ?
         """, (agent_id, desired_role))
-        
+
         fit_score = fit_result[0]['role_fit_score'] if fit_result else 0.3
-        
+
         # Calculate success probability
         # Base: fit_score (0.0 to 1.0)
         # Minus: cooldown penalty (0.0 or 0.3)
         # Minus: lock penalty (0.0 or 0.4 if locked)
         lock_penalty = 0.4 if is_locked else 0.0
         success_probability = max(0.1, fit_score - cooldown_penalty - lock_penalty)
-        
+
         # Roll for success
         roll = random.random()
         was_successful = roll < success_probability
-        
+
         # Record the transition attempt
         transition_id = f"trans_{uuid.uuid4().hex[:12]}"
         atp_cost = 0.0 if was_successful else 0.1  # 10% ATP learning tax on failure
-        
+
         self.db.execute_query("""
             INSERT INTO role_transition_attempts
             (transition_id, agent_id, from_role, to_role, success_probability,
@@ -1410,16 +1413,16 @@ class AgentOperatingModeSystem:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (transition_id, agent_id, current_role, desired_role,
               success_probability, was_successful, atp_cost, generation))
-        
+
         if was_successful:
             # Apply the transition
             self.db.execute_query("""
-                UPDATE agents SET 
+                UPDATE agents SET
                     preferred_role = ?,
                     last_role_switch_gen = ?
                 WHERE agent_id = ?
             """, (desired_role, generation, agent_id))
-            
+
             # Record new mode assignment with fresh w_B snapshot
             self._record_mode_assignment(
                 agent_id=agent_id,
@@ -1428,7 +1431,7 @@ class AgentOperatingModeSystem:
                 mode=desired_role,
                 reason=f"Soft transition from {current_role} (prob={success_probability:.2f})"
             )
-            
+
             logger.info(f"[SOFT TRANSITION] Agent {agent_id[:8]}: {current_role} -> {desired_role} "
                        f"(success, prob={success_probability:.2f})")
             return True, f"Transition successful (prob={success_probability:.2f})", 0.0
@@ -1437,19 +1440,19 @@ class AgentOperatingModeSystem:
                        f"(failed, prob={success_probability:.2f}, tax=10%)")
             return False, f"Transition failed (prob={success_probability:.2f}), 10% ATP learning tax", atp_cost
 
-    def request_role_change(self, agent_id: str, desired_role: str, 
+    def request_role_change(self, agent_id: str, desired_role: str,
                            generation: int) -> Tuple[bool, str]:
         """
         Agent requests to change role. Evaluated based on:
         - Cooldown period (2 generations)
         - Role capacity
         - Agent's fit score for desired role
-        
+
         Args:
             agent_id: Agent ID
             desired_role: Role agent wants to switch to
             generation: Current generation
-            
+
         Returns:
             (approved, reason) tuple
         """
@@ -1458,43 +1461,43 @@ class AgentOperatingModeSystem:
             SELECT role_locked, last_role_switch_gen, role_switch_cooldown
             FROM agents WHERE agent_id = ?
         """, (agent_id,))
-        
+
         if not agent:
             return False, "Agent not found"
-        
+
         agent_data = agent[0]
-        
+
         if agent_data.get('role_locked'):
             return False, "Agent is role-locked (found their niche)"
-        
+
         # Check cooldown
         cooldown = agent_data.get('role_switch_cooldown', 2)
         last_switch = agent_data.get('last_role_switch_gen', 0)
-        
+
         if generation - last_switch < cooldown:
             remaining = cooldown - (generation - last_switch)
             return False, f"Cooldown not complete ({remaining} generations remaining)"
-        
+
         # Check capacity (soft limit - high fit agents can overflow)
         has_capacity = self._role_has_capacity(desired_role, generation)
-        
+
         # Get agent's fit score for desired role
         fit_result = self.db.execute_query("""
             SELECT role_fit_score FROM agent_role_performance
             WHERE agent_id = ? AND role = ?
         """, (agent_id, desired_role))
-        
+
         fit_score = fit_result[0]['role_fit_score'] if fit_result else 0.0
-        
+
         if has_capacity or fit_score > 0.7:  # High-fit agents can overflow
             # Approve the change
             self.db.execute_query("""
-                UPDATE agents SET 
+                UPDATE agents SET
                     preferred_role = ?,
                     last_role_switch_gen = ?
                 WHERE agent_id = ?
             """, (desired_role, generation, agent_id))
-            
+
             # ================================================================
             # RESET wA/wB FOR NEW ROLE
             # ================================================================
@@ -1510,18 +1513,18 @@ class AgentOperatingModeSystem:
                 'exploiter': 0.6,
             }
             new_wB = role_wB_defaults.get(desired_role.lower(), 0.5)
-            
+
             self.db.execute_query("""
                 UPDATE agents SET self_network_bias = ?
                 WHERE agent_id = ?
             """, (new_wB, agent_id))
-            
+
             logger.info(
                 f"[ROLE CHANGE] Agent {agent_id[:8]} -> {desired_role} "
                 f"(fit={fit_score:.2f}, reset wB={new_wB:.2f})"
             )
             return True, f"Role change approved (fit={fit_score:.2f}, wB reset to {new_wB:.2f})"
-        
+
         return False, f"No capacity and fit too low ({fit_score:.2f})"
 
     def get_role_fit_summary(self, agent_id: str) -> Dict:
@@ -1530,17 +1533,17 @@ class AgentOperatingModeSystem:
         Useful for debugging and agent introspection.
         """
         performances = self.db.execute_query("""
-            SELECT role, role_fit_score, games_played, total_wins, 
+            SELECT role, role_fit_score, games_played, total_wins,
                    avg_frustration, avg_satisfaction
             FROM agent_role_performance
             WHERE agent_id = ?
         """, (agent_id,))
-        
+
         agent = self.db.execute_query("""
             SELECT preferred_role, role_locked, role_confidence
             FROM agents WHERE agent_id = ?
         """, (agent_id,))
-        
+
         summary = {
             'agent_id': agent_id,
             'preferred_role': agent[0]['preferred_role'] if agent else None,
@@ -1548,7 +1551,7 @@ class AgentOperatingModeSystem:
             'role_confidence': agent[0]['role_confidence'] if agent else 0.0,
             'role_fits': {}
         }
-        
+
         for p in performances:
             summary['role_fits'][p['role']] = {
                 'fit_score': p['role_fit_score'],
@@ -1557,7 +1560,7 @@ class AgentOperatingModeSystem:
                 'frustration': p['avg_frustration'],
                 'satisfaction': p['avg_satisfaction']
             }
-        
+
         return summary
 
     def get_locked_agents_count(self) -> Dict[str, int]:
@@ -1568,18 +1571,18 @@ class AgentOperatingModeSystem:
             WHERE role_locked = TRUE AND is_active = TRUE
             GROUP BY preferred_role
         """)
-        
+
         counts = {'pioneer': 0, 'optimizer': 0, 'generalist': 0, 'exploiter': 0}
         for r in results:
             if r['preferred_role']:
                 counts[r['preferred_role']] = r['count']
-        
+
         return counts
 
     # ========================================================================
     # TWO-STREAMS: META-LEARNING (Learn to Trust Self vs Network)
     # ========================================================================
-    
+
     def update_meta_bias(
         self,
         agent_id: str,
@@ -1588,13 +1591,13 @@ class AgentOperatingModeSystem:
     ) -> None:
         """
         Update agent's self/network bias based on decision outcome.
-        
+
         Two-Streams Philosophy: Agents should learn WHEN to trust themselves
         vs when to trust the network. This is recursive meta-learning.
-        
+
         REFACTORED: Now delegates to IThread.learn_from_outcome() for centralized
         wA/wB management. Maintains backward compatibility with fallback path.
-        
+
         Args:
             agent_id: Agent to update
             decision_aligned_with: 'private' (trusted self) or 'network' (trusted network)
@@ -1607,10 +1610,10 @@ class AgentOperatingModeSystem:
             chosen_source = 'stream_b'
         else:
             chosen_source = 'synthesis'
-        
+
         # Map outcome_success to outcome string
         outcome = 'positive' if outcome_success else 'negative'
-        
+
         # Try IThread path first (centralized)
         if ITHREAD_AVAILABLE and IThread:
             try:
@@ -1627,19 +1630,19 @@ class AgentOperatingModeSystem:
                 return
             except Exception as e:
                 logger.debug(f"[I-THREAD] learn_from_outcome failed, using fallback: {e}")
-        
+
         # Fallback: Original manual implementation
         agent = self.db.execute_query("""
             SELECT self_network_bias, bias_learning_rate
             FROM agents WHERE agent_id = ?
         """, (agent_id,))
-        
+
         if not agent:
             return
-        
+
         current_bias = agent[0]['self_network_bias'] or 0.5
         learning_rate = agent[0]['bias_learning_rate'] or 0.1
-        
+
         # Calculate bias adjustment
         if decision_aligned_with == 'private':
             if outcome_success:
@@ -1653,23 +1656,23 @@ class AgentOperatingModeSystem:
                 adjustment = learning_rate
         else:
             adjustment = 0.0
-        
+
         # Apply adjustment with dampening for extreme values
         dampening = 1.0 - abs(current_bias - 0.5) * 0.5
         adjustment *= dampening
-        
+
         new_bias = current_bias + adjustment
         new_bias = max(0.0, min(1.0, new_bias))
-        
+
         self.db.execute_query("""
             UPDATE agents SET self_network_bias = ? WHERE agent_id = ?
         """, (new_bias, agent_id))
-        
+
         logger.debug(
             f"[META-BIAS] Agent {agent_id[:8]}: {current_bias:.2f} -> {new_bias:.2f} "
             f"(aligned={decision_aligned_with}, success={outcome_success})"
         )
-    
+
     def record_stream_alignment(
         self,
         agent_id: str,
@@ -1681,10 +1684,10 @@ class AgentOperatingModeSystem:
     ) -> None:
         """
         Record which stream (private/network) a decision aligned with.
-        
+
         This extends sensation_learning_events to track stream alignment
         for meta-learning analysis.
-        
+
         Args:
             agent_id: Agent who made decision
             game_id: Game context
@@ -1695,11 +1698,11 @@ class AgentOperatingModeSystem:
         """
         import uuid
         from datetime import datetime
-        
+
         try:
             self.db.execute_query("""
                 INSERT INTO sensation_learning_events
-                (event_id, agent_id, game_id, generation, action_taken, 
+                (event_id, agent_id, game_id, generation, action_taken,
                  reward_received, aligned_with_stream, event_timestamp)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -1709,18 +1712,18 @@ class AgentOperatingModeSystem:
             ))
         except Exception as e:
             logger.debug(f"Stream alignment recording failed: {e}")
-    
+
     def get_agent_stream_stats(self, agent_id: str) -> Dict[str, Any]:
         """
         Get statistics on agent's stream alignment history.
-        
+
         Useful for understanding whether agent should trust self or network more.
-        
+
         Returns:
             Dictionary with success rates for private vs network decisions
         """
         stats = self.db.execute_query("""
-            SELECT 
+            SELECT
                 aligned_with_stream,
                 COUNT(*) as total,
                 AVG(CASE WHEN reward_received > 0 THEN 1.0 ELSE 0.0 END) as success_rate
@@ -1728,7 +1731,7 @@ class AgentOperatingModeSystem:
             WHERE agent_id = ? AND aligned_with_stream IS NOT NULL
             GROUP BY aligned_with_stream
         """, (agent_id,))
-        
+
         result = {
             'private_success_rate': 0.5,
             'network_success_rate': 0.5,
@@ -1737,7 +1740,7 @@ class AgentOperatingModeSystem:
             'network_count': 0,
             'balanced_count': 0
         }
-        
+
         for s in (stats or []):
             stream = s['aligned_with_stream']
             if stream == 'private':
@@ -1749,17 +1752,17 @@ class AgentOperatingModeSystem:
             elif stream == 'balanced':
                 result['balanced_success_rate'] = s['success_rate'] or 0.5
                 result['balanced_count'] = s['total']
-        
+
         # Calculate recommended bias based on historical performance
         private_weight = result['private_success_rate'] * max(1, result['private_count'])
         network_weight = result['network_success_rate'] * max(1, result['network_count'])
         total_weight = private_weight + network_weight
-        
+
         if total_weight > 0:
             result['recommended_bias'] = private_weight / total_weight
         else:
             result['recommended_bias'] = 0.5
-        
+
         return result
 
 
@@ -1771,25 +1774,25 @@ class AgentOperatingModeSystem:
 def calculate_role_saturation(db: DatabaseInterface, generation: int) -> Dict[str, float]:
     """
     Calculate saturation level for each role (approaching target limits).
-    
+
     Role Saturation measures how close each role is to its target population.
     Useful for detecting when roles are under/over-filled and need rebalancing.
-    
+
     Formula per role:
         actual_count / target_count
-        
+
     Values:
         < 0.8 = Under-filled (need more agents in this role)
         0.8-1.2 = Healthy range
         > 1.2 = Over-filled (too many agents, wasted resources)
-    
+
     Args:
         db: DatabaseInterface instance
         generation: Current evolution generation
-        
+
     Returns:
         Dict mapping role -> saturation ratio
-        
+
     Part of the Societal Metrics System.
     See DOCS/Societal_Metrics_Implementation_Analysis.md for design rationale.
     """
@@ -1802,7 +1805,7 @@ def calculate_role_saturation(db: DatabaseInterface, generation: int) -> Dict[st
             WHERE is_full_game_win = 1 AND is_valid = 1
         """)
         has_full_wins: bool = bool(full_wins and full_wins[0]['count'] > 0)
-        
+
         if has_full_wins:
             # OPTIMIZATION PHASE ratios
             target_ratios = {
@@ -1819,61 +1822,61 @@ def calculate_role_saturation(db: DatabaseInterface, generation: int) -> Dict[st
                 'generalist': 0.20,
                 'exploiter': 0.10
             }
-        
+
         # Get actual population counts per role
         population_result = db.execute_query("""
-            SELECT 
+            SELECT
                 LOWER(COALESCE(role, 'generalist')) as role,
                 COUNT(*) as count
             FROM agents
             WHERE is_active = TRUE
             GROUP BY role
         """)
-        
+
         if not population_result:
             logger.warning("No active agents for role saturation calculation")
             return {role: 0.0 for role in target_ratios}
-        
+
         total_agents = sum(r['count'] for r in population_result)
         if total_agents == 0:
             return {role: 0.0 for role in target_ratios}
-        
+
         actual_counts = {
-            r['role']: r['count'] 
+            r['role']: r['count']
             for r in population_result
         }
-        
+
         # Calculate saturation per role
         saturations = {}
         for role, target_ratio in target_ratios.items():
             target_count = max(total_agents * target_ratio, 1)
             actual_count = actual_counts.get(role, 0)
             saturations[role] = actual_count / target_count
-        
+
         # Store metrics in ecosystem_metrics table
         _store_role_saturation_metrics(db, generation, saturations, has_full_wins)
-        
+
         # Calculate overall saturation health
         mean_saturation = sum(saturations.values()) / len(saturations)
         max_deviation = max(abs(s - 1.0) for s in saturations.values())
-        
+
         logger.info(f"[SATURATION] Generation {generation}: "
                    f"mean={mean_saturation:.2f} max_dev={max_deviation:.2f} "
                    f"phase={'OPTIMIZATION' if has_full_wins else 'EXPLORATION'}")
-        
+
         return saturations
-        
+
     except Exception as e:
         logger.error(f"Error calculating role saturation: {e}")
         return {}
 
 
 def _store_role_saturation_metrics(db: DatabaseInterface, generation: int,
-                                    saturations: Dict[str, float], 
+                                    saturations: Dict[str, float],
                                     is_optimization_phase: bool):
     """Store role saturation in ecosystem_metrics table for tracking."""
     import json
-    
+
     try:
         # Ensure table exists
         db.execute_query("""
@@ -1886,34 +1889,34 @@ def _store_role_saturation_metrics(db: DatabaseInterface, generation: int,
                 PRIMARY KEY (metric_name, generation)
             )
         """)
-        
+
         # Store overall saturation health (mean)
         mean_saturation = sum(saturations.values()) / len(saturations) if saturations else 0.0
-        
+
         metadata = {
             'by_role': saturations,
             'phase': 'optimization' if is_optimization_phase else 'exploration'
         }
-        
+
         db.execute_query("""
             INSERT INTO ecosystem_metrics (metric_name, generation, value, metadata)
             VALUES ('role_saturation', ?, ?, ?)
-            ON CONFLICT(metric_name, generation) DO UPDATE SET 
+            ON CONFLICT(metric_name, generation) DO UPDATE SET
                 value = excluded.value,
                 metadata = excluded.metadata,
                 measured_at = CURRENT_TIMESTAMP
         """, (generation, mean_saturation, json.dumps(metadata)))
-        
+
         # Also store individual role saturations for detailed tracking
         for role, saturation in saturations.items():
             db.execute_query("""
                 INSERT INTO ecosystem_metrics (metric_name, generation, value, metadata)
                 VALUES (?, ?, ?, ?)
-                ON CONFLICT(metric_name, generation) DO UPDATE SET 
+                ON CONFLICT(metric_name, generation) DO UPDATE SET
                     value = excluded.value,
                     measured_at = CURRENT_TIMESTAMP
-            """, (f'role_saturation_{role}', generation, saturation, 
+            """, (f'role_saturation_{role}', generation, saturation,
                   json.dumps({'phase': 'optimization' if is_optimization_phase else 'exploration'})))
-        
+
     except Exception as e:
         logger.error(f"Error storing role saturation metrics: {e}")

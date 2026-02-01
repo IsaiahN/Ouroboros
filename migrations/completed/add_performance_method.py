@@ -4,14 +4,14 @@ This method records agent performance metrics to the agent_performance_history t
 """
 
 PERFORMANCE_TRACKING_METHOD = '''
-    def _track_agent_performance(self, agent_id: str, game_id: str, 
+    def _track_agent_performance(self, agent_id: str, game_id: str,
                                 final_score: float, actions_taken: int,
                                 level_completions: int, win: bool,
                                 duration_seconds: float):
         """
         Track agent performance metrics for self-model (Task #6).
         Records performance to agent_performance_history table.
-        
+
         Args:
             agent_id: Agent ID
             game_id: Game that was played
@@ -24,14 +24,14 @@ PERFORMANCE_TRACKING_METHOD = '''
         try:
             # Get current performance snapshot
             current = self.db.execute_query("""
-                SELECT games_played, total_score, total_actions, 
+                SELECT games_played, total_score, total_actions,
                        total_levels_completed, wins, best_score, worst_score
                 FROM agent_performance_history
                 WHERE agent_id = ?
                 ORDER BY recorded_at DESC
                 LIMIT 1
             """, (agent_id,))
-            
+
             if current:
                 # Update cumulative metrics
                 games_played = current[0]['games_played'] + 1
@@ -50,14 +50,14 @@ PERFORMANCE_TRACKING_METHOD = '''
                 wins = 1 if win else 0
                 best_score = final_score
                 worst_score = final_score
-            
+
             # Calculate averages
             avg_score = total_score / games_played
             avg_actions = total_actions / games_played
             avg_levels = total_levels / games_played
             avg_efficiency = total_score / total_actions if total_actions > 0 else 0.0
             win_rate = wins / games_played
-            
+
             # Get prestige score
             prestige_data = self.db.execute_query("""
                 SELECT prestige_score
@@ -65,23 +65,23 @@ PERFORMANCE_TRACKING_METHOD = '''
                 WHERE agent_id = ?
             """, (agent_id,))
             prestige_score = prestige_data[0]['prestige_score'] if prestige_data else 0.0
-            
+
             # Get sequence contribution
             sequences_discovered = self.db.execute_query("""
                 SELECT COUNT(*) as cnt
                 FROM winning_sequences
                 WHERE agent_id = ?
             """, (agent_id,))[0]['cnt']
-            
+
             sequences_validated = self.db.execute_query("""
                 SELECT COUNT(*) as cnt
                 FROM sequence_validation_attempts
                 WHERE agent_id = ?
             """, (agent_id,))[0]['cnt'] if self.db.execute_query("""
-                SELECT name FROM sqlite_master 
+                SELECT name FROM sqlite_master
                 WHERE type='table' AND name='sequence_validation_attempts'
             """) else 0
-            
+
             # Insert performance snapshot
             self.db.execute_query("""
                 INSERT INTO agent_performance_history (
@@ -96,12 +96,12 @@ PERFORMANCE_TRACKING_METHOD = '''
                   total_actions, avg_actions, avg_efficiency, wins,
                   win_rate, sequences_discovered, sequences_validated,
                   prestige_score))
-            
+
             self.db.checkpoint_wal()
-            
+
             logger.debug(f"[STATS] Agent {agent_id} performance: {games_played} games, "
                         f"avg score {avg_score:.2f}, win rate {win_rate:.1%}")
-            
+
         except Exception as e:
             logger.error(f"Error tracking agent performance: {e}")
 '''

@@ -40,21 +40,21 @@ result = list(map(lambda x: x*2, range(1000000)))
 ```python
 # Example 1: List lookup
 if item in my_list:  # O(n) - slow
-    
+
 if item in my_set:   # O(1) - fast
 
-# Example 2: String concatenation  
+# Example 2: String concatenation
 s = ""
 for i in range(1000):
     s += str(i)  # O(n²) - slow
-    
+
 s = "".join(str(i) for i in range(1000))  # O(n) - fast
 
 # Generalize to Example 3 (never seen):
 result = {}
 for key in keys:
     result[key] = value  # You KNOW this is slow
-    
+
 result = {key: value for key in keys}  # You KNOW this is faster
 ```
 
@@ -93,7 +93,7 @@ def process(items=[]):  # BUG: mutable default
     items.append(1)
     return items
 
-# Example 2:  
+# Example 2:
 def process(items=None):  # CORRECT
     if items is None:
         items = []
@@ -119,7 +119,7 @@ Then generalized to: "I need bigger heart → use blue door"
 ### Programmers Learn:
 ```
 Loop with append → SLOW (abstract performance transformation)
-Comprehension → FAST (abstract performance transformation)  
+Comprehension → FAST (abstract performance transformation)
 
 Then generalize to: "I need fast processing → use comprehension"
 ```
@@ -170,7 +170,7 @@ mutable_list = [1, 2, 3]     # Not thread-safe, not hashable, flexible
 
 # Immediately generalize:
 frozen_set vs set
-str vs bytearray  
+str vs bytearray
 namedtuple vs dict
 ```
 
@@ -207,7 +207,7 @@ access_pattern_B()  # Slow due to cache misses
 
 # But predicting which requires understanding:
 # - CPU architecture
-# - Cache sizes  
+# - Cache sizes
 # - Memory layout
 # - Access patterns
 ```
@@ -222,7 +222,7 @@ Programming operates at **multiple abstraction levels**:
 HIGH ABSTRACTION (few-shot learnable)
 ↓
 Algorithm choice → Big-O behavior
-Data structure → Access patterns  
+Data structure → Access patterns
 Language constructs → Readability/maintainability
 Design patterns → Code organization
 
@@ -243,7 +243,7 @@ This connects back to the toddler study's key insight:
 
 In programming:
 - `O(n²)` is an **abstract relation** between input size and time
-- "Immutable → thread-safe" is an **abstract relation**  
+- "Immutable → thread-safe" is an **abstract relation**
 - "Pure function → no side effects" is an **abstract relation**
 
 These **abstract relations** are exactly what makes programming few-shot learnable at the logical/semantic level.
@@ -266,7 +266,7 @@ So when you ask "is logic few-shot learning based," the answer is:
 
 Just like the toddlers could learn "bigger/smaller" relations independent of:
 - What object (ball, character, hat)
-- What color  
+- What color
 - What material
 - What absolute size
 
@@ -295,7 +295,7 @@ This explains why:
 **Yes, programming logic is few-shot learnable precisely because:**
 
 - Logic operates through **abstract causal relations**
-- These relations are **compositional** (combine predictably)  
+- These relations are **compositional** (combine predictably)
 - They map **grammatical structure → semantic outcomes**
 - This mapping is **regular and generalizable**
 
@@ -304,7 +304,7 @@ This explains why:
 
 **Programmers learn:**
 "List iteration + append → O(n) memory growth"
-"Hash table lookup → O(1) access"  
+"Hash table lookup → O(1) access"
 "Recursion depth → stack usage"
 
 Both are **abstract relational causal reasoning** - the same cognitive capacity the toddler study revealed emerging at 24 months.

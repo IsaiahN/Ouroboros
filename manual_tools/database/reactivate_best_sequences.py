@@ -12,7 +12,7 @@ print("=" * 100)
 
 # Find all game_type/level combinations with NO active sequences but HAVE inactive ones
 c.execute("""
-    SELECT 
+    SELECT
         game_type,
         level_number,
         COUNT(*) as total_seqs,
@@ -34,33 +34,33 @@ for combo in needs_reactivation:
     total = combo['total_seqs']
     best_success = combo['best_success']
     max_refs = combo['max_refs']
-    
+
     print(f"\n{game_type} Level {level}: {total} inactive sequences (best success: {best_success}, max refs: {max_refs})")
-    
+
     # Find the BEST sequence to reactivate
     # Priority: highest success_rate_when_reused, then most references, then fewest actions
     c.execute("""
-        SELECT sequence_id, total_actions, total_score, 
+        SELECT sequence_id, total_actions, total_score,
                COALESCE(success_rate_when_reused, 0) as success_rate,
                COALESCE(times_referenced, 0) as refs,
                flag_reason
         FROM winning_sequences
         WHERE game_type = ? AND level_number = ?
-        ORDER BY 
+        ORDER BY
             COALESCE(success_rate_when_reused, 0) DESC,
             COALESCE(times_referenced, 0) DESC,
             total_actions ASC
         LIMIT 1
     """, (game_type, level))
-    
+
     best = c.fetchone()
     if best:
         print(f"  -> Reactivating: {best['sequence_id'][:20]}... ({best['success_rate']*100:.0f}% success, {best['refs']} refs, {best['total_actions']} actions)")
         print(f"     Was deactivated because: {best['flag_reason']}")
-        
+
         c.execute("""
             UPDATE winning_sequences
-            SET is_active = 1, 
+            SET is_active = 1,
                 flag_reason = 'auto_reactivated_best_sequence'
             WHERE sequence_id = ?
         """, (best['sequence_id'],))
@@ -73,7 +73,7 @@ print("FINAL STATUS BY GAME TYPE")
 print("=" * 100)
 
 c.execute("""
-    SELECT 
+    SELECT
         game_type,
         MAX(level_number) as max_level,
         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_seqs,
@@ -96,7 +96,7 @@ print("=" * 100)
 for game_type in ['as66', 'ls20']:
     print(f"\n{game_type.upper()}:")
     c.execute("""
-        SELECT level_number, 
+        SELECT level_number,
                COUNT(*) as total,
                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
                MAX(CASE WHEN is_active = 1 THEN success_rate_when_reused ELSE 0 END) as active_success

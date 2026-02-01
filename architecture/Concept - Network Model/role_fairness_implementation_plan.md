@@ -1,7 +1,7 @@
 # Role Fairness Implementation Plan
 
-**Created**: December 9, 2025  
-**Status**: Planning  
+**Created**: December 9, 2025
+**Status**: Planning
 **Priority**: High (Fixes fundamental thermodynamic imbalance)
 
 ---
@@ -88,7 +88,7 @@ def _get_network_role_need(self, agent_role: str) -> float:
     """
     Query regulatory signals for current network needs.
     Returns adjustment between -0.3 and +0.3.
-    
+
     When network needs more exploration → Pioneer adjustment ↑
     When network needs refinement → Optimizer adjustment ↑
     """
@@ -100,7 +100,7 @@ def _get_network_role_need(self, agent_role: str) -> float:
         AND is_active = TRUE
         ORDER BY timestamp DESC LIMIT 1
     """, (agent_role,))
-    
+
     if signals and signals[0]['signal_value']:
         return max(-0.3, min(0.3, signals[0]['signal_value']))
     return 0.0
@@ -124,7 +124,7 @@ ALTER TABLE agent_operating_modes ADD COLUMN progress_score REAL DEFAULT 0.0;
 def _record_mode_assignment(self, agent_id, game_id, generation, mode, reason):
     mode_id = f"mode_{uuid.uuid4().hex[:16]}"
     params = self.MODE_PARAMETERS[mode]
-    
+
     self.db.execute_query("""
         INSERT INTO agent_operating_modes (
             mode_id, agent_id, game_id, generation,
@@ -139,14 +139,14 @@ def _record_mode_assignment(self, agent_id, game_id, generation, mode, reason):
 def _record_mode_assignment(self, agent_id, game_id, generation, mode, reason):
     mode_id = f"mode_{uuid.uuid4().hex[:16]}"
     params = self.MODE_PARAMETERS[mode]
-    
+
     # Get agent's current self_network_bias (w_B)
     agent_data = self.db.execute_query("""
         SELECT self_network_bias FROM agents WHERE agent_id = ?
     """, (agent_id,))
-    
+
     current_w_B = agent_data[0]['self_network_bias'] if agent_data else 0.5
-    
+
     # Record with initial w_B snapshot
     self.db.execute_query("""
         INSERT INTO agent_operating_modes (
@@ -171,9 +171,9 @@ def _record_mode_assignment(self, agent_id, game_id, generation, mode, reason):
 def _calculate_progress_score(self, agent_id: str, current_role: str) -> Dict[str, float]:
     """
     Calculate growth-based progress score for agent in current role.
-    
+
     Progress = (current_w_B - initial_w_B_for_role) × resource_efficiency
-    
+
     Returns:
         Dict with progress_score, initial_w_B, current_w_B, efficiency
     """
@@ -185,28 +185,28 @@ def _calculate_progress_score(self, agent_id: str, current_role: str) -> Dict[st
         ORDER BY assigned_timestamp DESC
         LIMIT 1
     """, (agent_id, current_role))
-    
+
     if not role_data:
         return {'progress_score': 0.0, 'initial_w_B': 0.5, 'current_w_B': 0.5, 'efficiency': 1.0}
-    
+
     initial_w_B = role_data[0]['initial_w_B_for_role']
-    
+
     # Get CURRENT w_B from agents table
     agent_data = self.db.execute_query("""
         SELECT self_network_bias, score_efficiency FROM agents WHERE agent_id = ?
     """, (agent_id,))
-    
+
     current_w_B = agent_data[0]['self_network_bias'] if agent_data else 0.5
     efficiency = agent_data[0]['score_efficiency'] if agent_data else 1.0
     efficiency = max(0.1, min(2.0, efficiency))  # Clamp to reasonable range
-    
+
     # Progress = growth × efficiency
     w_B_growth = current_w_B - initial_w_B
     progress_score = w_B_growth * efficiency
-    
+
     # Update current_w_B in mode record
     self.db.execute_query("""
-        UPDATE agent_operating_modes 
+        UPDATE agent_operating_modes
         SET current_w_B = ?, progress_score = ?
         WHERE agent_id = ? AND operating_mode = ?
         AND assigned_timestamp = (
@@ -214,7 +214,7 @@ def _calculate_progress_score(self, agent_id: str, current_role: str) -> Dict[st
             WHERE agent_id = ? AND operating_mode = ?
         )
     """, (current_w_B, progress_score, agent_id, current_role, agent_id, current_role))
-    
+
     return {
         'progress_score': progress_score,
         'initial_w_B': initial_w_B,
@@ -227,24 +227,24 @@ def _calculate_progress_score(self, agent_id: str, current_role: str) -> Dict[st
 ```python
 def calculate_agent_salary(self, agent_id: str, generation: int) -> Dict[str, Any]:
     # ... existing code ...
-    
+
     # Get agent's current role
     agent_role = self._get_agent_role(agent_id)
-    
+
     # Calculate progress score
     progress_data = self._calculate_progress_score(agent_id, agent_role)
     progress_score = progress_data['progress_score']
-    
+
     # ATP boost for low-start agents (per fairness protocol)
     initial_w_B = progress_data['initial_w_B']
     if initial_w_B < 0.4:
         low_start_boost = (0.4 - initial_w_B) * 0.5  # Up to +0.2 for lowest starters
     else:
         low_start_boost = 0.0
-    
+
     # Progress bonus (rewards growth)
     progress_bonus = max(0, progress_score) * 0.3  # Up to +0.3 for strong growth
-    
+
     # Combine all factors
     budget_multiplier = (
         role_multiplier +           # Base by role (0.8 - 1.5)
@@ -252,7 +252,7 @@ def calculate_agent_salary(self, agent_id: str, generation: int) -> Dict[str, An
         low_start_boost +           # Help for low-starters (0 to +0.2)
         progress_bonus              # Reward for growth (0 to +0.3)
     )
-    
+
     # ... rest of salary calculation ...
 ```
 
@@ -266,44 +266,44 @@ def calculate_agent_salary(self, agent_id: str, generation: int) -> Dict[str, An
 def attempt_role_transition(self, agent_id: str, target_role: str, generation: int) -> Dict[str, Any]:
     """
     Attempt a voluntary role transition with probabilistic success.
-    
+
     Success probability = skill_match × (1 + progress_score) × network_need
-    
+
     Failed transitions:
     - Cost 10% ATP (learning tax)
     - Are ALWAYS allowed (preserve voluntary choice)
     - Build skill for future attempts
-    
+
     Returns:
         Dict with success, new_role, probability, atp_cost
     """
     current_role = self._get_agent_current_role(agent_id)
-    
+
     # Can't transition to same role
     if current_role == target_role:
         return {'success': True, 'new_role': target_role, 'probability': 1.0, 'atp_cost': 0}
-    
+
     # Calculate skill match (how good is agent at target role based on history?)
     skill_match = self._calculate_role_skill_match(agent_id, target_role)
-    
+
     # Get progress score
     progress_data = self._calculate_progress_score(agent_id, current_role)
     progress_bonus = 1.0 + max(0, progress_data['progress_score'])
-    
+
     # Get network need for target role
     network_need = self._get_network_role_demand(target_role)
-    
+
     # Calculate success probability
     success_probability = min(0.95, skill_match * progress_bonus * network_need)
-    
+
     # Roll for success
     import random
     roll = random.random()
     success = roll < success_probability
-    
+
     if success:
         # Successful transition
-        self._record_mode_assignment(agent_id, None, generation, target_role, 
+        self._record_mode_assignment(agent_id, None, generation, target_role,
                                     f"voluntary_transition_from_{current_role}")
         atp_cost = 0
         logger.info(f"[TRANSITION] Agent {agent_id[:8]} {current_role} -> {target_role} SUCCESS "
@@ -311,14 +311,14 @@ def attempt_role_transition(self, agent_id: str, target_role: str, generation: i
     else:
         # Failed transition - stay in current role but pay learning tax
         atp_cost = 0.10  # 10% ATP penalty
-        
+
         # Record failed attempt for skill building
-        self._record_transition_attempt(agent_id, current_role, target_role, 
+        self._record_transition_attempt(agent_id, current_role, target_role,
                                         success_probability, generation)
-        
+
         logger.info(f"[TRANSITION] Agent {agent_id[:8]} {current_role} -> {target_role} FAILED "
                    f"(prob={success_probability:.2f}, roll={roll:.2f}, tax=10%)")
-    
+
     return {
         'success': success,
         'new_role': target_role if success else current_role,
@@ -334,30 +334,30 @@ def attempt_role_transition(self, agent_id: str, target_role: str, generation: i
 **Location**: `adaptive_action_limits.py` → integrate into `calculate_agent_salary()`
 
 ```python
-def _calculate_stagnation_penalty(self, agent_id: str, agent_role: str, 
+def _calculate_stagnation_penalty(self, agent_id: str, agent_role: str,
                                    progress_data: Dict) -> float:
     """
     Calculate penalty for high-start agents who stagnate.
-    
+
     Graduated curve:
     - progress < 0 (regression): -0.30 penalty
     - progress < 0.05 (stagnant): -0.15 penalty
     - progress < 0.10 (slow): -0.05 penalty
     - progress >= 0.10 (growing): +0.10 × progress bonus
-    
+
     Only applies to agents with initial_w_B >= 0.5 (high-starters)
     """
     initial_w_B = progress_data['initial_w_B']
     progress_score = progress_data['progress_score']
-    
+
     # Low-starters get no stagnation penalty (they get ATP boost instead)
     if initial_w_B < 0.5:
         return 0.0
-    
+
     # Higher expectations for higher starters
     expected_progress = initial_w_B * 0.15  # 0.5 start → expect 0.075 progress
     adjusted_progress = progress_score - expected_progress
-    
+
     if adjusted_progress < -0.1:  # Significant regression
         penalty = -0.30
         logger.debug(f"[PENALTY] Agent regressing: {penalty}")
@@ -367,7 +367,7 @@ def _calculate_stagnation_penalty(self, agent_id: str, agent_role: str,
         penalty = -0.05
     else:  # Growing as expected or better
         penalty = 0.10 * adjusted_progress  # Bonus for exceeding expectations
-    
+
     return penalty
 ```
 

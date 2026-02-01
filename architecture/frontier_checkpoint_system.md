@@ -1,8 +1,40 @@
 # Frontier Checkpoint System
-**Version**: 1.1  
-**Date**: January 27, 2026  
-**Status**: IMPLEMENTED  
-**Purpose**: Constructive pathfinding for hard frontier levels through incremental progress tracking
+**Version**: 1.4
+**Date**: February 1, 2026
+**Status**: IMPLEMENTED
+**Purpose**: Constructive pathfinding for hard frontier levels through incremental progress tracking + network-level topology aggregation
+
+---
+
+## Implementation Status
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| Database Schema | DONE | `complete_database_schema.sql` |
+| Cleanup Logic | DONE | `safe_cleanup.py` |
+| Replay Rung | DONE | `decision_rung_system.py:FrontierCheckpointRung` |
+| Context Fields | DONE | `context_builder.py:checkpoint_sequence/position/frame_hash` |
+| Save on Death | DONE | `learning_systems.py:_save_frontier_checkpoint()` |
+| Audit Tool | DONE | `manual_tools/audit_data_usage.py` |
+| **Network Topology** | **DONE** | `decision_rung_system.py:FrontierTopologyRung` |
+| **Prior Lessons Rung** | **DONE** | `decision_rung_system.py:PriorLessonsRung` |
+
+### Network-Level Topology (Added 2026-02-01)
+
+`FrontierTopologyRung` now queries `action_traces` from ALL agents to build collective knowledge:
+
+```sql
+SELECT action_number, COUNT(*), SUM(positive_outcomes), SUM(deaths), AVG(score_change)
+FROM action_traces
+WHERE frame_hash = ? AND game_id LIKE ? AND level_number = ?
+GROUP BY action_number
+```
+
+**Key features:**
+- **Exploration bonus**: Untried actions get weight 1.5 (higher than tried actions)
+- **Network aggregation**: Combines ALL agents' experiences, not just current agent
+- **Outcome-based scoring**: Positive score changes boost weight, deaths reduce weight
+- **Frame-specific**: Uses `frame_hash` to find exact situation matches
 
 ---
 
@@ -54,32 +86,32 @@ CREATE TABLE frontier_checkpoints (
     game_type TEXT NOT NULL,
     level_number INTEGER NOT NULL,
     terminal_frame_hash TEXT NOT NULL,
-    
+
     -- The action sequence that reaches this state
     action_sequence TEXT NOT NULL,      -- JSON array: [1,4,3,2,6,...]
     actions_count INTEGER NOT NULL,
-    
+
     -- Progress metrics (game-agnostic)
     unique_frames_seen INTEGER DEFAULT 0,   -- Exploration diversity
     survival_score REAL DEFAULT 0,          -- Composite ranking metric
-    
+
     -- Terminal state info
     terminal_reason TEXT,                   -- 'death' | 'stuck' | 'exploring' | 'timeout'
-    
+
     -- Usage tracking
     times_used INTEGER DEFAULT 0,           -- How often replayed as base
     times_extended INTEGER DEFAULT 0,       -- How often someone built on this
-    
+
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_used_at TIMESTAMP,
-    
+
     -- Composite primary key: One row per unique terminal state per level
     PRIMARY KEY (game_type, level_number, terminal_frame_hash)
 );
 
 -- Index for fast "get best checkpoint" queries
-CREATE INDEX idx_frontier_checkpoints_best 
+CREATE INDEX idx_frontier_checkpoints_best
 ON frontier_checkpoints(game_type, level_number, survival_score DESC);
 
 -- Index for cleanup queries
@@ -104,15 +136,15 @@ ON frontier_checkpoints(game_type, level_number, times_extended DESC, created_at
 ```sql
 INSERT INTO frontier_checkpoints (...) VALUES (...)
 ON CONFLICT (game_type, level_number, terminal_frame_hash) DO UPDATE SET
-    action_sequence = CASE 
-        WHEN excluded.survival_score > frontier_checkpoints.survival_score 
-        THEN excluded.action_sequence 
-        ELSE frontier_checkpoints.action_sequence 
+    action_sequence = CASE
+        WHEN excluded.survival_score > frontier_checkpoints.survival_score
+        THEN excluded.action_sequence
+        ELSE frontier_checkpoints.action_sequence
     END,
-    actions_count = CASE 
-        WHEN excluded.survival_score > frontier_checkpoints.survival_score 
-        THEN excluded.actions_count 
-        ELSE frontier_checkpoints.actions_count 
+    actions_count = CASE
+        WHEN excluded.survival_score > frontier_checkpoints.survival_score
+        THEN excluded.actions_count
+        ELSE frontier_checkpoints.actions_count
     END,
     survival_score = MAX(frontier_checkpoints.survival_score, excluded.survival_score),
     unique_frames_seen = MAX(frontier_checkpoints.unique_frames_seen, excluded.unique_frames_seen),
@@ -186,14 +218,14 @@ survival_score = (unique_frames_seen * 10) + actions_count - (oscillation_count 
 def save_frontier_checkpoint(self, game_type, level, ...):
     # Guard: Only save if level is STILL frontier
     existing_win = self.db.execute_query("""
-        SELECT 1 FROM winning_sequences 
+        SELECT 1 FROM winning_sequences
         WHERE game_type = ? AND level = ? AND is_active = 1
         LIMIT 1
     """, (game_type, level))
-    
+
     if existing_win:
         return None  # Level beaten, don't create new checkpoints
-    
+
     # Proceed with UPSERT...
 ```
 
@@ -321,7 +353,7 @@ def _is_frontier_level(self, game_id, level):
 
 **New helper method**:
 ```python
-def _compute_survival_score(self, unique_frames: int, action_count: int, 
+def _compute_survival_score(self, unique_frames: int, action_count: int,
                             oscillation_count: int = 0) -> float:
     """Game-agnostic progress metric - higher = better"""
     return (unique_frames * 10) + action_count - (oscillation_count * 5)
@@ -343,10 +375,10 @@ Run every N generations or when table exceeds threshold:
 -- Keep only top 20 checkpoints per (game_type, level_number)
 -- Prioritize: high survival_score, frequently extended
 WITH ranked AS (
-    SELECT 
+    SELECT
         game_type, level_number, terminal_frame_hash,
         ROW_NUMBER() OVER (
-            PARTITION BY game_type, level_number 
+            PARTITION BY game_type, level_number
             ORDER BY survival_score DESC, times_extended DESC
         ) as rn
     FROM frontier_checkpoints
@@ -371,7 +403,7 @@ A checkpoint may become invalid if:
 ```python
 def invalidate_checkpoint(self, game_type, level, terminal_hash):
     self.db.execute_query("""
-        UPDATE frontier_checkpoints 
+        UPDATE frontier_checkpoints
         SET survival_score = survival_score * 0.5,
             terminal_reason = 'invalidated'
         WHERE game_type = ? AND level_number = ? AND terminal_frame_hash = ?
@@ -400,7 +432,7 @@ def invalidate_checkpoint(self, game_type, level, terminal_hash):
    - Add `frontier_checkpoints` table (schema in this doc)
    - Run migration: `python -c "from database_interface import DatabaseInterface; db = DatabaseInterface('core_data.db'); db.execute_query('''CREATE TABLE IF NOT EXISTS...''')"
 
-2. **Recording method** 
+2. **Recording method**
    - File: `core_gameplay.py`
    - Add method: `_save_frontier_checkpoint(game_type, level, frame_hash, actions, metrics)`
    - Uses existing: `_compute_frame_hash()` (line 6452), `_recent_action_traces` (line 9154)

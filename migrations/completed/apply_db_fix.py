@@ -41,8 +41,8 @@ replacement_content = """        with self._get_connection() as conn:
 
             # CRITICAL FIX: Try UPDATE first, then INSERT if record doesn't exist
             cursor = conn.execute(\"\"\"
-                UPDATE game_results 
-                SET 
+                UPDATE game_results
+                SET
                     scorecard_id = ?,
                     end_time = ?,
                     status = ?,
@@ -72,7 +72,7 @@ replacement_content = """        with self._get_connection() as conn:
                 game_data['game_id'],
                 game_data['session_id']
             ))
-            
+
             # If no rows were updated, insert new record
             logger.debug(f"[DB_TRACE] UPDATE affected {cursor.rowcount} rows for game={game_data['game_id']}")
             if cursor.rowcount == 0:
@@ -103,7 +103,7 @@ replacement_content = """        with self._get_connection() as conn:
                 logger.debug(f"Inserted new game result: {game_data['game_id']}")
             else:
                 logger.debug(f"Updated game result: {game_data['game_id']} - score={game_data.get('final_score', 0.0)}, actions={game_data.get('total_actions', 0)}, levels={game_data.get('level_completions', 0)}")
-            
+
             conn.commit()
 
         logger.debug(f"Saved game result: {game_data['game_id']}")"""

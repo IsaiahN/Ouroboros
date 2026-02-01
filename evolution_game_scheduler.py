@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 """
@@ -8,17 +9,19 @@ This provides a simple interface for the evolution runner to get games
 for agents without duplicating effort on the same game types.
 """
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-from typing import List, Dict, Optional
-from game_scheduler import GameScheduler
+from typing import Dict, List, Optional
+
 from database_interface import DatabaseInterface
+from game_scheduler import GameScheduler
 
 
 class EvolutionGameScheduler:
     """
     Wrapper around GameScheduler for evolution system integration.
-    
+
     Usage in autonomous_evolution_runner.py:
         scheduler = EvolutionGameScheduler(db)
         games_for_agents = scheduler.assign_games_to_agents(
@@ -26,15 +29,15 @@ class EvolutionGameScheduler:
             total_games_to_play=50
         )
     """
-    
+
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self.scheduler = GameScheduler(db)
-    
+
     def shutdown(self):
         """Initiate graceful shutdown."""
         self.scheduler.shutdown()
-        
+
     def assign_games_to_agents(
         self,
         agents: List[Dict],
@@ -45,7 +48,7 @@ class EvolutionGameScheduler:
     ) -> Dict[str, List[str]]:
         """
         Assign games to agents, ensuring no duplicate game types running simultaneously.
-        
+
         Args:
             agents: List of agent dicts with 'agent_id' and 'mode'
             total_games_to_play: Total number of games to play this generation
@@ -54,13 +57,13 @@ class EvolutionGameScheduler:
                                        before random assignment (good when total_games_to_play
                                        equals the number of game types)
             mixed_domain: If True, mark this batch as mixed-domain (telemetry-only)
-            
+
         Returns:
             Dict mapping agent_id -> list of game_ids to play
         """
         if available_game_ids is None:
             available_game_ids = self._get_all_available_games()
-        
+
         if not available_game_ids:
             print("[WARN]  No games available in database!")
             return {}
@@ -69,7 +72,7 @@ class EvolutionGameScheduler:
         self.scheduler.mixed_domain_flag = mixed_domain
         if mixed_domain:
             print("[SCHEDULER] Mixed-domain batch enabled (telemetry only; role ratios/budgets unchanged)")
-        
+
         # ENSURE GAME TYPE COVERAGE: When enabled, make sure each unique game type is played
         if ensure_game_type_coverage:
             # Group games by type (prefix before '-')
@@ -79,9 +82,9 @@ class EvolutionGameScheduler:
                 if game_type not in games_by_type:
                     games_by_type[game_type] = []
                 games_by_type[game_type].append(game_id)
-            
+
             unique_types = len(games_by_type)
-            
+
             # If we have fewer/equal games to play than unique types, guarantee one per type
             if total_games_to_play <= unique_types:
                 # Pick one random game from each type
@@ -89,7 +92,7 @@ class EvolutionGameScheduler:
                 coverage_games = []
                 for game_type, type_games in games_by_type.items():
                     coverage_games.append(random.choice(type_games))
-                
+
                 # Shuffle and take only what we need
                 random.shuffle(coverage_games)
                 available_game_ids = coverage_games[:total_games_to_play]
@@ -99,23 +102,23 @@ class EvolutionGameScheduler:
                 import random
                 coverage_games = []
                 remaining_games = []
-                
+
                 for game_type, type_games in games_by_type.items():
                     # One guaranteed from each type
                     selected = random.choice(type_games)
                     coverage_games.append(selected)
                     # Rest go to remaining pool
                     remaining_games.extend([g for g in type_games if g != selected])
-                
+
                 # Fill remaining slots randomly
                 extra_needed = total_games_to_play - len(coverage_games)
                 if extra_needed > 0 and remaining_games:
                     random.shuffle(remaining_games)
                     coverage_games.extend(remaining_games[:extra_needed])
-                
+
                 available_game_ids = coverage_games
                 print(f"[COVERAGE] Ensured {unique_types} game types covered + {extra_needed} extra games")
-        
+
         # Calculate games per agent
         if total_games_to_play <= len(agents):
             # Fewer games than agents - some agents won't play
@@ -125,29 +128,29 @@ class EvolutionGameScheduler:
             # More games than agents - distribute evenly
             selected_agents = agents
             games_per_agent = max(1, total_games_to_play // len(agents))
-        
+
         print(f"\n[GAME] GAME SCHEDULER: Assigning {total_games_to_play} games to {len(selected_agents)} agents")
         print(f"   Games per agent: {games_per_agent}")
         print(f"   Available games: {len(available_game_ids)}")
         print(f"   Mode distribution: {self._count_modes(selected_agents)}\n")
         if mixed_domain:
             print("   Batch tag: mixed-domain (telemetry)")
-        
+
         # Assign games to each agent
         assignments: Dict[str, List[str]] = {}
-        
+
         for agent in selected_agents:
             # Check for shutdown before each agent assignment
             if self.scheduler.is_shutting_down:
                 print("   [STOP] Graceful shutdown requested - stopping game assignments")
                 break
-                
+
             agent_id = agent.get('agent_id')
             if not agent_id:
                 continue  # Skip if no agent_id
-                
+
             agent_mode = agent.get('mode', agent.get('operating_mode', 'generalist'))
-            
+
             # Get games for this agent
             agent_games = []
             agent_generation = agent.get('generation', 0)
@@ -159,7 +162,7 @@ class EvolutionGameScheduler:
                     available_games=available_game_ids,
                     generation=agent_generation  # Pass generation for rotation
                 )
-                
+
                 if game_id:
                     agent_games.append(game_id)
                 else:
@@ -182,41 +185,41 @@ class EvolutionGameScheduler:
                         if not self.scheduler.is_shutting_down:
                             print(f"   [WARN]  No more games available for {agent_id}")
                         break
-            
+
             if agent_games:
                 assignments[agent_id] = agent_games
-        
+
         # Summary
         total_assigned = sum(len(games) for games in assignments.values())
         print(f"\n[OK] Assigned {total_assigned} games to {len(assignments)} agents")
         print(f"  Active game types: {len(self.scheduler.get_active_games())}")
-        
+
         return assignments
-    
+
     def release_game(self, game_id: str, agent_id: Optional[str] = None):
         """Mark a game as completed (agent finished playing)."""
         self.scheduler.release_game(game_id, agent_id=agent_id)
-    
+
     def release_all_agent_games(self, agent_id: str):
         """Release all games assigned to an agent."""
         active = self.scheduler.get_active_games()
         for game in active:
             if game.agent_id == agent_id:
                 self.scheduler.release_game(game.game_id)
-    
+
     def get_stats(self) -> Dict:
         """Get scheduler statistics."""
         return self.scheduler.get_stats()
-    
+
     def _get_all_available_games(self) -> List[str]:
         """
         Dynamically discover all available game IDs from database.
-        
+
         Sources (in priority order):
         1. game_results (games that have been played)
         2. winning_sequences (games with known sequences)
         3. agent_arc_performance (games attempted by agents)
-        
+
         This scales automatically as new games are discovered.
         """
         # Get all unique game IDs from multiple sources
@@ -231,16 +234,16 @@ class EvolutionGameScheduler:
             )
             ORDER BY game_id
         """)
-        
+
         game_ids = [g['game_id'] for g in games if g['game_id']]
-        
+
         if game_ids:
             # Detect unique game types dynamically
             game_types = set(gid.split('-')[0] for gid in game_ids if '-' in gid)
             print(f"  [DISCOVER] Found {len(game_ids)} games across {len(game_types)} game types: {sorted(game_types)}")
-        
+
         return game_ids
-    
+
     def _count_modes(self, agents: List[Dict]) -> Dict[str, int]:
         """Count agents by mode."""
         counts = {}
@@ -254,25 +257,25 @@ class EvolutionGameScheduler:
 if __name__ == "__main__":
     db = DatabaseInterface()
     evo_scheduler = EvolutionGameScheduler(db)
-    
+
     # Simulate agent population
     test_agents = [
         {'agent_id': f'agent_{i}', 'mode': ['pioneer', 'generalist', 'optimizer'][i % 3], 'generation': 5}
         for i in range(10)
     ]
-    
+
     print("=== EVOLUTION GAME SCHEDULER TEST ===\n")
-    
+
     # Assign games
     assignments = evo_scheduler.assign_games_to_agents(
         agents=test_agents,
         total_games_to_play=15
     )
-    
+
     print("\n=== ASSIGNMENTS ===")
     for agent_id, games in assignments.items():
         print(f"{agent_id}: {games}")
-    
+
     print("\n=== STATS ===")
     stats = evo_scheduler.get_stats()
     print(f"Active games: {stats['active_games']}")

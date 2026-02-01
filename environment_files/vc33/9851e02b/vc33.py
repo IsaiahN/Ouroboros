@@ -21,7 +21,15 @@
 # SOFTWARE.
 
 import numpy as np
-from arcengine import ActionInput, ARCBaseGame, Camera, GameAction, Level, RenderableUserDisplay, Sprite
+from arcengine import (
+    ActionInput,
+    ARCBaseGame,
+    Camera,
+    GameAction,
+    Level,
+    RenderableUserDisplay,
+    Sprite,
+)
 
 sprites = {
     "AEF": Sprite(

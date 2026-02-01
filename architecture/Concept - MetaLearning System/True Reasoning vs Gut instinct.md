@@ -28,5 +28,3 @@ I dont want this to become a hindrance later on, so lets cap reasoning per actio
 Make sure that the reasoning logs distinguish between the gut instinct (and keep all of its initial answers)
 
 and then highlight the reasoning response (and if/how it changed the action and if/how it changed the answers).
-
-

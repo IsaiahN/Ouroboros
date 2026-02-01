@@ -1,6 +1,6 @@
 # Tests
 
-**Purpose**: Unit tests for core system components.  
+**Purpose**: Unit tests for core system components.
 **Framework**: pytest
 
 ---

@@ -13,7 +13,7 @@ You're correct: **CODS is not per-agent**; it's a **centralized discovery engine
 
 **The flow becomes:**
 ```
-Agents Play Games → Generate RLVR Results → CODS/Oracle Analyzes → Validates Patterns → 
+Agents Play Games → Generate RLVR Results → CODS/Oracle Analyzes → Validates Patterns →
 1. Unlocks Primitives (for agent cognition)
 2. Creates Viral Packages (for network Stream B)
 ```
@@ -55,7 +55,7 @@ These look **completely different**.
 
 **WITH meta-representation**, agents can **abstract the structure**:
 - Math agent: "Pattern: `function(parameter) stabilizes when parameter = threshold`"
-- Physics agent: "Pattern: `system(state) stabilizes when energy = threshold`"  
+- Physics agent: "Pattern: `system(state) stabilizes when energy = threshold`"
 - Game agent: "Pattern: `action(object) succeeds when object.property = value`"
 
 **The meta-representational insight**: "Wait, these are all **threshold stabilization patterns**!"

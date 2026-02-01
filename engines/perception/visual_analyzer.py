@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
@@ -13,9 +14,9 @@ Finds salient features like:
 """
 
 import logging
-from typing import List, Tuple, Optional, Dict, Any
-from collections import Counter
 import random
+from collections import Counter
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +32,17 @@ class VisualAnalyzer:
         self.last_action_changed_frame = False  # Did last action change the frame?
         self.consecutive_no_change_count = 0  # How many actions with no frame change?
         self.grid_exploration_index = 0  # For systematic grid walking
-        
+
         # Agent mode tracking (for mode-specific behavior)
         self.current_agent_mode = None  # 'pioneer', 'optimizer', 'generalist', or None
-        
+
         # CRITICAL FIX: Priority targeting from reasoning system (Q3)
         # When the agent learns "color 11 worked before", this tells the visual_analyzer
         # to prioritize that color instead of cycling through random rare colors
         self.priority_color: Optional[int] = None  # Color that worked before
         self.priority_color_reason: str = ""  # Why this color is prioritized
         self.colors_that_worked: Dict[int, int] = {}  # color -> success_count (persistent learning)
-        
+
         # Adaptive exploration parameters
         self.exploration_radius = 8  # Start with broader exploration
         self.min_exploration_radius = 6  # Was 3 - too restrictive, trapped agents in local regions
@@ -52,7 +53,7 @@ class VisualAnalyzer:
         self.recent_scores = []  # Track recent scores to detect stagnation
         self.actions_since_improvement = 0
         self.actions_since_decline = 0
-        
+
         # Pattern oscillation detection
         self.recent_targets = []  # Track all targets during game
         # Full game memory - keep all targets (was 10 goldfish window)
@@ -60,13 +61,13 @@ class VisualAnalyzer:
         self.oscillation_detected = False
         self.total_actions_this_game = 0  # Track actions for early-game contraction protection
         self.map_coverage_percent = 0.0  # Estimated map coverage for radius decisions
-    
+
     def set_priority_color(self, color: int, reason: str = "learned from previous success"):
         """Set a priority color to target based on what worked before.
-        
+
         Called by reasoning system when Q3 identifies a successful color.
         This breaks the random rare-color cycling.
-        
+
         Args:
             color: The color value that should be prioritized
             reason: Why this color is prioritized (for logging)
@@ -74,12 +75,12 @@ class VisualAnalyzer:
         self.priority_color = color
         self.priority_color_reason = reason
         logger.info(f"[PRIORITY] Visual analyzer will prioritize color {color}: {reason}")
-    
+
     def record_color_success(self, color: int):
         """Record that clicking on a color led to success (level advance, score increase).
-        
+
         Builds persistent memory of what colors work across levels.
-        
+
         Args:
             color: The color that was clicked when success occurred
         """
@@ -88,30 +89,30 @@ class VisualAnalyzer:
         if self.colors_that_worked[color] >= 2:
             self.set_priority_color(color, f"worked {self.colors_that_worked[color]} times")
         logger.info(f"[SUCCESS] Color {color} worked! (count: {self.colors_that_worked[color]})")
-    
+
     def clear_priority_on_new_game(self):
         """Clear priority and reset action counter when starting a new game (but keep colors_that_worked)."""
         self.priority_color = None
         self.priority_color_reason = ""
         self.total_actions_this_game = 0  # Reset for early-game contraction protection
         self.map_coverage_percent = 0.0  # Reset coverage estimate
-    
+
     def get_effective_radius(self, purpose: str = "deduplication") -> int:
         """Get radius based on agent mode, game phase, and purpose.
-        
+
         Different purposes need different radii:
         - 'deduplication': Used to filter out nearby duplicate targets (can be smaller)
         - 'selection': Used to prioritize distant targets (should be larger)
         - 'generation': Used for target generation (should be largest)
-        
+
         Args:
             purpose: What the radius will be used for
-            
+
         Returns:
             Effective radius for the given purpose
         """
         base_radius = self.exploration_radius
-        
+
         # PIONEER MODE: Always use expanded radius for maximum exploration
         if self.current_agent_mode == 'pioneer':
             if purpose == 'generation':
@@ -120,7 +121,7 @@ class VisualAnalyzer:
                 return max(base_radius, 12)  # Prefer distant targets
             else:  # deduplication
                 return max(base_radius, 10)  # Minimal deduplication
-        
+
         # EARLY GAME (first 50 actions): Force broad exploration
         if self.total_actions_this_game < 50:
             if purpose == 'generation':
@@ -129,27 +130,27 @@ class VisualAnalyzer:
                 return max(base_radius, 10)
             else:  # deduplication
                 return max(base_radius, 8)
-        
+
         # LOW COVERAGE: If we haven't explored much, stay broad
         if self.map_coverage_percent < 30:
             if purpose == 'generation':
                 return max(base_radius, 10)
             elif purpose == 'selection':
                 return max(base_radius, 8)
-            else:  # deduplication  
+            else:  # deduplication
                 return base_radius
-        
+
         # OPTIMIZER/GENERALIST with good coverage: Can use tighter radius
         if self.current_agent_mode in ('optimizer', 'generalist'):
             # These modes are refining, not exploring - allow contraction
             return base_radius
-        
+
         # DEFAULT: Use base radius
         return base_radius
-    
+
     def update_coverage_estimate(self, clicked_count: int, frame_width: int, frame_height: int):
         """Update estimated map coverage based on clicked coordinates.
-        
+
         Args:
             clicked_count: Number of unique coordinates clicked
             frame_width: Frame width in pixels
@@ -164,11 +165,11 @@ class VisualAnalyzer:
 
     def update_frame_change_tracking(self, new_frame: List[List[int]], current_score: Optional[float] = None) -> bool:
         """Track whether the frame changed after an action.
-        
+
         Args:
             new_frame: Frame after action was taken
             current_score: Current game score (if available) to track improvement
-            
+
         Returns:
             True if frame changed, False otherwise
         """
@@ -176,7 +177,7 @@ class VisualAnalyzer:
             self.previous_frame = [row[:] for row in new_frame] if new_frame else None
             self.last_action_changed_frame = False
             return False
-        
+
         # Compare frames
         changed = False
         if len(new_frame) != len(self.previous_frame):
@@ -186,13 +187,13 @@ class VisualAnalyzer:
                 if row != self.previous_frame[i]:
                     changed = True
                     break
-        
+
         self.last_action_changed_frame = changed
-        
+
         # Track score changes for adaptive exploration
         if current_score is not None:
             self._update_score_tracking(current_score)
-        
+
         if changed:
             self.consecutive_no_change_count = 0
             self.actions_since_decline = 0
@@ -201,34 +202,34 @@ class VisualAnalyzer:
             self.consecutive_no_change_count += 1
             self.actions_since_decline += 1
             logger.debug(f"Frame unchanged ({self.consecutive_no_change_count} consecutive)")
-        
+
         # Track total actions for early-game protection
         self.total_actions_this_game += 1
-        
+
         # Track total actions for early-game protection
         self.total_actions_this_game += 1
-        
+
         # Adapt exploration based on stagnation
         self._adapt_exploration_radius()
-        
+
         # Update previous frame
         self.previous_frame = [row[:] for row in new_frame]
-        
+
         return changed
-    
+
     def _update_score_tracking(self, current_score: float):
         """Track recent scores to detect improvement or stagnation.
-        
+
         Args:
             current_score: Current game score
         """
         self.recent_scores.append(current_score)
-        
+
         # Full game memory - keep all scores (was 10 goldfish window)
         # Safety cap at 20000 for pathological cases only
         if len(self.recent_scores) > 20000:
             self.recent_scores.pop(0)
-        
+
         # Check if score improved
         if len(self.recent_scores) >= 2:
             if current_score > self.recent_scores[-2]:
@@ -236,10 +237,10 @@ class VisualAnalyzer:
                 logger.debug(f"Score improved to {current_score}")
             else:
                 self.actions_since_improvement += 1
-    
+
     def _adapt_exploration_radius(self):
         """Adapt exploration radius based on stagnation/improvement.
-        
+
         When stuck (no changes, no improvement): EXPAND exploration
         When improving: CONTRACT to exploit current strategy
         """
@@ -258,7 +259,7 @@ class VisualAnalyzer:
                 self.actions_since_decline = 0
                 # Accelerate next expansion (more urgent the longer stuck)
                 self._expansion_step = min(self._expansion_step + 1, 10)
-        
+
         # Contract if improving - also reset expansion step (no longer desperate)
         # PROTECTIONS against premature contraction:
         # 1. PIONEER EXEMPTION: Pioneers need maximum exploration freedom
@@ -284,17 +285,17 @@ class VisualAnalyzer:
                     logger.info(f"Improvement detected - contracting exploration radius: {old_radius} -> {self.exploration_radius}")
                     # Reset expansion urgency since we're making progress
                     self._expansion_step = 2
-    
+
     def mark_coordinate_clicked(self, x: int, y: int, frame_changed: bool = False):
         """Mark a coordinate as already clicked and track failures.
-        
+
         Args:
             x: X coordinate
             y: Y coordinate
             frame_changed: Whether clicking this coordinate changed the frame
         """
         self.clicked_coordinates.add((x, y))
-        
+
         # Track dead coordinates - coords that never produce frame changes
         coord = (x, y)
         if not frame_changed:
@@ -306,52 +307,52 @@ class VisualAnalyzer:
             if coord in self.dead_coordinates:
                 del self.dead_coordinates[coord]
                 logger.info(f"[REVIVE] Coordinate ({x},{y}) worked! Removed from dead list")
-        
+
         # Track target history for oscillation detection
         self.recent_targets.append((x, y))
         if len(self.recent_targets) > self.max_target_history:
             self.recent_targets.pop(0)
-        
+
         # Detect oscillation (clicking same few coordinates repeatedly)
         self._detect_oscillation()
-        
+
         logger.debug(f"Marked ({x}, {y}) as clicked. Total clicked: {len(self.clicked_coordinates)}")
-    
+
     def set_agent_mode(self, mode: Optional[str]):
         """Set the current agent operating mode for mode-specific behavior.
-        
+
         Args:
             mode: Agent operating mode ('pioneer', 'optimizer', 'generalist', or None)
         """
         self.current_agent_mode = mode
         logger.debug(f"VisualAnalyzer agent mode set to: {mode}")
-    
+
     def _detect_oscillation(self):
         """Detect if we're oscillating between the same targets.
-        
+
         If we're repeatedly clicking the same small set of coordinates,
         expand exploration to break the pattern.
-        
+
         **PIONEER MODE EXEMPTION**: PIONEER agents are exempt from oscillation
         detection - they need maximum freedom to explore and discover.
         """
         # PIONEER EXEMPTION: No oscillation detection for pioneers
         if self.current_agent_mode == 'pioneer':
             return
-        
+
         if len(self.recent_targets) < self.max_target_history:
             return
-        
+
         # Count unique coordinates in recent history
         unique_recent = len(set(self.recent_targets))
-        
+
         # If only hitting 2-3 coordinates repeatedly, we're oscillating
         if unique_recent <= 3:
             if not self.oscillation_detected:
                 logger.warning(f"Oscillation detected! Only {unique_recent} unique targets in last {self.max_target_history} actions")
                 logger.warning(f"Recent targets: {self.recent_targets[-5:]}")
                 self.oscillation_detected = True
-                
+
                 # Force expansion to break oscillation
                 old_radius = self.exploration_radius
                 self.exploration_radius = min(
@@ -359,12 +360,12 @@ class VisualAnalyzer:
                     self.max_exploration_radius
                 )
                 logger.info(f"Breaking oscillation - expanding radius: {old_radius} → {self.exploration_radius}")
-                
+
                 # Clear clicked coordinates to force new exploration
                 self.reset_clicked_coordinates()
         else:
             self.oscillation_detected = False
-    
+
     def reset_clicked_coordinates(self):
         """Reset clicked coordinates (e.g., when starting new game)."""
         self.clicked_coordinates.clear()
@@ -375,29 +376,29 @@ class VisualAnalyzer:
     # =========================================================================
     # PUBLIC INTERFACE METHODS (Used by Decision Rungs)
     # =========================================================================
-    
+
     def get_priority_targets(
         self,
         frame: Optional[List[List[int]]]
     ) -> List[Dict[str, Any]]:
         """
         Get prioritized click targets from frame analysis.
-        
+
         This is the public interface for VisualAnalyzerRung.
-        
+
         Args:
             frame: Current game frame (64x64 grid)
-            
+
         Returns:
             List of dicts with 'x', 'y', 'confidence', 'reason'
         """
         if not frame:
             return []
-        
+
         # Use existing analyze_frame and extract targets
         analysis = self.analyze_frame(frame)
         targets = analysis.get('targets', [])
-        
+
         # Convert internal priority to confidence if needed
         result = []
         for t in targets:
@@ -409,15 +410,15 @@ class VisualAnalyzer:
                 'type': t.get('type', 'unknown'),
                 'color': t.get('color', 0)
             })
-        
+
         return result
-    
+
     def get_grid_exploration_targets(self) -> List[Dict[str, Any]]:
         """
         Get systematic grid walk targets when stuck.
-        
+
         This is the public interface for GridExplorationRung.
-        
+
         Returns:
             List of dicts with 'x', 'y', 'grid_index'
         """
@@ -441,10 +442,10 @@ class VisualAnalyzer:
             start_idx = self.grid_exploration_index % max(1, len(targets))
             self.grid_exploration_index += 5
             return targets[start_idx:start_idx + 5] if targets else []
-        
+
         # Use internal generator with current frame
         raw_targets = self._generate_grid_exploration_targets(frame)
-        
+
         # Convert to expected format
         result = []
         for t in raw_targets:
@@ -453,7 +454,7 @@ class VisualAnalyzer:
                 'y': t.get('y', 0),
                 'grid_index': self.grid_exploration_index
             })
-        
+
         return result
 
     def analyze_frame(self, frame: List[List[int]]) -> Dict[str, Any]:
@@ -470,20 +471,20 @@ class VisualAnalyzer:
         """
         if not frame:
             return {"targets": [], "analysis": "Empty frame"}
-        
+
         if not isinstance(frame, list):
             return {"targets": [], "analysis": "Invalid frame structure"}
-        
+
         # Frame should already be unwrapped to 64x64 grid
         height = len(frame)
         if height == 0:
             return {"targets": [], "analysis": "Empty frame"}
-        
+
         # Get width from first row
         width = len(frame[0]) if isinstance(frame[0], list) else 0
         if width == 0:
             return {"targets": [], "analysis": "Empty frame rows"}
-        
+
         # Debug: Log frame dimensions
         logger.debug(f"Frame dimensions: {height}x{width}")
 
@@ -512,7 +513,7 @@ class VisualAnalyzer:
             if changed_targets:
                 analysis["targets"].extend(changed_targets)
                 analysis["features"]["changed_regions"] = len(changed_targets)
-        
+
         # 4. Add grid-walking targets when stuck (systematic exploration)
         # This ensures we explore beyond just the 3 rare color targets
         if self.consecutive_no_change_count >= 10:
@@ -523,7 +524,7 @@ class VisualAnalyzer:
 
         # Deduplicate and sort targets by priority
         analysis["targets"] = self._deduplicate_targets(analysis["targets"])
-        
+
         # Filter out dead coordinates that have failed too many times
         if self.dead_coordinates:
             original_count = len(analysis["targets"])
@@ -563,7 +564,7 @@ class VisualAnalyzer:
                     color = tuple(color) if color else 0
                 elif not isinstance(color, (int, float, str, tuple)):
                     color = 0  # Fallback to background
-                    
+
                 if color not in color_positions:
                     color_positions[color] = []
                 color_positions[color].append((x, y))
@@ -580,19 +581,19 @@ class VisualAnalyzer:
                 # Calculate centroid of all pixels with this color
                 avg_x = sum(pos[0] for pos in positions) // len(positions)
                 avg_y = sum(pos[1] for pos in positions) // len(positions)
-                
+
                 # Clamp to frame bounds
                 avg_x = max(0, min(width - 1, avg_x))
                 avg_y = max(0, min(height - 1, avg_y))
-                
+
                 # CRITICAL FIX: Priority boost for colors that worked before
                 base_priority = 0.9  # High priority - rare colors are interesting
-                
+
                 # Boost priority for priority_color (from Q3 reasoning)
                 if self.priority_color is not None and color == self.priority_color:
                     base_priority = 1.5  # Much higher - we KNOW this works!
                     logger.info(f"[PRIORITY] Boosting color {color} (learned: {self.priority_color_reason})")
-                
+
                 # Boost priority for colors with success history
                 elif color in self.colors_that_worked:
                     success_count = self.colors_that_worked[color]
@@ -610,26 +611,26 @@ class VisualAnalyzer:
                 })
 
         return targets
-    
+
     def _generate_grid_exploration_targets(self, frame: List[List[int]], grid_step: int = 8) -> List[Dict[str, Any]]:
         """Generate systematic grid-walking targets for exploration.
-        
+
         When stuck with only 3 rare-color targets that don't work,
         this generates additional targets by walking a grid across the frame.
         This ensures the agent tries clicking on different areas, not just
         the same 3 rare-color centroids.
-        
+
         Args:
             frame: Current frame
             grid_step: Step size for grid (smaller = more targets)
-            
+
         Returns:
             List of grid exploration targets
         """
         targets = []
         height = len(frame) if frame else 64
         width = len(frame[0]) if frame and frame[0] else 64
-        
+
         # Generate grid points, skipping already-dead coordinates
         grid_points = []
         for y in range(grid_step // 2, height, grid_step):
@@ -638,7 +639,7 @@ class VisualAnalyzer:
                 # Skip if this coordinate has failed 5+ times
                 if self.dead_coordinates.get(coord, 0) < 5:
                     grid_points.append(coord)
-        
+
         # Start from where we left off (rotating through grid)
         num_points = len(grid_points)
         if num_points == 0:
@@ -649,31 +650,31 @@ class VisualAnalyzer:
                     if self.dead_coordinates.get(coord, 0) < 5:
                         grid_points.append(coord)
             num_points = len(grid_points)
-        
+
         if num_points == 0:
             return targets  # Truly exhausted
-        
+
         # Get next few grid points to try (rotate through them)
         start_idx = self.grid_exploration_index % num_points
         points_to_try = []
         for i in range(min(5, num_points)):  # Add up to 5 grid targets
             idx = (start_idx + i) % num_points
             points_to_try.append(grid_points[idx])
-        
+
         self.grid_exploration_index += 5  # Advance for next time
-        
+
         # Create targets from grid points
         for x, y in points_to_try:
             # Skip if already clicked this session
             if (x, y) in self.clicked_coordinates:
                 continue
-                
+
             # Get the color at this grid point for context
             try:
                 color = frame[y][x] if isinstance(frame[y][x], int) else 0
             except (IndexError, TypeError):
                 color = 0
-            
+
             targets.append({
                 "x": x,
                 "y": y,
@@ -682,10 +683,10 @@ class VisualAnalyzer:
                 "priority": 0.6,  # Lower than rare colors but still useful
                 "reason": f"Grid exploration ({x},{y}) - systematic search"
             })
-        
+
         if targets:
             logger.info(f"[GRID] Generated {len(targets)} grid exploration targets (index={self.grid_exploration_index})")
-        
+
         return targets
 
     def _find_color_clusters(self, frame: List[List[int]]) -> List[Dict[str, Any]]:
@@ -711,7 +712,7 @@ class VisualAnalyzer:
                     all_colors.append(cell[0] if cell else 0)
                 else:
                     all_colors.append(cell)
-        
+
         color_counts = Counter(all_colors)
         background = color_counts.most_common(1)[0][0] if color_counts else 0
 
@@ -728,7 +729,7 @@ class VisualAnalyzer:
                     # Handle nested lists
                     if isinstance(cell_value, list):
                         cell_value = cell_value[0] if cell_value else 0
-                    
+
                     if cell_value == color:
                         positions.append((x, y))
 
@@ -736,7 +737,7 @@ class VisualAnalyzer:
                 # Calculate centroid
                 avg_x = sum(p[0] for p in positions) // len(positions)
                 avg_y = sum(p[1] for p in positions) // len(positions)
-                
+
                 # Clamp to actual frame bounds
                 avg_x = max(0, min(width - 1, avg_x))
                 avg_y = max(0, min(height - 1, avg_y))
@@ -744,7 +745,7 @@ class VisualAnalyzer:
                 # Calculate how "tight" the cluster is
                 total_dist = sum(abs(p[0] - avg_x) + abs(p[1] - avg_y) for p in positions)
                 avg_dist = total_dist / len(positions)
-                
+
                 # Tighter clusters (objects) are more interesting
                 tightness = max(0.1, 1.0 - (avg_dist / max(width, height)))
 
@@ -791,7 +792,7 @@ class VisualAnalyzer:
             # Calculate centroid of changed region
             avg_x = sum(p[0] for p in changed_positions) // len(changed_positions)
             avg_y = sum(p[1] for p in changed_positions) // len(changed_positions)
-            
+
             # Clamp to frame bounds
             avg_x = max(0, min(width - 1, avg_x))
             avg_y = max(0, min(height - 1, avg_y))
@@ -810,7 +811,7 @@ class VisualAnalyzer:
     def _deduplicate_targets(self, targets: List[Dict[str, Any]],
                             min_distance: Optional[int] = None) -> List[Dict[str, Any]]:
         """Remove duplicate targets that are too close together.
-        
+
         Uses get_effective_radius() for mode-specific deduplication that
         preserves more targets for pioneers and early-game exploration.
 
@@ -823,7 +824,7 @@ class VisualAnalyzer:
         """
         if not targets:
             return []
-        
+
         # Use mode-aware effective radius for deduplication
         # This is intentionally less aggressive than raw exploration_radius
         if min_distance is None:
@@ -853,10 +854,10 @@ class VisualAnalyzer:
 
         return unique_targets
 
-    def select_best_target(self, analysis: Dict[str, Any], 
+    def select_best_target(self, analysis: Dict[str, Any],
                            agent_position: Optional[Tuple[int, int]] = None) -> Optional[Tuple[int, int, str]]:
         """Select the best target from analysis, avoiding already-clicked coordinates.
-        
+
         Uses mode-specific radius and prioritizes distant targets for exploration.
         DECOUPLED from deduplication - selection considers exploration needs separately.
 
@@ -871,7 +872,7 @@ class VisualAnalyzer:
 
         if not targets:
             return None
-        
+
         # Update coverage estimate
         frame_width = analysis.get("width", 64)
         frame_height = analysis.get("height", 64)
@@ -879,21 +880,21 @@ class VisualAnalyzer:
 
         # Filter out already-clicked coordinates
         unclicked_targets = [
-            t for t in targets 
+            t for t in targets
             if (t["x"], t["y"]) not in self.clicked_coordinates
         ]
-        
+
         # If oscillating, try to find targets between previous clicks
         if self.oscillation_detected and len(self.recent_targets) >= 2:
             combination_target = self._find_combination_target(targets)
             if combination_target:
                 logger.info(f"Oscillation detected - trying combination point: {combination_target}")
                 return combination_target
-        
+
         # DECOUPLED TARGET SELECTION: Prioritize based on exploration needs
         if unclicked_targets:
             selection_radius = self.get_effective_radius(purpose='selection')
-            
+
             # For PIONEERS or early game: Prefer DISTANT targets to maximize exploration
             if self.current_agent_mode == 'pioneer' or self.total_actions_this_game < 50:
                 distant_targets = self._sort_by_exploration_value(
@@ -904,12 +905,12 @@ class VisualAnalyzer:
                     logger.debug(f"Selected exploration target: ({best_target['x']}, {best_target['y']}) "
                                f"[mode={self.current_agent_mode}, radius={selection_radius}]")
                     return (best_target["x"], best_target["y"], best_target["reason"])
-            
+
             # For OPTIMIZERS: Prefer high-priority (known good) targets
             best_target = unclicked_targets[0]
             logger.debug(f"Selected unclicked target: ({best_target['x']}, {best_target['y']}) [radius={self.exploration_radius}]")
             return (best_target["x"], best_target["y"], best_target["reason"])
-        
+
         # If all targets clicked and stagnating, force expansion
         if self.consecutive_no_change_count > 10:
             logger.info("All targets clicked and no frame changes - forcing exploration expansion")
@@ -921,43 +922,43 @@ class VisualAnalyzer:
             if targets:
                 best_target = targets[0]
                 return (best_target["x"], best_target["y"], best_target["reason"])
-        
+
         # Fallback: use best target even if clicked
         if targets:
             best_target = targets[0]
             logger.debug(f"Using already-clicked target: ({best_target['x']}, {best_target['y']})")
             return (best_target["x"], best_target["y"], best_target["reason"])
-        
+
         return None
-    
-    def _sort_by_exploration_value(self, targets: List[Dict[str, Any]], 
+
+    def _sort_by_exploration_value(self, targets: List[Dict[str, Any]],
                                     agent_position: Optional[Tuple[int, int]],
                                     selection_radius: int) -> List[Dict[str, Any]]:
         """Sort targets by exploration value - prioritize distant, unexplored areas.
-        
+
         DECOUPLED from deduplication: This method decides which targets are best
         for exploration, independent of how close targets are to each other.
-        
+
         Exploration value considers:
         1. Distance from agent position (farther = better for exploration)
         2. Distance from recently clicked areas (farther = less explored)
         3. Target priority (still matters, but weighted less)
-        
+
         Args:
             targets: List of target dictionaries
             agent_position: Current agent position (x, y), or None
             selection_radius: Radius threshold for "distant" classification
-            
+
         Returns:
             Targets sorted by exploration value (best first)
         """
         if not targets:
             return []
-        
+
         def exploration_score(target: Dict[str, Any]) -> float:
             x, y = target["x"], target["y"]
             base_priority = target.get("priority", 0.5)
-            
+
             # Distance from agent (if known)
             agent_distance_score = 0.0
             if agent_position:
@@ -967,7 +968,7 @@ class VisualAnalyzer:
                 # Normalize: targets beyond selection_radius get bonus
                 if agent_distance > selection_radius:
                     agent_distance_score = min(1.0, agent_distance / 50.0)  # Cap at 50 pixels
-            
+
             # Distance from clicked coordinates (avoid re-exploring same areas)
             min_click_distance = float('inf')
             for clicked_x, clicked_y in self.clicked_coordinates:
@@ -975,57 +976,57 @@ class VisualAnalyzer:
                 dy = abs(y - clicked_y)
                 dist = (dx**2 + dy**2) ** 0.5
                 min_click_distance = min(min_click_distance, dist)
-            
+
             # Normalize click distance (farther from clicks = better)
             if min_click_distance == float('inf'):
                 click_distance_score = 1.0  # No clicks yet, all areas equal
             else:
                 click_distance_score = min(1.0, min_click_distance / 30.0)
-            
+
             # Combined score: prioritize exploration over raw priority
             # Weights: 40% distance from agent, 40% distance from clicks, 20% priority
-            return (agent_distance_score * 0.4 + 
-                    click_distance_score * 0.4 + 
+            return (agent_distance_score * 0.4 +
+                    click_distance_score * 0.4 +
                     base_priority * 0.2)
-        
+
         # Sort by exploration score (highest first)
         return sorted(targets, key=exploration_score, reverse=True)
-    
+
     def _find_combination_target(self, targets: List[Dict[str, Any]]) -> Optional[Tuple[int, int, str]]:
         """Find a target between recent clicks to explore combinations.
-        
+
         When oscillating between pseudo-buttons, try clicking between them
         or in patterns that might trigger different behavior.
-        
+
         Args:
             targets: Available targets
-            
+
         Returns:
             Tuple of (x, y, reason) or None
         """
         if len(self.recent_targets) < 2:
             return None
-        
+
         # Get last two unique targets
         last_target = self.recent_targets[-1]
         prev_target = self.recent_targets[-2]
-        
+
         # Skip if they're the same
         if last_target == prev_target:
             return None
-        
+
         # Try midpoint between oscillating targets
         mid_x = (last_target[0] + prev_target[0]) // 2
         mid_y = (last_target[1] + prev_target[1]) // 2
-        
+
         # Clamp to frame bounds
         mid_x = max(0, min(63, mid_x))
         mid_y = max(0, min(63, mid_y))
-        
+
         # Check if we haven't tried this combination yet
         if (mid_x, mid_y) not in self.clicked_coordinates:
             return (mid_x, mid_y, f"Combination point between oscillating targets")
-        
+
         # Try varied offset points using adaptive radius for spacing
         # Use larger, more varied offsets to truly escape oscillation
         radius = self.exploration_radius
@@ -1049,14 +1050,14 @@ class VisualAnalyzer:
             (radius + 3, -radius - 5),
             (-radius - 3, -radius - 5)
         ]
-        
+
         for dx, dy in offsets:
             test_x = max(0, min(63, mid_x + dx))
             test_y = max(0, min(63, mid_y + dy))
-            
+
             if (test_x, test_y) not in self.clicked_coordinates:
                 return (test_x, test_y, f"Exploration around oscillation pattern (offset={dx},{dy})")
-        
+
         # If all offsets tried, force a random unexplored coordinate
         import random
         for _ in range(20):  # Try 20 random attempts
@@ -1064,7 +1065,7 @@ class VisualAnalyzer:
             rand_y = random.randint(0, 63)
             if (rand_x, rand_y) not in self.clicked_coordinates:
                 return (rand_x, rand_y, f"Random exploration to break oscillation deadlock")
-        
+
         return None
 
     def get_exploratory_coordinates(self, frame: List[List[int]],

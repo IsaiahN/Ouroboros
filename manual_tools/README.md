@@ -1,6 +1,6 @@
 # Manual Tools
 
-**Purpose**: Standalone scripts for debugging, testing, analysis, and one-time operations.  
+**Purpose**: Standalone scripts for debugging, testing, analysis, and one-time operations.
 **Note**: These are NOT integrated into the main evolution loop - they are developer utilities.
 
 ---

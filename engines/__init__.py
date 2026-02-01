@@ -21,64 +21,47 @@ Sub-packages:
 
 Usage:
     from engines import EngineRegistry
-    
+
     registry = EngineRegistry(db_path="core_data.db")
-    
+
     # Access engines via properties
     self_model = registry.self_model
     visual = registry.visual_analyzer
-    
+
     # Or by name
     engine = registry.get('scientific_method')
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-from engines.interfaces import (
-    # Self Model
-    SelfModelInterface,
-    
-    # Perception
-    VisualAnalyzerInterface,
-    TerminalPatternInterface,
-    
-    # Cognition
-    ScientificMethodInterface,
-    QuestioningEngineInterface,
+from engines.interfaces import (  # Self Model; Perception; Cognition; Memory/Planning; Regulation; Social; Consciousness; Analysis; Registry
+    AbstractionEngineInterface,
+    ActionHandlerInterface,
+    BudgetAllocatorInterface,
     CODSEngineInterface,
     CounterfactualAnalyzerInterface,
-    
-    # Memory/Planning
-    ViralPackageInterface,
-    MultiStagePipelineInterface,
-    AbstractionEngineInterface,
-    ReplayLearningInterface,
-    
-    # Regulation
-    FrustrationDetectorInterface,
-    BudgetAllocatorInterface,
-    ImaginationBudgetInterface,
-    RegulatorySignalInterface,
-    NetworkExplorationInterface,
-    
-    # Social
-    ResonanceDetectorInterface,
-    
-    # Consciousness
-    SensationEngineInterface,
-    IThreadInterface,
-    
-    # Analysis
-    NearMissAnalyzerInterface,
-    SubgoalPlannerInterface,
-    ActionHandlerInterface,
-    PrimitiveHelperInterface,
-    
-    # Registry
     EngineRegistryInterface,
+    FrustrationDetectorInterface,
+    ImaginationBudgetInterface,
+    IThreadInterface,
+    MultiStagePipelineInterface,
+    NearMissAnalyzerInterface,
+    NetworkExplorationInterface,
+    PrimitiveHelperInterface,
+    QuestioningEngineInterface,
+    RegulatorySignalInterface,
+    ReplayLearningInterface,
+    ResonanceDetectorInterface,
+    ScientificMethodInterface,
+    SelfModelInterface,
+    SensationEngineInterface,
+    SubgoalPlannerInterface,
+    TerminalPatternInterface,
+    ViralPackageInterface,
+    VisualAnalyzerInterface,
 )
-
 from engines.registry import EngineRegistry, get_registry
 
 __all__ = [
@@ -107,11 +90,11 @@ __all__ = [
     'ActionHandlerInterface',
     'PrimitiveHelperInterface',
     'EngineRegistryInterface',
-    
+
     # Registry
     'EngineRegistry',
     'get_registry',
-    
+
     # Self Model Components
     'SymbolicStateTracker',
     'CompletionPredictor',
@@ -119,40 +102,40 @@ __all__ = [
     'FewShotRelations',
     'NetworkSharingEngine',
     'Action6BehaviorEngine',
-    
+
     # Consciousness Components
     'WeavingReporter',
-    
+
     # Cognition Components
     'CognitiveStageSystem',
     'MetacognitiveReasoningEngine',
-    
+
     # Memory Components
     'EpisodicMemorySystem',
-    
+
     # Social Components
     'AgentNetworkContributor',
     'AgentHypothesisSystem',
 ]
 
-# Import self_model components for convenience
-from engines.self_model import (
-    SymbolicStateTracker, 
-    CompletionPredictor,
-    EmbeddingMatcher,
-    FewShotRelations,
-    NetworkSharingEngine,
-    Action6BehaviorEngine,
-)
+# Import cognition components
+from engines.cognition import CognitiveStageSystem, MetacognitiveReasoningEngine
 
 # Import consciousness components
 from engines.consciousness import WeavingReporter
 
-# Import cognition components
-from engines.cognition import CognitiveStageSystem, MetacognitiveReasoningEngine
-
 # Import memory components
 from engines.memory import EpisodicMemorySystem
 
+# Import self_model components for convenience
+from engines.self_model import (
+    Action6BehaviorEngine,
+    CompletionPredictor,
+    EmbeddingMatcher,
+    FewShotRelations,
+    NetworkSharingEngine,
+    SymbolicStateTracker,
+)
+
 # Import social components
-from engines.social import AgentNetworkContributor, AgentHypothesisSystem
+from engines.social import AgentHypothesisSystem, AgentNetworkContributor

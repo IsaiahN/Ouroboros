@@ -29,17 +29,17 @@ logger = logging.getLogger(__name__)
 class MetacognitiveReasoningEngine:
     """
     Provides metacognitive reasoning capabilities for agents.
-    
+
     Philosophy: Strong problem-solvers don't just try things - they:
     1. Make PREDICTIONS before acting ("if theory is right, X should happen")
     2. Track ASSUMPTIONS that might be wrong
     3. Analyze FAILURE PATTERNS (what do failed attempts have in common?)
     4. ELIMINATE possibilities systematically
     5. REFLECT after success to extract transferable insights
-    
+
     This shifts agents from "random exploration" to "scientific hypothesis testing".
     """
-    
+
     def __init__(self, db: "DatabaseInterface"):
         """Initialize metacognitive engine."""
         self.db = db
@@ -47,7 +47,7 @@ class MetacognitiveReasoningEngine:
 
         # Provenance for the current session (attempt/mode/generation/role)
         self._session_provenance: Dict[str, Any] = {}
-        
+
         # Session state (cleared per game)
         self._current_assumptions: List[Dict[str, Any]] = []
         self._pending_prediction: Optional[Dict[str, Any]] = None
@@ -55,7 +55,7 @@ class MetacognitiveReasoningEngine:
         self._eliminated_actions: set = set()
         self._theory_revisions: List[Dict[str, Any]] = []
         self._current_theory: Optional[str] = None
-        
+
         # Fix #4: Track contradicted action-object pairs for actionable theory revision
         # Key = action (e.g., 'ACTION1'), Value = list of contradictions
         self._contradicted_actions: Dict[str, List[Dict[str, Any]]] = {}
@@ -74,7 +74,7 @@ class MetacognitiveReasoningEngine:
             'generation': generation,
             'role': role,
         }
-    
+
     def _ensure_tables(self) -> None:
         """Create metacognitive tracking tables."""
         # Track assumptions and their validity
@@ -84,11 +84,11 @@ class MetacognitiveReasoningEngine:
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The assumption
                 assumption_text TEXT NOT NULL,
                 assumption_type TEXT NOT NULL,  -- 'control', 'goal', 'obstacle', 'rule'
-                
+
                 -- Status
                 is_valid BOOLEAN DEFAULT NULL,  -- NULL = untested, TRUE/FALSE = tested
                 tested_at DATETIME,
@@ -101,11 +101,11 @@ class MetacognitiveReasoningEngine:
                 decay_score REAL DEFAULT 0.0,
                 reliability REAL DEFAULT 0.5,
                 consensus REAL DEFAULT 0.0,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # Track predictions and outcomes
         self.db.execute_query("""
             CREATE TABLE IF NOT EXISTS metacognitive_predictions (
@@ -113,12 +113,12 @@ class MetacognitiveReasoningEngine:
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The prediction
                 theory_text TEXT NOT NULL,
                 predicted_outcome TEXT NOT NULL,  -- "score will increase", "object will move right"
                 action_taken TEXT NOT NULL,
-                
+
                 -- Outcome
                 actual_outcome TEXT,
                 prediction_correct BOOLEAN,
@@ -131,11 +131,11 @@ class MetacognitiveReasoningEngine:
                 decay_score REAL DEFAULT 0.0,
                 reliability REAL DEFAULT 0.5,
                 consensus REAL DEFAULT 0.0,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # Track failure commonalities
         self.db.execute_query("""
             CREATE TABLE IF NOT EXISTS metacognitive_failure_patterns (
@@ -143,12 +143,12 @@ class MetacognitiveReasoningEngine:
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The pattern
                 common_factor TEXT NOT NULL,  -- "all failures involved color_3"
                 failure_count INTEGER NOT NULL,
                 example_actions TEXT,  -- JSON list of actions that failed
-                
+
                 -- Insight derived
                 insight TEXT,
                 insight_applied BOOLEAN DEFAULT FALSE,
@@ -160,11 +160,11 @@ class MetacognitiveReasoningEngine:
                 decay_score REAL DEFAULT 0.0,
                 reliability REAL DEFAULT 0.5,
                 consensus REAL DEFAULT 0.0,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # Track eliminated possibilities
         # NOTE: This table is for directional actions (ACTION1-5, ACTION7) only
         # ACTION6 (click) uses eliminated_click_coordinates table instead
@@ -174,12 +174,12 @@ class MetacognitiveReasoningEngine:
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- What was eliminated
                 eliminated_action TEXT NOT NULL,  -- "ACTION1", "ACTION2", etc. (NOT ACTION6)
                 reason TEXT NOT NULL,
                 confidence REAL DEFAULT 0.8,
-                
+
                 -- Evidence
                 test_count INTEGER DEFAULT 1,
                 consistent_failure BOOLEAN DEFAULT TRUE,
@@ -191,11 +191,11 @@ class MetacognitiveReasoningEngine:
                 decay_score REAL DEFAULT 0.0,
                 reliability REAL DEFAULT 0.5,
                 consensus REAL DEFAULT 0.0,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # Track eliminated CLICK COORDINATES for ACTION6 specifically
         # ACTION6 should never be eliminated as an action type - only specific coordinates
         self.db.execute_query("""
@@ -204,16 +204,16 @@ class MetacognitiveReasoningEngine:
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The coordinate that failed
                 click_x INTEGER NOT NULL,
                 click_y INTEGER NOT NULL,
-                
+
                 -- Evidence
                 reason TEXT NOT NULL,
                 test_count INTEGER DEFAULT 1,
                 consistent_failure BOOLEAN DEFAULT TRUE,
-                
+
                 -- Provenance/decay
                 source_attempt_id TEXT,
                 source_mode TEXT,
@@ -221,13 +221,13 @@ class MetacognitiveReasoningEngine:
                 decay_score REAL DEFAULT 0.0,
                 reliability REAL DEFAULT 0.5,
                 consensus REAL DEFAULT 0.0,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, click_x, click_y)
             )
         """)
-        
+
         # Track post-win reflections (the key insight)
         self.db.execute_query("""
             CREATE TABLE IF NOT EXISTS metacognitive_insights (
@@ -235,16 +235,16 @@ class MetacognitiveReasoningEngine:
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The insight
                 key_insight TEXT NOT NULL,
                 winning_strategy TEXT NOT NULL,
-                
+
                 -- What led to the breakthrough
                 breakthrough_action TEXT,
                 theory_at_breakthrough TEXT,
                 actions_before_breakthrough INTEGER,
-                
+
                 -- Transferability
                 is_transferable BOOLEAN DEFAULT FALSE,
                 applicable_to TEXT,  -- JSON list of similar game types
@@ -256,21 +256,21 @@ class MetacognitiveReasoningEngine:
                 decay_score REAL DEFAULT 0.0,
                 reliability REAL DEFAULT 0.5,
                 consensus REAL DEFAULT 0.0,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # Index for fast lookup
         self.db.execute_query("""
-            CREATE INDEX IF NOT EXISTS idx_metacog_assumptions_game 
+            CREATE INDEX IF NOT EXISTS idx_metacog_assumptions_game
             ON metacognitive_assumptions(game_type, level_number, is_valid)
         """)
-    
+
     # ========================================================================
     # 1. ASSUMPTION TRACKER
     # ========================================================================
-    
+
     def register_assumption(
         self,
         agent_id: str,
@@ -281,27 +281,27 @@ class MetacognitiveReasoningEngine:
     ) -> str:
         """
         Register an assumption the agent is making.
-        
+
         Examples:
         - "I control the blue object"
         - "Rare colors are goals"
         - "ACTION1 moves me up"
         - "Walls cannot be passed"
-        
+
         Args:
             agent_id: Agent making assumption
             game_type: Current game type
             level_number: Current level
             assumption: The assumption text
             assumption_type: 'control', 'goal', 'obstacle', 'rule'
-            
+
         Returns:
             assumption_id
         """
         assumption_id = f"assume_{uuid.uuid4().hex[:12]}"
-        
+
         self.db.execute_query("""
-            INSERT INTO metacognitive_assumptions 
+            INSERT INTO metacognitive_assumptions
             (assumption_id, agent_id, game_type, level_number, assumption_text, assumption_type,
              source_attempt_id, source_mode, last_observed_generation, decay_score, reliability, consensus)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -319,7 +319,7 @@ class MetacognitiveReasoningEngine:
             0.5,
             0.0,
         ))
-        
+
         # Track in session
         self._current_assumptions.append({
             'id': assumption_id,
@@ -327,10 +327,10 @@ class MetacognitiveReasoningEngine:
             'type': assumption_type,
             'tested': False
         })
-        
+
         logger.debug(f"[METACOG] Registered assumption: {assumption}")
         return assumption_id
-    
+
     def challenge_assumption(
         self,
         assumption_id: str,
@@ -339,27 +339,27 @@ class MetacognitiveReasoningEngine:
     ) -> None:
         """
         Record the result of testing an assumption.
-        
+
         Args:
             assumption_id: ID of assumption being tested
             is_valid: Whether assumption proved true
             test_result: Description of what happened
         """
         self.db.execute_query("""
-            UPDATE metacognitive_assumptions 
+            UPDATE metacognitive_assumptions
             SET is_valid = ?, tested_at = datetime('now'), test_result = ?
             WHERE assumption_id = ?
         """, (is_valid, test_result, assumption_id))
-        
+
         # Update session state
         for a in self._current_assumptions:
             if a['id'] == assumption_id:
                 a['tested'] = True
                 a['valid'] = is_valid
-        
+
         status = "CONFIRMED" if is_valid else "DISPROVEN"
         logger.info(f"[METACOG] Assumption {status}: {test_result}")
-    
+
     def get_untested_assumptions(
         self,
         game_type: str,
@@ -373,9 +373,9 @@ class MetacognitiveReasoningEngine:
             ORDER BY created_at DESC
             LIMIT 5
         """, (game_type, level_number))
-        
+
         return result or []
-    
+
     def get_disproven_assumptions(
         self,
         game_type: str,
@@ -389,13 +389,13 @@ class MetacognitiveReasoningEngine:
             ORDER BY created_at DESC
             LIMIT 5
         """, (game_type, level_number))
-        
+
         return result or []
-    
+
     # ========================================================================
     # 2. PREDICTION BEFORE ACTION
     # ========================================================================
-    
+
     def make_prediction(
         self,
         agent_id: str,
@@ -407,18 +407,18 @@ class MetacognitiveReasoningEngine:
     ) -> str:
         """
         Make a prediction before taking an action.
-        
+
         This is the key shift from random exploration to hypothesis testing.
-        
+
         Examples:
         - Theory: "I control the blue object"
           Prediction: "ACTION1 will move it up"
           Action: "ACTION1"
-          
+
         - Theory: "Rare colors are goals"
           Prediction: "Touching color_7 will increase score"
           Action: "ACTION4" (move toward color_7)
-        
+
         Args:
             agent_id: Agent making prediction
             game_type: Current game type
@@ -426,14 +426,14 @@ class MetacognitiveReasoningEngine:
             theory: The underlying theory being tested
             predicted_outcome: What should happen if theory is correct
             action: The action being taken to test
-            
+
         Returns:
             prediction_id
         """
         prediction_id = f"pred_{uuid.uuid4().hex[:12]}"
-        
+
         self.db.execute_query("""
-            INSERT INTO metacognitive_predictions 
+            INSERT INTO metacognitive_predictions
             (prediction_id, agent_id, game_type, level_number, theory_text, predicted_outcome, action_taken,
              source_attempt_id, source_mode, last_observed_generation, decay_score, reliability, consensus)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -452,7 +452,7 @@ class MetacognitiveReasoningEngine:
             0.5,
             0.0,
         ))
-        
+
         # Store pending prediction for outcome evaluation
         self._pending_prediction = {
             'id': prediction_id,
@@ -462,9 +462,9 @@ class MetacognitiveReasoningEngine:
             'game_type': game_type,
             'level_number': level_number,
         }
-        
+
         self._current_theory = theory
-        
+
         logger.info(f"[METACOG] PREDICTION: If '{theory}' then {action} should cause '{predicted_outcome}'")
         return prediction_id
 
@@ -477,15 +477,15 @@ class MetacognitiveReasoningEngine:
     def get_current_prediction(self) -> Optional[Dict[str, Any]]:
         """
         Get the current hypothesis being tested.
-        
+
         This is the public interface for MetacognitivePredictionRung.
-        
+
         Returns:
             Dict with 'test_action', 'confidence', 'hypothesis' or None
         """
         if not self._pending_prediction:
             return None
-        
+
         return {
             'test_action': self._pending_prediction.get('action'),
             'confidence': 0.6,  # Default confidence for active prediction
@@ -588,7 +588,7 @@ class MetacognitiveReasoningEngine:
                     )
         except Exception:
             logger.debug("Significance observation recording failed (non-critical)")
-    
+
     def evaluate_prediction(
         self,
         actual_outcome: str,
@@ -599,22 +599,22 @@ class MetacognitiveReasoningEngine:
     ) -> Dict[str, Any]:
         """
         Evaluate the pending prediction against actual outcome.
-        
+
         Returns evaluation with recommendation for theory revision.
         """
         if not self._pending_prediction:
             return {'status': 'no_pending_prediction'}
-        
+
         pred = self._pending_prediction
         prediction_id = pred['id']
-        
+
         # Determine if prediction was correct
         predicted = pred['predicted'].lower()
         prediction_correct = False
-        
+
         # Parse actual_outcome to check for GAME_OVER
         is_game_over = 'game_over' in actual_outcome.lower() if actual_outcome else False
-        
+
         if 'score' in predicted and 'increase' in predicted:
             # score_increase: Did score go up?
             prediction_correct = score_after > score_before
@@ -637,16 +637,16 @@ class MetacognitiveReasoningEngine:
         else:
             # Generic fallback - frame change or score change counts as something happened
             prediction_correct = frame_changed or score_after > score_before
-        
+
         # Record outcome
         self.db.execute_query("""
-            UPDATE metacognitive_predictions 
+            UPDATE metacognitive_predictions
             SET actual_outcome = ?, prediction_correct = ?,
                 last_observed_generation = COALESCE(?, last_observed_generation, 0),
                 decay_score = COALESCE(decay_score, 0.0)
             WHERE prediction_id = ?
         """, (actual_outcome, prediction_correct, generation, prediction_id))
-        
+
         result: Dict[str, Any] = {
             'prediction_id': prediction_id,
             'theory': pred['theory'],
@@ -654,21 +654,21 @@ class MetacognitiveReasoningEngine:
             'actual': actual_outcome,
             'correct': prediction_correct
         }
-        
+
         if prediction_correct:
             logger.info(f"[METACOG] PREDICTION CORRECT: Theory '{pred['theory']}' confirmed!")
             result['recommendation'] = 'strengthen_theory'
         else:
             logger.info(f"[METACOG] PREDICTION WRONG: Expected '{pred['predicted']}', got '{actual_outcome}'")
             result['recommendation'] = 'revise_theory'
-            
+
             # Queue theory revision
             self._theory_revisions.append({
                 'old_theory': pred['theory'],
                 'failed_prediction': pred['predicted'],
                 'actual': actual_outcome
             })
-        
+
         # Clear pending prediction
         self._pending_prediction = None
 
@@ -681,13 +681,13 @@ class MetacognitiveReasoningEngine:
             prediction_correct=prediction_correct,
             generation=generation,
         )
-        
+
         return result
-    
+
     # ========================================================================
     # 3. THEORY REVISION
     # ========================================================================
-    
+
     def revise_theory(
         self,
         old_theory: str,
@@ -696,15 +696,15 @@ class MetacognitiveReasoningEngine:
     ) -> str:
         """
         Generate a revised theory based on failed prediction.
-        
+
         Fix #4: Theory revision now AFFECTS behavior by populating
         _contradicted_actions for actionable filtering.
-        
+
         Returns:
             New theory text
         """
         new_theory = old_theory
-        
+
         # Fix #4: Extract action from theory/prediction and mark as contradicted
         action_match = re.search(r'ACTION(\d+)', old_theory.upper() + ' ' + failed_prediction.upper())
         if action_match:
@@ -717,50 +717,50 @@ class MetacognitiveReasoningEngine:
                 'timestamp': datetime.now().isoformat()
             })
             logger.info(f"[METACOG-FIX4] Marked {action_str} as contradicted: {failed_prediction[:50]}")
-        
+
         if 'control' in old_theory.lower() and 'no change' in actual_outcome.lower():
             # "I control X" but nothing moved -> probably don't control X
             new_theory = old_theory.replace('I control', 'I might NOT control')
-            
+
         elif 'goal' in old_theory.lower() and 'no score' in actual_outcome.lower():
             # "X is goal" but score didn't increase -> probably not the goal
             new_theory = old_theory.replace('is a goal', 'is NOT a goal')
-            
+
         elif 'move' in failed_prediction.lower() and 'blocked' in actual_outcome.lower():
             # Predicted movement but was blocked -> add obstacle awareness
             new_theory = f"{old_theory} (but obstacles block movement)"
-        
+
         else:
             # Generic revision
             new_theory = f"REVISED: {old_theory} [failed: {failed_prediction}]"
-        
+
         logger.info(f"[METACOG] THEORY REVISED: '{old_theory}' -> '{new_theory}'")
-        
+
         self._current_theory = new_theory
         return new_theory
-    
+
     def get_contradicted_actions(self) -> Dict[str, int]:
         """
         Fix #4: Get actions that have been contradicted by failed theories.
-        
+
         Returns:
             Dict mapping action string to number of contradictions
         """
-        return {action: len(contradictions) 
+        return {action: len(contradictions)
                 for action, contradictions in self._contradicted_actions.items()}
-    
+
     def get_current_theory(self) -> Optional[str]:
         """Get the current working theory."""
         return self._current_theory
-    
+
     def get_theory_revision_history(self) -> List[Dict[str, Any]]:
         """Get history of theory revisions this session."""
         return self._theory_revisions.copy()
-    
+
     # ========================================================================
     # 4. FAILURE COMMONALITY ANALYSIS
     # ========================================================================
-    
+
     def record_failure(
         self,
         action: str,
@@ -768,7 +768,7 @@ class MetacognitiveReasoningEngine:
     ) -> None:
         """
         Record a failed attempt for commonality analysis.
-        
+
         Args:
             action: The action that failed
             context: Context of failure (colors nearby, position, etc.)
@@ -778,11 +778,11 @@ class MetacognitiveReasoningEngine:
             'context': context,
             'timestamp': datetime.now().isoformat()
         })
-        
+
         # Full game memory - safety cap at 20000 for pathological cases only
         if len(self._failed_attempts) > 20000:
             self._failed_attempts = self._failed_attempts[-20000:]
-    
+
     def analyze_failure_commonality(
         self,
         agent_id: str,
@@ -792,22 +792,22 @@ class MetacognitiveReasoningEngine:
     ) -> Optional[Dict[str, Any]]:
         """
         Analyze recent failures to find common factors.
-        
+
         Returns:
             Common factor analysis if pattern found, None otherwise
         """
         if len(self._failed_attempts) < min_failures:
             return None
-        
+
         # Analyze last N failures
         recent_failures = self._failed_attempts[-min_failures:]
-        
+
         # Check for common actions
         action_counts: Dict[str, int] = {}
         for f in recent_failures:
             action = f.get('action', '')
             action_counts[action] = action_counts.get(action, 0) + 1
-        
+
         # Check for common context elements
         # EXCLUDE trivial/tautological elements that don't help pattern detection
         EXCLUDED_KEYS = {'level', 'state', 'available_actions'}
@@ -819,27 +819,27 @@ class MetacognitiveReasoningEngine:
                     continue
                 element = f"{key}:{value}"
                 context_elements[element] = context_elements.get(element, 0) + 1
-        
+
         # Find most common factor
         common_factor: Optional[str] = None
         max_count = 0
-        
+
         for action, count in action_counts.items():
             if count >= min_failures * 0.8 and count > max_count:
                 common_factor = f"ACTION: {action}"
                 max_count = count
-        
+
         for element, count in context_elements.items():
             if count >= min_failures * 0.8 and count > max_count:
                 common_factor = f"CONTEXT: {element}"
                 max_count = count
-        
+
         if not common_factor:
             return None
-        
+
         # Generate insight
         insight = self._generate_failure_insight(common_factor, recent_failures)
-        
+
         # Store pattern
         pattern_id = f"fail_{uuid.uuid4().hex[:12]}"
         self.db.execute_query("""
@@ -859,16 +859,16 @@ class MetacognitiveReasoningEngine:
             0.5,
             0.0,
         ))
-        
+
         logger.info(f"[METACOG] FAILURE PATTERN: {common_factor} - {insight}")
-        
+
         return {
             'pattern_id': pattern_id,
             'common_factor': common_factor,
             'failure_count': len(recent_failures),
             'insight': insight
         }
-    
+
     def _generate_failure_insight(
         self,
         common_factor: str,
@@ -891,11 +891,11 @@ class MetacognitiveReasoningEngine:
             return f"This position/area is deadly - avoid or find another route"
         else:
             return f"Pattern detected: {common_factor} causes death/penalty"
-    
+
     # ========================================================================
     # 5. ELIMINATION TRACKER
     # ========================================================================
-    
+
     def eliminate_action(
         self,
         agent_id: str,
@@ -907,7 +907,7 @@ class MetacognitiveReasoningEngine:
     ) -> None:
         """
         Mark an action as eliminated (proven not to work).
-        
+
         NOTE: ACTION6 (click) should NOT be eliminated as an action type!
               Instead, use eliminate_click_coordinate() with specific coordinates.
         """
@@ -926,19 +926,19 @@ class MetacognitiveReasoningEngine:
             else:
                 logger.debug("[METACOG] REJECTED: Cannot eliminate ACTION6 as type - use eliminate_click_coordinate")
             return
-        
+
         # Add to session set (only for non-ACTION6)
         self._eliminated_actions.add(action)
-        
+
         # Check if already eliminated in DB
         existing = self.db.execute_query("""
             SELECT elimination_id, test_count FROM metacognitive_eliminations
             WHERE agent_id = ? AND game_type = ? AND level_number = ? AND eliminated_action = ?
         """, (agent_id, game_type, level_number, action))
-        
+
         if existing:
             self.db.execute_query("""
-                UPDATE metacognitive_eliminations 
+                UPDATE metacognitive_eliminations
                 SET test_count = test_count + 1,
                     last_observed_generation = COALESCE(?, last_observed_generation, 0),
                     decay_score = COALESCE(decay_score, 0.0)
@@ -968,9 +968,9 @@ class MetacognitiveReasoningEngine:
                 0.5,
                 0.0,
             ))
-        
+
         logger.debug(f"[METACOG] ELIMINATED: {action} - {reason}")
-    
+
     def eliminate_click_coordinate(
         self,
         agent_id: str,
@@ -982,7 +982,7 @@ class MetacognitiveReasoningEngine:
     ) -> None:
         """
         Mark a specific click coordinate as eliminated for ACTION6.
-        
+
         Unlike eliminate_action() which eliminates an action type entirely,
         this method only eliminates a specific (x, y) coordinate for clicking.
         """
@@ -990,10 +990,10 @@ class MetacognitiveReasoningEngine:
             SELECT elimination_id, test_count FROM eliminated_click_coordinates
             WHERE game_type = ? AND level_number = ? AND click_x = ? AND click_y = ?
         """, (game_type, level_number, click_x, click_y))
-        
+
         if existing:
             self.db.execute_query("""
-                UPDATE eliminated_click_coordinates 
+                UPDATE eliminated_click_coordinates
                 SET test_count = test_count + 1,
                     last_observed_generation = COALESCE(?, last_observed_generation, 0),
                     decay_score = COALESCE(decay_score, 0.0)
@@ -1024,9 +1024,9 @@ class MetacognitiveReasoningEngine:
                 0.5,
                 0.0,
             ))
-        
+
         logger.debug(f"[METACOG] ELIMINATED CLICK: ({click_x}, {click_y}) - {reason}")
-    
+
     def get_eliminated_click_coordinates(
         self,
         game_type: str,
@@ -1035,20 +1035,20 @@ class MetacognitiveReasoningEngine:
     ) -> List[Tuple[int, int]]:
         """
         Get list of click coordinates that have been eliminated for this level.
-        
+
         Returns:
             List of (x, y) tuples that should be avoided for clicking
         """
         result = self.db.execute_query("""
             SELECT click_x, click_y FROM eliminated_click_coordinates
-            WHERE game_type = ? AND level_number = ? 
+            WHERE game_type = ? AND level_number = ?
               AND test_count >= ? AND consistent_failure = TRUE
             ORDER BY test_count DESC
         """, (game_type, level_number, min_test_count))
-        
+
         if not result:
             return []
-        
+
         return [(r['click_x'], r['click_y']) for r in result]
 
     def get_eliminated_actions(
@@ -1060,17 +1060,17 @@ class MetacognitiveReasoningEngine:
         """Get list of actions that have been eliminated for this level."""
         result = self.db.execute_query("""
             SELECT eliminated_action FROM metacognitive_eliminations
-            WHERE game_type = ? AND level_number = ? 
+            WHERE game_type = ? AND level_number = ?
               AND confidence >= ? AND consistent_failure = TRUE
             ORDER BY test_count DESC
         """, (game_type, level_number, min_confidence))
-        
+
         db_eliminated = [r['eliminated_action'] for r in (result or [])]
-        
+
         # Combine with session eliminations
         all_eliminated = set(db_eliminated) | self._eliminated_actions
         return list(all_eliminated)
-    
+
     def get_remaining_actions(
         self,
         game_type: str,
@@ -1080,10 +1080,10 @@ class MetacognitiveReasoningEngine:
         """Get actions that haven't been eliminated yet."""
         if all_actions is None:
             all_actions = [f"ACTION{i}" for i in range(1, 8)]
-        
+
         eliminated = set(self.get_eliminated_actions(game_type, level_number))
         return [a for a in all_actions if a not in eliminated]
-    
+
     def get_elimination_summary(
         self,
         game_type: str,
@@ -1092,19 +1092,19 @@ class MetacognitiveReasoningEngine:
         """Get human-readable elimination summary."""
         eliminated = self.get_eliminated_actions(game_type, level_number)
         remaining = self.get_remaining_actions(game_type, level_number)
-        
+
         if not eliminated:
             return "No actions eliminated yet - all options open"
-        
+
         return (
             f"Eliminated {len(eliminated)} actions ({', '.join(eliminated)}). "
             f"Remaining options: {', '.join(remaining)}"
         )
-    
+
     # ========================================================================
     # 6. POST-WIN REFLECTION
     # ========================================================================
-    
+
     def record_win_reflection(
         self,
         agent_id: str,
@@ -1118,12 +1118,12 @@ class MetacognitiveReasoningEngine:
     ) -> str:
         """
         Record reflection after winning - what was the key insight?
-        
+
         Returns:
             insight_id
         """
         insight_id = f"insight_{uuid.uuid4().hex[:12]}"
-        
+
         # Determine if insight is transferable
         is_transferable = any([
             'all games' in key_insight.lower(),
@@ -1131,7 +1131,7 @@ class MetacognitiveReasoningEngine:
             'general rule' in key_insight.lower(),
             'pattern' in key_insight.lower()
         ])
-        
+
         self.db.execute_query("""
             INSERT INTO metacognitive_insights
             (insight_id, agent_id, game_type, level_number, key_insight, winning_strategy,
@@ -1149,11 +1149,11 @@ class MetacognitiveReasoningEngine:
             0.5,
             0.0,
         ))
-        
+
         logger.info(f"[METACOG] WIN REFLECTION: '{key_insight}' (strategy: {winning_strategy})")
-        
+
         return insight_id
-    
+
     def generate_win_reflection(
         self,
         agent_id: str,
@@ -1164,45 +1164,45 @@ class MetacognitiveReasoningEngine:
     ) -> Dict[str, Any]:
         """
         Automatically generate win reflection from action history.
-        
+
         Returns:
             Generated reflection
         """
         if not action_history or not score_history:
             return {'status': 'no_history'}
-        
+
         # Find breakthrough moment (first significant score increase)
         breakthrough_idx: Optional[int] = None
         for i in range(1, len(score_history)):
             if score_history[i] > score_history[i-1]:
                 breakthrough_idx = i
                 break
-        
+
         if breakthrough_idx is None:
             breakthrough_idx = len(action_history) - 1
-        
+
         breakthrough_action = action_history[breakthrough_idx] if breakthrough_idx < len(action_history) else None
-        
+
         # Analyze winning pattern
         action_counts: Dict[str, int] = {}
         for a in action_history:
             action_counts[a] = action_counts.get(a, 0) + 1
-        
+
         most_used = max(action_counts.items(), key=lambda x: x[1])[0] if action_counts else None
-        
+
         # Generate key insight
         if breakthrough_action:
             key_insight = f"Breakthrough came from {breakthrough_action} at action {breakthrough_idx}"
         else:
             key_insight = f"Gradual progress using primarily {most_used}"
-        
+
         # Generate winning strategy
         unique_actions = len(set(action_history))
         if unique_actions <= 2:
             winning_strategy = f"Focused approach using {unique_actions} action types"
         else:
             winning_strategy = f"Mixed approach with {unique_actions} different actions"
-        
+
         # Record reflection
         insight_id = self.record_win_reflection(
             agent_id=agent_id,
@@ -1214,7 +1214,7 @@ class MetacognitiveReasoningEngine:
             theory_at_breakthrough=self._current_theory,
             actions_before_breakthrough=breakthrough_idx or 0
         )
-        
+
         return {
             'insight_id': insight_id,
             'key_insight': key_insight,
@@ -1222,7 +1222,7 @@ class MetacognitiveReasoningEngine:
             'breakthrough_action': breakthrough_action,
             'actions_before_breakthrough': breakthrough_idx
         }
-    
+
     def get_relevant_insights(
         self,
         game_type: str,
@@ -1238,13 +1238,13 @@ class MetacognitiveReasoningEngine:
             ORDER BY created_at DESC
             LIMIT 5
         """, (game_type, level_number, include_transferable))
-        
+
         return result or []
-    
+
     # ========================================================================
     # SESSION MANAGEMENT
     # ========================================================================
-    
+
     def reset_session(self) -> None:
         """Reset session state for new game."""
         self._current_assumptions = []
@@ -1253,14 +1253,14 @@ class MetacognitiveReasoningEngine:
         self._eliminated_actions = set()
         self._theory_revisions = []
         self._current_theory = None
-        
+
         logger.debug("[METACOG] Session reset for new game")
-    
+
     def get_metacognitive_summary(self) -> Dict[str, Any]:
         """Get summary of current metacognitive state."""
         untested = [a for a in self._current_assumptions if not a.get('tested')]
         disproven = [a for a in self._current_assumptions if a.get('tested') and not a.get('valid')]
-        
+
         return {
             'current_theory': self._current_theory,
             'assumptions_count': len(self._current_assumptions),
@@ -1271,7 +1271,7 @@ class MetacognitiveReasoningEngine:
             'actions_eliminated': len(self._eliminated_actions),
             'theory_revisions': len(self._theory_revisions)
         }
-    
+
     def get_q8_metacognitive_context(
         self,
         agent_id: str,
@@ -1280,9 +1280,9 @@ class MetacognitiveReasoningEngine:
     ) -> Dict[str, Any]:
         """
         Build Q8 context for reasoning logs.
-        
+
         Q8: What am I assuming? What have I proven/disproven? What's eliminated?
-        
+
         Returns:
             Q8 context dictionary
         """
@@ -1291,23 +1291,23 @@ class MetacognitiveReasoningEngine:
         remaining = self.get_remaining_actions(game_type, level_number)
         disproven = self.get_disproven_assumptions(game_type, level_number)
         insights = self.get_relevant_insights(game_type, level_number)
-        
+
         # Build insight text
         if self._current_theory:
             theory_insight = f"Working theory: {self._current_theory}"
         else:
             theory_insight = "No working theory yet - exploring"
-        
+
         if eliminated:
             elimination_insight = f"Eliminated {len(eliminated)} actions, {len(remaining)} remain"
         else:
             elimination_insight = "All actions still viable"
-        
+
         if disproven:
             assumption_insight = f"Disproven {len(disproven)} assumptions"
         else:
             assumption_insight = "No assumptions disproven yet"
-        
+
         return {
             'Q8': f"{theory_insight}. {elimination_insight}. {assumption_insight}.",
             'current_theory': self._current_theory,

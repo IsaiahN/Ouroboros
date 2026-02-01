@@ -261,8 +261,8 @@ Meta-principle: "Understand symbols before manipulating world"
 ## THE EMERGENCE FORMULA
 
 ```
-UNDERSTANDING = (Salience Detection) 
-              x (Hypothesis Generation) 
+UNDERSTANDING = (Salience Detection)
+              x (Hypothesis Generation)
               x (Experimental Validation)
               x (Structural Correspondence)
               x (Generalization)
@@ -298,4 +298,3 @@ See pattern -> Generate hypotheses -> Test via experiments
                          v
                   ... SPIRAL UPWARD ...
 ```
-

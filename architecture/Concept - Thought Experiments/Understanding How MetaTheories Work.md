@@ -10,9 +10,9 @@ Are you familiar with that kids song sung on long road trips (99 bottles of beer
 
 You don't need to know the lyrics because its a simple formula **_for any kid that knows how to count down (and knows the formula)_**:
 
-(n) bottles of beer on the wall.  
-(n) bottles of beer.  
-Take one down, pass it around,  
+(n) bottles of beer on the wall.
+(n) bottles of beer.
+Take one down, pass it around,
 (n−1) bottles of beer on the wall.
 
 We will call the kid who understand the rules of the game KID A.

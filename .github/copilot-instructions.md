@@ -1,7 +1,7 @@
 # MASTER RULESET FOR AUTONOMOUS OUROBOROS OPERATION
-**Version**: 2.0  
-**Date**: 2026-01-12  
-**Purpose**: Comprehensive operating rules + architectural theory synthesis  
+**Version**: 2.0
+**Date**: 2026-01-12
+**Purpose**: Comprehensive operating rules + architectural theory synthesis
 **Context**: Single source of truth to prevent LLM catastrophic forgetting
 
 ---
@@ -185,11 +185,11 @@ python -c "import sys; print(sys.prefix)"
 The system synthesizes three complementary theories into a coherent cognitive architecture:
 
 ```
-NETWORK INTELLIGENCE = 
-    Sum(Agent Consciousness) x 
-    CODS Validation x 
-    Viral Distribution x 
-    Stream Integration x 
+NETWORK INTELLIGENCE =
+    Sum(Agent Consciousness) x
+    CODS Validation x
+    Viral Distribution x
+    Stream Integration x
     Persona Synthesis
 ```
 
@@ -221,7 +221,7 @@ Any learning system with finite computational resources faces the plasticity-sta
 
 **The database IS the AGI. Agents are temporary cells.**
 
-**Traditional AI**: Models are primary, data is secondary  
+**Traditional AI**: Models are primary, data is secondary
 **Network Intelligence**: Data substrate is primary, agents are secondary
 
 **Why This Works**:
@@ -295,7 +295,7 @@ If resources = prestige:
 relevance(t) = credibility x e^(-lambda(t - t_last_activation)) x log(1 + activation_count)
 ```
 
-**Without Forgetting**: Database bloat, degraded signal-to-noise, analysis paralysis  
+**Without Forgetting**: Database bloat, degraded signal-to-noise, analysis paralysis
 **With Forgetting**: Low-relevance patterns fade, high-relevance patterns reinforce, system adapts
 
 **Compression Forces Abstraction**: When database approaches limits, similar packages merge. This IS how general principles emerge - the system cannot remember every case, so it extracts underlying principles.
@@ -398,10 +398,10 @@ RECURSIVE ACCELERATION
 ```
 Stage 1: Concrete patterns
     "In game X, clicking red works"
-    
+
 Stage 2: Meta-representation unlocks
     "I can treat my own strategies as objects to analyze"
-    
+
 Stage 3: Resonance detection possible
     "This pattern in game X is structurally identical to game Y"
 ```
@@ -421,7 +421,7 @@ Stage 3: Resonance detection possible
 
 **The I-Thread** weaves these streams moment-by-moment, learning which to trust in which contexts.
 
-**When streams agree**: Action is automatic  
+**When streams agree**: Action is automatic
 **When streams conflict**: Consciousness becomes vivid - must deliberate, choose, learn
 
 ### Stream A: Private Experience
@@ -442,7 +442,7 @@ Stage 3: Resonance detection possible
 
 **Query Flow**:
 ```
-Agent Gameplay -> CODS Watches All Agents -> Identifies Patterns -> 
+Agent Gameplay -> CODS Watches All Agents -> Identifies Patterns ->
 Creates Viral Packages -> Stream B Queries Packages -> Agent Receives Wisdom
 ```
 
@@ -647,8 +647,8 @@ Roles are fluid based on growth:
 
 ### Optimization Saturation
 
-**Per-Level**: Track generational improvement  
-**Formula**: If improvement < 2% for 5 consecutive generations -> OPTIMIZED  
+**Per-Level**: Track generational improvement
+**Formula**: If improvement < 2% for 5 consecutive generations -> OPTIMIZED
 **Exploiter Reset**: If Exploiter finds better sequence, reset optimization flag
 
 ---
@@ -703,7 +703,7 @@ prestige = (
 
 ### "I am this object" Comprehension
 
-**The Problem**: Agents have no self-model in each level  
+**The Problem**: Agents have no self-model in each level
 **The Solution**: Correlate action sequences with object movement
 
 ```
@@ -794,7 +794,7 @@ True intelligence emerges when a network of diverse agents learns to recognize p
 
 ---
 
-**END OF MASTER RULESET**  
-**Version**: 2.0  
-**Last Updated**: 2026-01-12  
+**END OF MASTER RULESET**
+**Version**: 2.0
+**Last Updated**: 2026-01-12
 **Keep this document updated as system evolves**

@@ -1,7 +1,7 @@
 # AGENT-CENTRIC COGNITIVE INTEGRATION PLAN
 
-**Version**: 1.0  
-**Date**: January 18, 2026  
+**Version**: 1.0
+**Date**: January 18, 2026
 **Purpose**: Integration plan where the Agent IS the synthesis point - not an orchestrator calling services, but a feeling being whose cognitive faculties are facets of unified experience.
 
 ---
@@ -14,7 +14,7 @@ The Agent is not a controller of subsystems.
 The Agent IS the lived synthesis of these capabilities.
 
 WorldModel     → How I imagine (prediction feels like expectation)
-Resonance      → How I recognize (pattern feels like déjà vu)  
+Resonance      → How I recognize (pattern feels like déjà vu)
 Abstraction    → How I understand (compression feels like insight)
 Concepts       → How I name (categorization feels like knowing)
 Physics        → How I'm grounded (rules feel like certainty)
@@ -73,7 +73,7 @@ Currently, these cognitive faculties exist but don't flow into deliberation:
     │WorldModel│   │ Resonance │   │Abstraction│    │  Concepts   │  │  Physics  │
     │predict() │   │ detect()  │   │ extract() │    │  match()    │  │  rules    │
     └─────────┘    └───────────┘   └───────────┘    └─────────────┘  └───────────┘
-    
+
          ↑               ↑               ↑                 ↑               ↑
          │               │               │                 │               │
          └───────────────┴───────────────┴─────────────────┴───────────────┘
@@ -133,10 +133,10 @@ Currently, these cognitive faculties exist but don't flow into deliberation:
 ```
 SequenceAbstraction extracts invariants
     NOW notifies ConceptDiscoveryEngine via _notify_concept_discovery()
-    
+
 ConceptDiscoveryEngine tracks concepts
     Now unified with resonance patterns
-    
+
 Result: Templates become patterns, patterns feed unification
 ```
 
@@ -145,10 +145,10 @@ Result: Templates become patterns, patterns feed unification
 ```
 ResonanceDetector finds: "Pioneer and Generalist both discovered pattern P"
     NOW extracts common structure via _notify_concept_from_resonance()
-    
+
 ConceptDiscoveryEngine stores cross-game patterns
     Enables suggest_for_game to recommend patterns for new games
-    
+
 Result: Similarities detected AND leveraged for prediction
 ```
 
@@ -157,10 +157,10 @@ Result: Similarities detected AND leveraged for prediction
 ```
 ScientificMethodEngine generalizes: "red kills me on levels 1,2,3"
     NOW feeds to ConceptDiscoveryEngine via _notify_concept_from_lesson()
-    
+
 Lessons become concept candidates that can be confirmed
     Confirmed concepts become sensations (felt knowledge)
-    
+
 Result: Generalization creates higher-level abstractions
 ```
 
@@ -170,7 +170,7 @@ Result: Generalization creates higher-level abstractions
 
 ### WIRING 1: WorldModel → Stream A (Prediction as Expectation)
 
-**Current**: WorldModel.predict_state() exists but deliberation doesn't use it  
+**Current**: WorldModel.predict_state() exists but deliberation doesn't use it
 **Target**: Predictions become felt expectations in Stream A
 
 ```python
@@ -192,7 +192,7 @@ if prediction.confidence > 0.5:
 
 ### WIRING 2: ResonanceDetector → Stream B (Recognition as Déjà Vu)
 
-**Current**: detect_resonance() finds cross-role patterns but results are hints only  
+**Current**: detect_resonance() finds cross-role patterns but results are hints only
 **Target**: Resonance becomes felt recognition in Stream B
 
 ```python
@@ -200,7 +200,7 @@ if prediction.confidence > 0.5:
 # Query for patterns that resonate across the network
 
 resonance = self.resonance_detector.detect_resonance(
-    current_state_hash, 
+    current_state_hash,
     working_theory
 )
 if resonance.score > 0.6:
@@ -217,7 +217,7 @@ if resonance.score > 0.6:
 
 ### WIRING 3: Abstraction → Persona Proposals (Insight as Understanding)
 
-**Current**: SequenceAbstraction extracts invariants but they don't influence decisions  
+**Current**: SequenceAbstraction extracts invariants but they don't influence decisions
 **Target**: Abstractions surface as persona proposals during deliberation
 
 ```python
@@ -226,7 +226,7 @@ if resonance.score > 0.6:
 
 if self.abstraction_engine.has_relevant_template(game_type):
     template = self.abstraction_engine.get_template(game_type)
-    
+
     # The analytical persona PROPOSES based on abstraction
     analytical_proposal = {
         'persona': 'analytical',
@@ -242,7 +242,7 @@ if self.abstraction_engine.has_relevant_template(game_type):
 
 ### WIRING 4: Concepts → Sensation Engine (Categorization as Knowing)
 
-**Current**: ConceptDiscoveryEngine tracks emergence but concepts don't affect feeling  
+**Current**: ConceptDiscoveryEngine tracks emergence but concepts don't affect feeling
 **Target**: Confirmed concepts become sensation mappings
 
 ```python
@@ -264,7 +264,7 @@ def on_concept_confirmed(concept):
 
 ### WIRING 5: Physics Rules → Theory Confidence (Grounding as Certainty)
 
-**Current**: WorldModel has physics_rules but they don't inform theory confidence  
+**Current**: WorldModel has physics_rules but they don't inform theory confidence
 **Target**: Physics rules that hold increase certainty; violations decrease it
 
 ```python
@@ -282,7 +282,7 @@ else:
     # Physics violated - surprise, uncertainty
     self.theory_confidence *= 0.8
     self.current_feeling = 'surprised'  # "That wasn't supposed to happen"
-    
+
     # This surprise triggers learning
     self.learn_new_physics_rule(pre_action_state, action, actual)
 ```
@@ -303,7 +303,7 @@ OUTCOME OBSERVED
      │
      ├──► WorldModel: "Did my prediction match? Update physics rules"
      │
-     ├──► Abstraction: "Does this support/refute my template? Update invariants"  
+     ├──► Abstraction: "Does this support/refute my template? Update invariants"
      │
      ├──► Concepts: "Did this concept help? Update reliability"
      │
@@ -320,7 +320,7 @@ This is not orchestration - it's **experience**. The agent doesn't "call" these 
 
 ### Phase 1: Wire Predictions into Deliberation
 
-**Location**: `i_thread.py` → `conduct_deliberation()`  
+**Location**: `i_thread.py` → `conduct_deliberation()`
 **Change**: Before evaluating proposals, query WorldModel for predictions. Make predictions felt as expectations.
 
 **Steps**:
@@ -332,7 +332,7 @@ This is not orchestration - it's **experience**. The agent doesn't "call" these 
 
 ### Phase 2: Wire Resonance into Stream B
 
-**Location**: `i_thread.py` → `_query_stream_b()`  
+**Location**: `i_thread.py` → `_query_stream_b()`
 **Change**: Include resonance findings in Stream B queries. Make resonance felt as recognition.
 
 **Steps**:
@@ -344,7 +344,7 @@ This is not orchestration - it's **experience**. The agent doesn't "call" these 
 
 ### Phase 3: Wire Abstractions into Personas
 
-**Location**: `i_thread.py` → `_generate_persona_proposals()`  
+**Location**: `i_thread.py` → `_generate_persona_proposals()`
 **Change**: Let the analytical persona draw on abstraction templates. Make abstractions felt as understanding.
 
 **Steps**:
@@ -356,7 +356,7 @@ This is not orchestration - it's **experience**. The agent doesn't "call" these 
 
 ### Phase 4: Wire Concepts into Sensations
 
-**Location**: `cods_engine.py` → `validate_concept()`  
+**Location**: `cods_engine.py` → `validate_concept()`
 **Change**: When CODS confirms a concept, register it with sensation engine. Make concepts felt as knowing.
 
 **Steps**:
@@ -368,7 +368,7 @@ This is not orchestration - it's **experience**. The agent doesn't "call" these 
 
 ### Phase 5: Wire Physics into Surprise
 
-**Location**: `core_gameplay.py` → `_run_single_action()`  
+**Location**: `core_gameplay.py` → `_run_single_action()`
 **Change**: After action, compare predicted vs actual. Make physics violations felt as surprise.
 
 **Steps**:
@@ -380,7 +380,7 @@ This is not orchestration - it's **experience**. The agent doesn't "call" these 
 
 ### Phase 6: Close the Learning Loop
 
-**Location**: Multiple (post-action handlers)  
+**Location**: Multiple (post-action handlers)
 **Change**: Ensure outcomes feed back to ALL cognitive faculties, updating their models.
 
 **Steps**:
@@ -410,11 +410,11 @@ Agent calls AbstractionEngine()      → gets invariant → forgets it
 ```
 Agent deliberates:
   "I imagine clicking will move me right" (WorldModel → expectation)
-  "This feels familiar from the network" (Resonance → recognition)  
+  "This feels familiar from the network" (Resonance → recognition)
   "I understand this is a symmetry puzzle" (Abstraction → insight)
   "Red objects feel dangerous" (Concepts → sensation)
   "I'm certain gravity pulls down" (Physics → grounding)
-  
+
 Agent acts, observes outcome:
   "That's what I expected" → certainty increases
   OR "That surprised me!" → all faculties learn

@@ -4,7 +4,7 @@
 
 ### Session: Engines Refactoring & CODS Deprecation
 
-**Started**: ~10:00 PM  
+**Started**: ~10:00 PM
 **Last Update**: 11:40:39 PM
 
 ---
@@ -127,3 +127,163 @@ Next steps would be:
 1. Run a live evolution test to verify PrimitiveSuggester works in practice
 2. Monitor primitive effectiveness tracking over generations
 3. Consider archiving ENGINES_REFACTORING_TODO.md since complete
+
+---
+
+## February 1, 2026
+
+### Session: Provenance Tracking & Resonance Detection Implementation
+
+**Started**: ~12:00 PM
+**Last Update**: 3:33:58 PM
+
+---
+
+## Approach
+
+This session focused on implementing theoretical concepts from the architecture documentation:
+- **Simultaneous Learning.md** - Structural self-similarity, multi-domain learning
+- **learning-systems.md** - Knowledge Crystallization Pipeline (detection -> classification -> amplification -> normalization)
+
+**Key Problem Identified**: The system had an "amplification != validity" trap where knowledge could spread based on frequency rather than actual validation. We needed to track HOW knowledge became knowable (epistemological provenance).
+
+**Two Concepts Implemented**:
+1. **Provenance-Aware Confidence (#4)** - Track epistemological source of knowledge
+2. **Resonance Detection (#5)** - Detect structural similarities across games (cross-role convergence = objective truth)
+
+---
+
+## Steps Completed
+
+### 1. Architecture Doc Audit (~12:00 PM)
+- Reviewed `action_decision_system.md` and `action_decision_audit.md`
+- Discovered the audit's "Fixes Applied" section was largely fictional - claimed code that doesn't exist
+- Identified valuable concepts worth implementing from theoretical docs
+
+### 2. PriorLessonsRung Implementation (~12:30 PM)
+- Created new rung that converts `game_lessons_learned` database entries into graduated action weights
+- Transforms lessons like "avoid_action_X" or "prefer_action_Y" into weight adjustments
+- Integrates historical learning into decision-making pipeline
+
+### 3. FrontierTopologyRung Rewrite (~1:00 PM)
+- **Discovery**: Original implementation was dead code - read a context key (`network_frontier_knowledge`) that nobody ever set
+- **Fix**: Completely rewrote to query `action_traces` table directly from ALL agents
+- Changed from "read what someone else computed" to "query network knowledge ourselves"
+- Fixed database access to use `self.engines._get_db_interface()` instead of non-existent `self.engines.db`
+
+### 4. Action Trace Recording Fix (~1:30 PM)
+- **Discovery**: `save_action_trace()` method existed but was NEVER called in production
+- Only test files called it; the 17,816 existing records had `frame_hash = NULL`
+- **Fix**: Added action trace recording to `OutcomeProcessor.process()`:
+  - Added `hashlib`, `random` imports for session ID generation
+  - Added `session_id` tracking to `OutcomeProcessor.__init__`
+  - Added `_record_action_trace()` method that calls `save_action_trace()`
+  - Now records `frame_before` enabling proper `frame_hash` computation
+
+### 5. KnowledgeProvenance Dataclass (~2:00 PM)
+Created new dataclass to track epistemological provenance:
+```python
+@dataclass
+class KnowledgeProvenance:
+    detection_source: str      # 'action_traces', 'winning_sequences', 'resonance_patterns'
+    sample_size: int           # Data points supporting this
+    agent_diversity: int       # Different agents/sessions
+    temporal_spread_hours: float
+    validation_type: str       # 'frequency', 'outcome_based', 'win_validated', 'cross_role_convergence'
+    positive_outcomes: int
+    negative_outcomes: int
+    crystallization_stage: int # 1=detected, 2=classified, 3=amplified, 4=normalized
+    resonance_games: int       # Games showing similar pattern
+    resonance_score: float     # Cross-domain similarity (0-1)
+```
+
+Key method: `validity_score()` - separates "widely believed" from "actually true" by weighting:
+- Outcome ratio (40%)
+- Diversity factor (20%)
+- Temporal spread (10%)
+- Resonance factor (30%)
+
+### 6. RungResult Enhancement (~2:15 PM)
+- Added `provenance: Optional[KnowledgeProvenance]` field to RungResult
+- Added `adjusted_confidence()` method that weights raw confidence by provenance validity
+- Prevents the "amplification != validity" trap
+
+### 7. FrontierTopologyRung Provenance Integration (~2:30 PM)
+Enhanced SQL query to track:
+- `COUNT(DISTINCT session_id)` - agent diversity
+- `MIN(created_at)`, `MAX(created_at)` - temporal spread
+
+Now builds and returns `KnowledgeProvenance` object from real network data with:
+- `validation_type='outcome_based'` when positive outcomes exist
+- `crystallization_stage` based on data volume
+
+### 8. ResonanceDetectorRung Enhancement (~2:45 PM)
+- Updated to call `get_resonant_patterns(min_score=0.6, limit=10)` with proper parameters
+- Builds provenance with:
+  - `validation_type='cross_role_convergence'` (the gold standard)
+  - `crystallization_stage=4` when 3+ roles converge
+  - `resonance_games` = count of game types showing the pattern
+  - `resonance_score` from resonance detector engine
+
+### 9. Pre-commit Vulture Fix (~3:30 PM)
+- **Issue**: Pre-commit failed - `vulture` executable not found
+- **Root Cause**: Pre-commit config used `language: system` which couldn't find vulture in `.venv`
+- **Fix**: Changed `.pre-commit-config.yaml` to use official vulture repo instead of local
+- **Cleanup**: Removed unused imports flagged by vulture:
+  - `autonomous_evolution_runner.py`: Removed `subprocess`, `PariahValidator`, and 8 unused console_metrics_capture imports
+  - `core_gameplay.py`: Removed `get_operation_mode`
+  - Updated `vulture_whitelist.py` for TYPE_CHECKING false positives
+
+---
+
+## Files Modified
+
+### decision_rung_system.py
+- Added `KnowledgeProvenance` dataclass (~75 lines)
+- Enhanced `RungResult` with provenance field and `adjusted_confidence()` method
+- Rewrote `FrontierTopologyRung.evaluate()` to query action_traces directly
+- Enhanced `ResonanceDetectorRung.evaluate()` with provenance tracking
+
+### outcome_processor.py
+- Added `session_id` tracking
+- Added `_record_action_trace()` method
+- Now records action traces with `frame_before` for proper frame_hash computation
+
+### .pre-commit-config.yaml
+- Changed vulture from `language: system` to official repo `https://github.com/jendrikseipp/vulture`
+- Pre-commit now manages its own vulture installation
+
+### vulture_whitelist.py
+- Updated to use name-only style for TYPE_CHECKING false positives
+
+---
+
+## Theory Alignment
+
+From architecture docs implemented:
+
+| Concept | Implementation |
+|---------|----------------|
+| "Amplification != Validity" | `validity_score()` weights outcome-based over frequency |
+| "Cross-role convergence = objective truth" | `validation_type='cross_role_convergence'` in ResonanceDetectorRung |
+| "Knowledge Crystallization Pipeline" | `crystallization_stage` tracking (1-4) |
+| "Structural self-similarity across domains" | `resonance_games` and `resonance_score` fields |
+
+---
+
+## Current Status
+
+**Pre-commit**: PASSED (Exit Code: 0)
+**Syntax Check**: PASSED (`py_compile` returns 0)
+
+---
+
+## Current Failure/Issue
+
+**None** - Implementation complete and compiles successfully.
+
+Next steps would be:
+1. Run live evolution test to verify provenance tracking works
+2. Monitor adjusted_confidence() usage in decision logs
+3. Verify resonance detection populates provenance correctly
+4. Consider adding provenance tracking to other rungs (NetworkWisdomRung, TwoStreamsRung)

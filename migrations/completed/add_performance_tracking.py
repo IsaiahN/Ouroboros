@@ -31,7 +31,7 @@ replacement = r"""\1
                     win=(game_state.state == "WIN"),
                     duration_seconds=duration
                 )
-            
+
             # Diversity Mode: Track game diversity"""
 
 # Apply the replacement
@@ -52,7 +52,7 @@ if new_content == content:
                     win=(game_state.state == "WIN"),
                     duration_seconds=duration
                 )
-            
+
             \1"""
 
     new_content = re.sub(pattern2, replacement2, content)

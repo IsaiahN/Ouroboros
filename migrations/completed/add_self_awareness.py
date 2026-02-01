@@ -8,10 +8,10 @@ SELF_AWARENESS_METHOD = '''
         """
         Get agent's self-awareness data from performance history (Task #6).
         Allows agents to know their own performance and adjust behavior.
-        
+
         Args:
             agent_id: Agent ID
-            
+
         Returns:
             Dict with performance metrics and self-awareness insights
         """
@@ -24,19 +24,19 @@ SELF_AWARENESS_METHOD = '''
                 ORDER BY recorded_at DESC
                 LIMIT 1
             """, (agent_id,))
-            
+
             if not perf_data:
                 return {
                     'has_history': False,
                     'confidence': 0.5,  # Neutral confidence for new agents
                     'strategy_adjustment': 'explore'  # Default to exploration
                 }
-            
+
             perf = perf_data[0]
-            
+
             # Calculate self-awareness metrics
             confidence = min(1.0, perf['win_rate'] + (perf['avg_score'] / 10.0))
-            
+
             # Determine strategy based on performance
             if perf['win_rate'] > 0.7:
                 strategy = 'exploit'  # High win rate - exploit what works
@@ -44,7 +44,7 @@ SELF_AWARENESS_METHOD = '''
                 strategy = 'explore'  # Low win rate - try new approaches
             else:
                 strategy = 'balanced'  # Moderate - balance exploration/exploitation
-            
+
             # Check if improving or declining
             if perf['games_played'] >= 5:
                 # Get previous snapshot for trend
@@ -55,11 +55,11 @@ SELF_AWARENESS_METHOD = '''
                     ORDER BY recorded_at DESC
                     LIMIT 1 OFFSET 1
                 """, (agent_id,))
-                
+
                 if prev_data:
                     score_trend = perf['avg_score'] - prev_data[0]['avg_score']
                     win_trend = perf['win_rate'] - prev_data[0]['win_rate']
-                    
+
                     if score_trend > 0.5 or win_trend > 0.1:
                         trend = 'improving'
                     elif score_trend < -0.5 or win_trend < -0.1:
@@ -70,7 +70,7 @@ SELF_AWARENESS_METHOD = '''
                     trend = 'unknown'
             else:
                 trend = 'insufficient_data'
-            
+
             return {
                 'has_history': True,
                 'games_played': perf['games_played'],
@@ -84,7 +84,7 @@ SELF_AWARENESS_METHOD = '''
                 'prestige': perf['prestige_score'],
                 'sequences_discovered': perf['sequences_discovered']
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting agent self-awareness: {e}")
             return {
@@ -92,23 +92,23 @@ SELF_AWARENESS_METHOD = '''
                 'confidence': 0.5,
                 'strategy_adjustment': 'explore'
             }
-    
+
     def _apply_self_awareness_to_strategy(self, agent_id: str, base_config: Dict) -> Dict:
         """
         Apply self-awareness insights to adjust agent strategy.
-        
+
         Args:
             agent_id: Agent ID
             base_config: Base game configuration
-            
+
         Returns:
             Modified configuration based on self-awareness
         """
         awareness = self._get_agent_self_awareness(agent_id)
-        
+
         if not awareness['has_history']:
             return base_config  # No history, use base config
-        
+
         # Adjust exploration rate based on performance
         if awareness['strategy_adjustment'] == 'explore':
             base_config['exploration_rate'] = min(1.0, base_config.get('exploration_rate', 0.3) * 1.5)
@@ -116,10 +116,10 @@ SELF_AWARENESS_METHOD = '''
         elif awareness['strategy_adjustment'] == 'exploit':
             base_config['exploration_rate'] = max(0.1, base_config.get('exploration_rate', 0.3) * 0.5)
             logger.debug(f"Agent {agent_id}: Decreasing exploration (high win rate)")
-        
+
         # Adjust confidence-based parameters
         base_config['confidence_level'] = awareness['confidence']
-        
+
         # Log self-awareness
         if awareness['games_played'] > 0:
             logger.info(f"🧠 Agent {agent_id} self-awareness: "
@@ -127,7 +127,7 @@ SELF_AWARENESS_METHOD = '''
                        f"Avg score {awareness['avg_score']:.2f}, "
                        f"Strategy: {awareness['strategy_adjustment']}, "
                        f"Trend: {awareness['performance_trend']}")
-        
+
         return base_config
 '''
 

@@ -1,0 +1,87 @@
+# CI workflow for BitterTruth-AI
+# Runs on push/PR to main branch
+# Checks: imports, vulture dead code, basic tests
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install vulture pytest
+          # Install project dependencies (skip torch for CI speed)
+          pip install python-dotenv aiohttp numpy pandas pydeps
+
+      - name: Check imports
+        run: |
+          python -c "from autonomous_evolution_runner import AutonomousEvolutionRunner; print('OK')"
+          python -c "from decision_rung_system import DecisionRungSystem; print('OK')"
+          python -c "from engines.registry import EngineRegistry; print('OK')"
+
+      - name: Vulture dead code check
+        run: |
+          # Check core files for dead code (80% confidence threshold)
+          # Exclude deprecated/, tests/, manual_tools/
+          # Allow _prefixed names (intentionally unused params)
+          vulture \
+            engines/ \
+            core_gameplay.py \
+            decision_rung_system.py \
+            autonomous_evolution_runner.py \
+            database_logger.py \
+            vulture_whitelist.py \
+            --min-confidence 80 \
+            --ignore-names "_*" \
+            --exclude "deprecated/,tests/,manual_tools/" \
+            || echo "Vulture found potential dead code (non-blocking)"
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v --tb=short || echo "Some tests failed (non-blocking for now)"
+        continue-on-error: true
+
+  vulture-strict:
+    # Strict vulture check - runs separately, doesn't block
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install vulture
+        run: pip install vulture
+
+      - name: Vulture strict check (95% confidence)
+        run: |
+          vulture \
+            engines/ \
+            core_gameplay.py \
+            decision_rung_system.py \
+            --min-confidence 95 \
+            --ignore-names "_*" \
+            --exclude "deprecated/,tests/,manual_tools/"

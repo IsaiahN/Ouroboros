@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 """
@@ -11,13 +12,16 @@ Provides consistent logging across all engine modules:
 - Structured context support for debugging
 - No Unicode emojis (Rule 11)
 
+Uses database_logger.DatabaseLogHandler for database storage,
+providing a unified logging backend across the codebase.
+
 Usage:
     from engines.engine_logger import get_engine_logger
-    
+
     logger = get_engine_logger("viral_package")
     logger.info("Package created", package_id=pkg_id)
     logger.error("Failed to create package", exc=e, game_id=game_id)
-    
+
 Console output:
     [viral_package:INFO] Package created
     [viral_package:ERROR] Failed to create package
@@ -26,16 +30,23 @@ Database storage:
     All logs stored in system_logs table with structured context
 """
 
+import json
 import logging
 import sys
-import json
-import traceback
 import threading
 from datetime import datetime
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from database_interface import DatabaseInterface
+
+# Import the canonical DatabaseLogHandler from database_logger
+try:
+    from database_logger import DatabaseLogHandler as SharedDatabaseLogHandler
+    _USE_SHARED_HANDLER = True
+except ImportError:
+    _USE_SHARED_HANDLER = False
+    SharedDatabaseLogHandler = None
 
 
 # Cache for engine loggers (one per engine name)
@@ -55,10 +66,10 @@ def set_global_db(db: 'DatabaseInterface') -> None:
 def get_engine_logger(engine_name: str) -> 'EngineLogger':
     """
     Get or create a logger for the specified engine.
-    
+
     Args:
         engine_name: Short name like "viral_package", "cods", "registry"
-        
+
     Returns:
         EngineLogger instance for that engine
     """
@@ -70,43 +81,76 @@ def get_engine_logger(engine_name: str) -> 'EngineLogger':
 
 class EngineLogFormatter(logging.Formatter):
     """Custom formatter that adds engine name prefix."""
-    
+
     def format(self, record: logging.LogRecord) -> str:
         # Get engine name from record (set by EngineLogger)
         engine = getattr(record, 'engine_name', 'unknown')
         level = record.levelname
-        
+
         # Format: [engine:LEVEL] message
         prefix = f"[{engine}:{level}]"
-        
+
         # Add context if present
         context = getattr(record, 'context', None)
         if context:
             context_str = ' '.join(f"{k}={v}" for k, v in context.items())
             return f"{prefix} {record.getMessage()} | {context_str}"
-        
+
         return f"{prefix} {record.getMessage()}"
 
 
-class DatabaseLogHandler(logging.Handler):
-    """Handler that writes logs to the database."""
-    
+class EngineDatabaseLogHandler(logging.Handler):
+    """
+    Handler that writes logs to the database.
+
+    Uses the shared DatabaseLogHandler from database_logger when available,
+    falls back to direct database writes via _global_db otherwise.
+    """
+
     def __init__(self):
         super().__init__()
         self._local = threading.local()
-    
+        # Use shared handler if available
+        if _USE_SHARED_HANDLER and SharedDatabaseLogHandler is not None:
+            self._shared_handler = SharedDatabaseLogHandler()
+        else:
+            self._shared_handler = None
+
     def emit(self, record: logging.LogRecord) -> None:
         """Write log record to database."""
+        # Add engine context to the record for shared handler
+        engine_name = getattr(record, 'engine_name', 'unknown')
+        context = getattr(record, 'context', {})
+
+        # Update record name to include engine prefix
+        original_name = record.name
+        record.name = f"engine.{engine_name}"
+
+        # If we have a shared handler, use it (preferred - has retry logic, auto-cleanup)
+        if self._shared_handler is not None:
+            try:
+                # Add context to extra_data
+                if context:
+                    if not hasattr(record, 'extra_context'):
+                        record.extra_context = {}
+                    record.extra_context.update(context)
+                self._shared_handler.emit(record)
+            except Exception:
+                pass  # Never fail on logging
+            finally:
+                record.name = original_name
+            return
+
+        # Fallback: Direct database write via _global_db
         global _global_db
-        
+
         if _global_db is None:
+            record.name = original_name
             return  # No database configured yet
-        
+
         try:
-            engine_name = getattr(record, 'engine_name', 'unknown')
-            context = getattr(record, 'context', {})
             exc_info = getattr(record, 'exc_text', None)
-            
+
             # Build log entry
             log_data = {
                 'timestamp': datetime.now().isoformat(),
@@ -118,13 +162,13 @@ class DatabaseLogHandler(logging.Handler):
                 'line_number': record.lineno,
                 'extra_data': json.dumps(context) if context else None,
             }
-            
+
             if exc_info:
                 log_data['extra_data'] = json.dumps({
                     **(context or {}),
                     'traceback': exc_info
                 })
-            
+
             # Insert into system_logs
             _global_db.execute("""
                 INSERT INTO system_logs (
@@ -144,24 +188,30 @@ class DatabaseLogHandler(logging.Handler):
         except Exception:
             # Never fail on logging - just skip database write
             pass
+        finally:
+            record.name = original_name
+
+
+# Alias for backwards compatibility
+DatabaseLogHandler = EngineDatabaseLogHandler
 
 
 class EngineLogger:
     """
     Logger for engine modules with console + database output.
-    
+
     Provides a simple API for logging with structured context:
         logger.info("message", key=value, key2=value2)
         logger.error("message", exc=exception, key=value)
     """
-    
+
     def __init__(self, engine_name: str):
         self.engine_name = engine_name
-        
+
         # Create Python logger
         self._logger = logging.getLogger(f"engine.{engine_name}")
         self._logger.setLevel(logging.DEBUG)
-        
+
         # Avoid duplicate handlers
         if not self._logger.handlers:
             # Console handler
@@ -169,15 +219,15 @@ class EngineLogger:
             console.setLevel(logging.INFO)
             console.setFormatter(EngineLogFormatter())
             self._logger.addHandler(console)
-            
+
             # Database handler
             db_handler = DatabaseLogHandler()
             db_handler.setLevel(logging.DEBUG)
             self._logger.addHandler(db_handler)
-        
+
         # Don't propagate to root logger
         self._logger.propagate = False
-    
+
     def _log(
         self,
         level: int,
@@ -191,7 +241,7 @@ class EngineLogger:
             'engine_name': self.engine_name,
             'context': context if context else None,
         }
-        
+
         # Handle exception
         exc_info = None
         if exc is not None:
@@ -199,29 +249,29 @@ class EngineLogger:
             extra['context'] = extra.get('context') or {}
             extra['context']['error_type'] = type(exc).__name__
             extra['context']['error_msg'] = str(exc)
-        
+
         self._logger.log(level, msg, exc_info=exc_info, extra=extra)
-    
+
     def debug(self, msg: str, **context: Any) -> None:
         """Log debug message (database only by default)."""
         self._log(logging.DEBUG, msg, **context)
-    
+
     def info(self, msg: str, **context: Any) -> None:
         """Log info message."""
         self._log(logging.INFO, msg, **context)
-    
+
     def warning(self, msg: str, exc: Optional[Exception] = None, **context: Any) -> None:
         """Log warning message."""
         self._log(logging.WARNING, msg, exc=exc, **context)
-    
+
     def warn(self, msg: str, exc: Optional[Exception] = None, **context: Any) -> None:
         """Alias for warning()."""
         self.warning(msg, exc=exc, **context)
-    
+
     def error(self, msg: str, exc: Optional[Exception] = None, **context: Any) -> None:
         """Log error message with optional exception."""
         self._log(logging.ERROR, msg, exc=exc, **context)
-    
+
     def critical(self, msg: str, exc: Optional[Exception] = None, **context: Any) -> None:
         """Log critical error."""
         self._log(logging.CRITICAL, msg, exc=exc, **context)
@@ -259,13 +309,13 @@ def log_silent_failure(
 ) -> None:
     """
     Log what would have been a silent failure.
-    
+
     Use this to replace `except: pass` blocks:
-    
+
     Before:
         except Exception:
             pass
-    
+
     After:
         except Exception as e:
             log_silent_failure("viral_package", "create_package", e, game_id=gid)

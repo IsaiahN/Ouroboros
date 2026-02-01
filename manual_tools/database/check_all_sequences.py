@@ -11,7 +11,7 @@ print("=" * 110)
 
 # Find deactivated sequences with high success rates or many references
 c.execute("""
-    SELECT 
+    SELECT
         game_type,
         level_number,
         sequence_id,
@@ -21,13 +21,13 @@ c.execute("""
         flag_reason,
         is_active
     FROM winning_sequences
-    WHERE is_active = 0 
+    WHERE is_active = 0
       AND (
           COALESCE(success_rate_when_reused, 0) >= 0.5  -- 50%+ success rate
           OR COALESCE(times_referenced, 0) >= 20        -- Used 20+ times
       )
-    ORDER BY 
-        game_type, 
+    ORDER BY
+        game_type,
         level_number,
         COALESCE(success_rate_when_reused, 0) DESC,
         COALESCE(times_referenced, 0) DESC
@@ -46,7 +46,7 @@ for seq in high_value_deactivated:
         if current_game_level:
             print()  # Blank line between game/levels
         current_game_level = key
-    
+
     success = f"{seq['success_rate']*100:.0f}%" if seq['success_rate'] else "N/A"
     flag = (seq['flag_reason'] or 'None')[:50]
     print(f"{seq['game_type']:<6} | L{seq['level_number']:<2} | {success:<8} | {seq['refs']:<5} | {seq['total_actions']:<8} | {flag}")
@@ -57,7 +57,7 @@ print("CURRENT ACTIVE SEQUENCE COUNT PER GAME/LEVEL")
 print("=" * 110)
 
 c.execute("""
-    SELECT 
+    SELECT
         game_type,
         level_number,
         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
@@ -75,7 +75,7 @@ print("-" * 90)
 for r in c.fetchall():
     active_success = f"{r['best_active_success']*100:.0f}%" if r['best_active_success'] else "N/A"
     inactive_success = f"{r['best_inactive_success']*100:.0f}%" if r['best_inactive_success'] else "N/A"
-    
+
     # Flag if there's a better inactive sequence
     status = ""
     if r['best_inactive_success'] and r['best_active_success']:
@@ -85,7 +85,7 @@ for r in c.fetchall():
         status = "NO ACTIVE, HAS INACTIVE"
     elif r['active'] == 0:
         status = "NO ACTIVE SEQUENCES"
-        
+
     print(f"{r['game_type']:<6} | L{r['level_number']:<2} | {r['active']:<7} | {r['total']:<6} | {active_success:<12} | {inactive_success:<13} | {status}")
 
 # Find cases where we should swap - inactive is better than active
@@ -95,14 +95,14 @@ print("=" * 110)
 
 c.execute("""
     WITH active_best AS (
-        SELECT game_type, level_number, 
+        SELECT game_type, level_number,
                MAX(COALESCE(success_rate_when_reused, 0)) as best_success,
                MAX(COALESCE(times_referenced, 0)) as best_refs
         FROM winning_sequences
         WHERE is_active = 1
         GROUP BY game_type, level_number
     )
-    SELECT 
+    SELECT
         ws.game_type,
         ws.level_number,
         ws.sequence_id,
@@ -120,11 +120,11 @@ c.execute("""
           COALESCE(ws.success_rate_when_reused, 0) > COALESCE(ab.best_success, 0)
           -- OR no active exists but this one has good metrics
           OR (ab.best_success IS NULL AND (
-              COALESCE(ws.success_rate_when_reused, 0) >= 0.5 
+              COALESCE(ws.success_rate_when_reused, 0) >= 0.5
               OR COALESCE(ws.times_referenced, 0) >= 10
           ))
       )
-    ORDER BY 
+    ORDER BY
         ws.game_type,
         ws.level_number,
         COALESCE(ws.success_rate_when_reused, 0) DESC

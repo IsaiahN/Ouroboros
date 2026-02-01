@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Comprehensive theory alignment analysis"""
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import sqlite3
+
 conn = sqlite3.connect('core_data.db')
 conn.row_factory = sqlite3.Row
 
@@ -11,7 +13,7 @@ print('='*70)
 print('COMPREHENSIVE THEORY ALIGNMENT ANALYSIS')
 print('='*70)
 
-# 1. Two-Stream Consciousness 
+# 1. Two-Stream Consciousness
 print('\n1. TWO-STREAM CONSCIOUSNESS')
 print('   Theory: Private Memory (Stream A) + Network Wisdom (Stream B)')
 try:
@@ -89,8 +91,8 @@ print(f'   Active packages: {vip_active}, Total: {vip_total}')
 # 10. Game Concentration
 print('\n10. GAME CONCENTRATION CHECK')
 top_games = conn.execute('''
-    SELECT game_id, COUNT(*) as cnt 
-    FROM game_results 
+    SELECT game_id, COUNT(*) as cnt
+    FROM game_results
     GROUP BY game_id
     ORDER BY cnt DESC
     LIMIT 5

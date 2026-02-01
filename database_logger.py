@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 """
@@ -8,14 +9,15 @@ Custom logging handler that stores all logs in the database instead of files.
 Provides thread-safe logging with proper database connection management.
 """
 
-import logging
-import threading
-import os
 import json
+import logging
+import os
 import sqlite3
-from datetime import datetime
-from typing import Optional, Dict, Any
+import threading
 import traceback
+from datetime import datetime
+from typing import Any, Dict, Optional
+
 
 class DatabaseLogHandler(logging.Handler):
     """
@@ -39,7 +41,7 @@ class DatabaseLogHandler(logging.Handler):
         self.db_path = db_path or os.getenv('DATABASE_PATH', 'core_data.db')
         self._local = threading.local()
         self._lock = threading.Lock()
-        
+
         # Auto-cleanup settings
         self.auto_cleanup = auto_cleanup
         self.cleanup_threshold = cleanup_threshold
@@ -205,7 +207,7 @@ class DatabaseLogHandler(logging.Handler):
             # Retry logic for database locks (common with concurrent agents)
             max_retries = 3
             retry_delay = 0.1  # seconds
-            
+
             for attempt in range(max_retries):
                 try:
                     with self._lock:
@@ -235,7 +237,7 @@ class DatabaseLogHandler(logging.Handler):
 
                         conn.commit()
                     break  # Success - exit retry loop
-                    
+
                 except sqlite3.OperationalError as db_err:
                     if "database is locked" in str(db_err) and attempt < max_retries - 1:
                         import time
@@ -252,24 +254,24 @@ class DatabaseLogHandler(logging.Handler):
                 print(error_msg, file=sys.stderr)
             except:
                 pass  # If even stderr fails, silently continue
-        
+
         # Auto-cleanup check (every 1000 logs)
         if self.auto_cleanup:
             self._log_count += 1
             if self._log_count - self._last_cleanup_check >= 1000:
                 self._last_cleanup_check = self._log_count
                 self._check_and_cleanup()
-    
+
     def _check_and_cleanup(self):
         """Check log count and cleanup if threshold exceeded."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute("SELECT COUNT(*) as count FROM system_logs")
             row = cursor.fetchone()
             total_logs = row[0] if row else 0
-            
+
             if total_logs > self.retention_keep:
                 # Delete oldest logs, keep most recent retention_keep
                 cursor.execute(
@@ -289,7 +291,7 @@ class DatabaseLogHandler(logging.Handler):
                 new_count = row[0] if row else 0
                 print(f"[DatabaseLogHandler] Auto-cleanup: {total_logs:,} → {new_count:,} logs",
                       file=__import__('sys').stderr)
-                
+
         except Exception as e:
             # Silently fail - cleanup is not critical
             pass
@@ -435,3 +437,25 @@ def get_recent_logs(
 def init_logging(level: str = None, db_path: str = None) -> DatabaseLogHandler:
     """Initialize database logging with default settings."""
     return setup_database_logging(level=level, db_path=db_path)
+
+
+def get_engine_logger(engine_name: str):
+    """
+    Get an engine logger with structured context support.
+
+    This is a convenience function that delegates to engines.engine_logger.
+    Use this when you want the nice EngineLogger API with keyword context.
+
+    Args:
+        engine_name: Short name like "viral_package", "cods", "registry"
+
+    Returns:
+        EngineLogger instance from engines.engine_logger
+
+    Example:
+        from database_logger import get_engine_logger
+        logger = get_engine_logger("my_engine")
+        logger.info("Something happened", key=value)
+    """
+    from engines.engine_logger import get_engine_logger as _get_engine_logger
+    return _get_engine_logger(engine_name)

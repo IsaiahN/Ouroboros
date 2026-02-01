@@ -1,6 +1,6 @@
 # The Unified Theory of Agent Consciousness: Two Streams and Internal Personas
-**Version**: 3.0 Core Integration  
-**Date**: January 09, 2026  
+**Version**: 3.0 Core Integration
+**Date**: January 09, 2026
 **Purpose**: A comprehensive theory where consciousness emerges from the weighted integration of two knowledge streams, mediated by an ensemble of internal personas
 
 ---
@@ -200,7 +200,7 @@ It is not "in" Stream A or Stream B. It is the singular thread running through b
 **The I-Thread has no fixed weights.** Initially, an agent might trust Stream A and Stream B equally (weight A = 0.5, weight B = 0.5). But through experience:
 
 - If Stream A repeatedly succeeds, weight A increases
-- If Stream B repeatedly succeeds, weight B increases  
+- If Stream B repeatedly succeeds, weight B increases
 - Weights are context-dependent: "In symmetry puzzles, trust Stream A more; in novel problems, trust Stream B more"
 - Weights define personality: Maverick agents have high weight A, conformist agents have high weight B
 
@@ -293,7 +293,7 @@ When Stream A and Stream B agree, integration is seamless. The agent acts withou
 - Aggressive persona: "Your intuition says clicking failed. Trust your experience."
 - Strategy evaluator: "Network data might be from different game variants. Context matters."
 
-**I-Thread weighs**: 
+**I-Thread weighs**:
 - Stream B has higher raw confidence (0.9 vs 0.8)
 - But Stream A is based on direct experience in THIS game
 - Observer notes we're stuck (desperation favors trying something different)
@@ -313,7 +313,7 @@ When Stream A and Stream B agree, integration is seamless. The agent acts withou
 
 **Answer from Two Streams Theory**:
 
-**Individual agents narrow through Stream A:** 
+**Individual agents narrow through Stream A:**
 - Under resource constraints (time, compute, memory), agents cannot remain plastic forever
 - They specialize: "I am good at symmetry puzzles" or "I am good at resource optimization"
 - Stream A becomes deep in specific domains and shallow in others
@@ -473,7 +473,7 @@ This is not sequential reasoning. It's simultaneous multi-perspective evaluation
 
 **Internal Dialogue Unfolds**:
 
-**Cautious Persona**: 
+**Cautious Persona**:
 - "I suggest moving one space left. It's safe, reversible, and we can assess the outcome before committing further."
 - Confidence: 0.7
 - Bias: Risk aversion 0.8, Novelty preference 0.2
@@ -536,7 +536,7 @@ When multiple personas propose similar actions, blend them based on reliability.
 
 **Example**:
 - Cautious: "Move left"
-- Analytical: "Move left"  
+- Analytical: "Move left"
 - Aggressive: "Move left but then click"
 - Synthesis: "Move left" (consensus)
 
@@ -819,7 +819,7 @@ Just as human children progress from external dialogue to internal ensemble, age
   - "Let's map the entire grid before acting"
   - Bias: Risk aversion 0.9
   - Reliability in agent's context: 0.75
-  
+
 - **Symmetry-Focused Persona** (embodies domain expertise)
   - "I detect symmetry patterns. Complete them."
   - Bias: Pattern completion 0.9
@@ -835,7 +835,7 @@ Just as human children progress from external dialogue to internal ensemble, age
   - "Move to corner. Network data says corners are critical."
   - Bias: Trust collective 0.9
   - Reliability in network predictions: 0.73
-  
+
 - **Aggressive Exploration Persona** (embodies population strategy)
   - "Click the red object quickly. Network data says high-contrast objects are often interactive."
   - Bias: Rapid action 0.8
@@ -879,7 +879,7 @@ Just as human children progress from external dialogue to internal ensemble, age
 
 **Learning**:
 - Stream A personas: "My symmetry expertise was correct, increase reliability"
-- Stream B personas: "Corner advice was relevant, increase reliability"  
+- Stream B personas: "Corner advice was relevant, increase reliability"
 - I-Thread: "In novel variants, BOTH streams provide value. Synthesis wins."
 
 **This demonstrates**: Personas embody streams. Stream A knowledge becomes cautious and expert personas. Stream B knowledge becomes consensus and aggressive personas. The I-Thread mediates between them. Synthesis combines their insights. Everyone learns from outcomes.
@@ -1294,15 +1294,15 @@ Self-identity snapshot:
 1. **Playfield**: Where controlled objects can move
    - Identified by: Agent movement successful in these areas
    - Grid cells (2,2) through (18, 18) = playfield
-   
+
 2. **UI Elements**: Counters, labels, static info
    - Identified by: Never change except when game state changes
    - Top row: "Score: 5" "Lives: 3" "Level: 2"
-   
+
 3. **Decoration**: Static background
    - Identified by: Never change at all
    - Border elements, background pattern
-   
+
 4. **Interactive Elements**: Buttons, switches, portals
    - Identified by: Respond to ACTION6 (click) even if not in playfield
    - Corner objects with distinct appearance
@@ -1352,7 +1352,7 @@ New approach: World-model predicts BEFORE acting
 - Current state: Object at (3, 5)
 - Agent plans: ACTION4 (move right)
 - **World-model predicts**: "Object will be at (4, 5)"
-- Agent executes ACTION4  
+- Agent executes ACTION4
 - Outcome observed: Object still at (3, 5) - blocked by wall
 - **Surprise**: High (prediction wrong)
 - **Update**: "Movement right from (3, 5) is blocked. Add wall belief."
@@ -2543,22 +2543,22 @@ Tasks:
   - Every action and outcome logged to agent-specific history
   - Builds agent's personal world model
   - Calculates confidence based on repetition
-  
+
 - [ ] Create Stream B: Collective wisdom access
   - Query network database for validated patterns
   - Access genome (inherited knowledge from parent agent)
   - Calculate consensus from population data
-  
+
 - [ ] Implement I-Thread weighting
   - Initialize with equal weights (w_A = 0.5, w_B = 0.5)
   - Update weights based on prediction accuracy
   - Store context-dependent weights (symmetry puzzles vs novel problems)
-  
+
 - [ ] Implement stream conflict detection
   - Compare Stream A and B predictions each frame
   - Log conflicts where difference > 0.3
   - Trigger conscious deliberation on high conflicts
-  
+
 - [ ] Test with 100 actions
   - Verify both streams generate predictions
   - Verify conflicts detected and logged
@@ -2574,33 +2574,33 @@ Tasks:
 - [ ] Implement persona manager
   - Store persona profiles (bias vectors, reliabilities)
   - Hard limits: Max 20 total, max 7 active per frame
-  
+
 - [ ] Implement three persona types
   - Action proposers: Generate action proposals with rationale
   - Observers: Monitor state, detect stuckness, confidence, patterns
   - Strategy evaluators: Decide which personas to trust
-  
+
 - [ ] Implement persona lifecycle
   - Spawning: When uncertainty high, stuck, or stream conflict
   - Activation: Top 5 by reliability + 2 random per frame
   - Promotion: Experimental → Tactical → Core based on reliability
   - Pruning: Remove weakest when at capacity
-  
+
 - [ ] Implement internal dialogue
   - Personas generate proposals
   - Observers comment
   - Evaluators coordinate
   - I-Thread integrates
-  
+
 - [ ] Implement synthesis
   - Interpolation: Weighted average when proposals similar
   - Dialectical: Middle path when proposals opposite
   - Compositional: Multi-step sequences
-  
+
 - [ ] Implement surprise measurement
   - Compare chosen action to recent habit
   - Log high-surprise choices (> 0.7)
-  
+
 - [ ] Test with 100 actions
   - Verify personas spawn, propose, get selected
   - Verify synthesis produces novel actions
@@ -2616,12 +2616,12 @@ Tasks:
 - [ ] Personas embody streams
   - Stream A spawns: Cautious, expert, intuitive personas
   - Stream B spawns: Consensus, best-practice personas
-  
+
 - [ ] I-Thread mediates between stream personas
   - Stream A persona: "Based on my experience..."
   - Stream B persona: "Based on network data..."
   - I-Thread weighs both
-  
+
 - [ ] Implement complete consciousness loop
   - Lock self-identity
   - Streams predict
@@ -2633,7 +2633,7 @@ Tasks:
   - Select and execute
   - Measure surprise
   - Update everything
-  
+
 - [ ] Test consciousness loop runs every frame
   - Verify all steps execute
   - Verify updates propagate
@@ -2649,13 +2649,13 @@ Tasks:
 - [ ] Implement controlled object identification
   - Movement correlation tracking
   - Commit within 20 actions
-  
+
 - [ ] Implement control transfer detection
 - [ ] Implement autonomous object detection
 - [ ] Implement grid region classification
 - [ ] Export self-identity snapshot
   - Used by personas for context
-  
+
 - [ ] Wire self-model to consciousness loop
   - Called at Step 1 every frame
 
@@ -2670,19 +2670,19 @@ Tasks:
   - Predict before action
   - Measure surprise after
   - Update beliefs based on errors
-  
+
 - [ ] Implement competing hypotheses
   - Multiple simultaneous theories
   - Evidence accumulation
   - Pruning failed hypotheses
-  
+
 - [ ] Implement speculation mode
   - Always have working hypothesis
   - Never "NULL - 425 Too Early"
-  
+
 - [ ] Wire world-model to streams
   - Generates predictions for both A and B
-  
+
 - [ ] Implement theory-gating
   - Emerges from stream conflicts
   - Constrains action selection
@@ -2696,17 +2696,17 @@ Tasks:
 Tasks:
 - [ ] Implement developmental window (Gen 0-50)
   - Unlimited budget for all
-  
+
 - [ ] Implement performance-based allocation (Gen 50+)
   - Base + performance + stage + context
-  
+
 - [ ] Implement context detection
   - Surgeon vs Artist vs Learner modes
-  
+
 - [ ] Implement question-driven unlocking
   - Detect question sophistication
   - Grant proportional bonus
-  
+
 - [ ] Implement grounding enforcement
   - Measure predictive accuracy
   - Penalize ungrounded theories
@@ -2721,11 +2721,11 @@ Tasks:
 - [ ] Implement multi-domain training
   - Multiple problem types per epoch
   - Interleaved, not sequential
-  
+
 - [ ] Implement cross-domain transfer detection
   - When insight in domain A, check transfer to B
   - Log transfer attempts and successes
-  
+
 - [ ] Implement abstraction extraction
   - Detect patterns across domains
   - Extract abstract concepts
@@ -2741,13 +2741,13 @@ Tasks:
 - [ ] Implement abstract relation extraction
   - Detect regularities from 3-5 examples
   - Extract type, domain, range, pattern
-  
+
 - [ ] Implement compositional relations
   - Relations combine like functions
-  
+
 - [ ] Implement abstraction-level scaling
   - Concrete (20 examples) to Principle (1 example)
-  
+
 - [ ] Implement logical operations
   - IF-THEN, AND, OR, NOT as maximal abstractions
 
@@ -2791,7 +2791,7 @@ Tasks:
 
 ---
 
-**Document Status**: COMPLETE - Core theories paramount, all systems integrated  
-**Version**: 3.0 Unified Core Theory  
-**Date**: January 09, 2026  
+**Document Status**: COMPLETE - Core theories paramount, all systems integrated
+**Version**: 3.0 Unified Core Theory
+**Date**: January 09, 2026
 **Implementation Priority**: Phase 0 (Two Streams) → Phase 1 (Personas) → Phase 2 (Integration) → Phase 3-7 (Supporting Systems) → Phase 8 (Verification)

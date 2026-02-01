@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 #!/usr/bin/env python3
@@ -15,6 +16,7 @@ Manual usage:
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 import logging
 import subprocess
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Patterns for temporary files (case-insensitive matching)
 TEMP_PATTERNS = [
     "check_*.py",
-    "investigate_*.py", 
+    "investigate_*.py",
     "analyze_*.py",
     "diagnose_*.py",
     "show_*.py",
@@ -80,7 +82,7 @@ KEEP_FILES = {
     "agent_operating_mode_system.py",
     "agent_self_model.py",
     "arc_rlvr_framework.py",
-    
+
     # TIER 2: Active Utilities (referenced by core files)
     "breakthrough_budget_allocator.py",
     "breakthrough_detector.py",
@@ -113,16 +115,16 @@ KEEP_FILES = {
     "safe_cleanup.py",
     "cleanup_temp_files.py",
     "requirements.txt",
-    
+
     # TIER 3: Experimental/Future (kept in root but not integrated)
     "symbolic_reasoning_engine.py",
     "visual_reasoning_engine.py",
     "emotional_gameplay_mixin.py",
     "specialist_coordinator.py",
-    
+
     # Package init
     "__init__.py",
-    
+
     # Documentation (keep)
     "README.md",
     "CODEBASE_INVENTORY.md",
@@ -162,7 +164,7 @@ def _load_tracked_files(repo_root: Path) -> set[str]:
 def should_delete(filepath: Path) -> bool:
     """
     Determine if file should be deleted.
-    
+
     Rules:
     1. If in whitelist, keep it
     2. If ALL_CAPS.md file (LLM-generated docs), delete it (case-sensitive check)
@@ -170,11 +172,11 @@ def should_delete(filepath: Path) -> bool:
     4. Otherwise, keep it
     """
     filename = filepath.name
-    
+
     # Whitelist check
     if filename in KEEP_FILES:
         return False
-    
+
     # Check for ALL_CAPS.md files (LLM-generated documentation) - CASE SENSITIVE
     if filename.endswith('.md'):
         # Get filename without extension
@@ -190,12 +192,12 @@ def should_delete(filepath: Path) -> bool:
             letters_only = ''.join(c for c in name_without_ext if c.isalpha())
             if letters_only and letters_only.isupper():
                 return True
-    
+
     # Pattern check (case-insensitive)
     filename_lower = filename.lower()
     for pattern in TEMP_PATTERNS:
         pattern_lower = pattern.lower()
-        
+
         # Simple wildcard matching
         if pattern_lower.count("*") == 2:
             # Pattern like *_summary.* - split into prefix, middle, suffix
@@ -223,7 +225,7 @@ def should_delete(filepath: Path) -> bool:
                 return True
         elif filename_lower == pattern_lower:
             return True
-    
+
     return False
 
 def cleanup_temp_files(
@@ -234,7 +236,7 @@ def cleanup_temp_files(
 ) -> tuple[int, int]:
     """
     Clean up temporary files and __pycache__ folders from workspace.
-    
+
     Returns:
         (files_deleted, bytes_freed)
     """
@@ -244,14 +246,14 @@ def cleanup_temp_files(
     bytes_freed = 0
     pycache_folders_deleted = 0
     skip_tracked_count = 0
-    
+
     print("\n[CLEANUP] Removing temporary files and __pycache__ folders...")
     print("=" * 80)
-    
+
     # Walk workspace
     for root, dirs, files in os.walk(workspace_path):
         root_path = Path(root)
-        
+
         # Delete __pycache__ folders entirely
         if '__pycache__' in dirs:
             pycache_path = root_path / '__pycache__'
@@ -259,38 +261,38 @@ def cleanup_temp_files(
                 # Count files in __pycache__ before deleting
                 pycache_size = sum(f.stat().st_size for f in pycache_path.rglob('*') if f.is_file())
                 pycache_file_count = sum(1 for f in pycache_path.rglob('*') if f.is_file())
-                
+
                 # Delete the entire folder
                 import shutil
                 shutil.rmtree(pycache_path)
-                
+
                 files_deleted += pycache_file_count
                 bytes_freed += pycache_size
                 pycache_folders_deleted += 1
                 print(f"  [DEL] {pycache_path.relative_to(workspace_path)}/ ({pycache_file_count} files)")
             except Exception as e:
                 logger.warning(f"Failed to delete {pycache_path}: {e}")
-            
+
             # Remove from dirs so we don't walk into it
             dirs.remove('__pycache__')
-        
+
         # Skip certain directories (but we'll check individual files)
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        
 
-        
+
+
         for filename in files:
             filepath = root_path / filename
-            
+
             # Process Python files, markdown files, log files, text files, and summary files (case-insensitive)
             filename_lower = filename.lower()
             if not (filename_lower.endswith(".py") or filename_lower.endswith(".md") or filename_lower.endswith(".log") or filename_lower.endswith(".txt") or "_summary." in filename_lower):
                 continue
-            
+
             # Skip DOCS directory for Python files, but allow .md files to be cleaned there
             if "DOCS" in filepath.parts and filename_lower.endswith(".py"):
                 continue
-            
+
             rel_path = filepath.relative_to(workspace_path)
             rel_posix = rel_path.as_posix()
             is_tracked = rel_posix in tracked_files
@@ -319,7 +321,7 @@ def cleanup_temp_files(
                     print(f"  {prefix} {rel_path}")
                 except Exception as e:
                     logger.warning(f"Failed to delete {filepath}: {e}")
-    
+
     print("=" * 80)
     if pycache_folders_deleted > 0:
         print(f"[OK] Deleted {files_deleted} files + {pycache_folders_deleted} __pycache__ folders ({bytes_freed / 1024:.1f} KB freed)\n")
@@ -328,7 +330,7 @@ def cleanup_temp_files(
 
     if skip_tracked_count > 0:
         print(f"[SKIP] {skip_tracked_count} tracked file(s) protected (suppressed detail)")
-    
+
     return files_deleted, bytes_freed
 
 def list_temp_files(
@@ -343,22 +345,22 @@ def list_temp_files(
     workspace_path = Path(workspace_root)
     tracked_files = tracked_files if tracked_files is not None else _load_tracked_files(workspace_path)
     temp_files = []
-    
+
     for root, dirs, files in os.walk(workspace_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         root_path = Path(root)
-        
+
         for filename in files:
             filepath = root_path / filename
             filename_lower = filename.lower()
-            
+
             if not (filename_lower.endswith(".py") or filename_lower.endswith(".md") or filename_lower.endswith(".log") or filename_lower.endswith(".txt") or "_summary." in filename_lower):
                 continue
-            
+
             # Skip DOCS directory for Python files, but allow .md files to be cleaned there
             if "DOCS" in filepath.parts and filename_lower.endswith(".py"):
                 continue
-            
+
             rel_posix = filepath.relative_to(workspace_path).as_posix()
             is_tracked = rel_posix in tracked_files
             if is_tracked and not allow_tracked:
@@ -366,12 +368,12 @@ def list_temp_files(
 
             if should_delete(filepath):
                 temp_files.append(filepath)
-    
+
     return temp_files
 
 if __name__ == "__main__":
     import sys
-    
+
     # Parse arguments
     dry_run = "--dry-run" in sys.argv or "-n" in sys.argv
     allow_tracked = "--allow-tracked" in sys.argv
@@ -381,7 +383,7 @@ if __name__ == "__main__":
         allow_tracked = True
 
     tracked_files = _load_tracked_files(Path("."))
-    
+
     if dry_run:
         print("\n[DRY RUN] Files that would be deleted:")
         print("=" * 80)

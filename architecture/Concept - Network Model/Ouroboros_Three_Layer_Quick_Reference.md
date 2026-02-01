@@ -366,7 +366,7 @@ success_rate = 10 / 12 = 0.833
            parent1_feature * parent1_weight +
            parent2_feature * parent2_weight
        ) * decay_rate  # 0.95
-       
+
        # Add mutation
        mutation = random.uniform(-0.1, 0.1)
        offspring_feature = max(0.5, min(1.6, offspring_feature + mutation))
@@ -388,7 +388,7 @@ success_rate = 10 / 12 = 0.833
 Parent A (fitness 0.85):
   edges: 1.4
   symmetry: 1.0
-  
+
 Parent B (fitness 0.45):
   edges: 0.9
   symmetry: 1.3
@@ -537,7 +537,7 @@ agents = db.execute_query("""
 for agent in agents:
     wins = agent['total_games_won']
     games = agent['total_games_played']
-    
+
     discovery_speed = (wins ** 1.5) / math.log(games + 1)
     print(f"Agent {agent['agent_id']}: discovery_speed = {discovery_speed:.3f}")
 ```
@@ -545,7 +545,7 @@ for agent in agents:
 ### Check Community Memory
 ```python
 sequences = db.execute_query("""
-    SELECT s.sequence_id, s.game_id, 
+    SELECT s.sequence_id, s.game_id,
            r.reliability_score, r.success_rate
     FROM winning_sequences s
     JOIN sequence_reputation r ON s.sequence_id = r.sequence_id

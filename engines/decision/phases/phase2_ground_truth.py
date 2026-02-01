@@ -14,10 +14,11 @@ The database is the AGI - this phase queries it.
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import logging
-from typing import Dict, List, Set, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 if TYPE_CHECKING:
     from engines.registry import EngineRegistry
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 class GroundTruthPhase:
     """
     Phase 2: Gather empirical ground truth from database.
-    
+
     Queries:
     - NetworkWisdom for action history
     - TerminalPatternDetector for death weights
@@ -39,13 +40,13 @@ class GroundTruthPhase:
     - BeliefSystem for active beliefs
     - ViralPackageEngine for pariahs
     """
-    
+
     # All possible actions
     ALL_ACTIONS = [f"ACTION{i}" for i in range(1, 8)]
-    
+
     def __init__(self, engines: 'EngineRegistry'):
         self.engines = engines
-    
+
     def execute(
         self,
         game_state: 'GameState',
@@ -54,31 +55,31 @@ class GroundTruthPhase:
     ) -> GroundTruthContext:
         """
         Gather ground truth from database.
-        
+
         NEVER returns None. ALWAYS returns valid GroundTruthContext.
         Missing data -> explicit defaults with warnings logged.
         """
         # === Action Safety Weights (from terminal patterns) ===
         action_safety = self._get_action_safety(game_state)
-        
+
         # === Empirical Rankings (from network wisdom) ===
         empirical_rankings = self._get_empirical_rankings(game_state)
-        
+
         # === Object Valences ===
         object_valences = self._get_object_valences(game_state)
-        
+
         # === Active Beliefs ===
         active_beliefs = self._get_active_beliefs(game_state, agent_context)
-        
+
         # === Pariah Actions ===
         pariah_actions = self._get_pariah_actions(game_state)
-        
+
         # === Death Risk by Position ===
         death_risk = self._get_death_risk(game_state)
-        
+
         # === Network Sequence ===
         has_sequence, sequence = self._get_network_sequence(game_state)
-        
+
         # Build context
         ctx = GroundTruthContext(
             action_safety_weights=action_safety,
@@ -90,22 +91,22 @@ class GroundTruthPhase:
             network_sequence_available=has_sequence,
             network_sequence=sequence,
         )
-        
+
         # Validate contract
         ctx.validate()
-        
+
         logger.debug(
             f"[GROUND_TRUTH] pariahs={len(pariah_actions)}, "
             f"beliefs={len(active_beliefs)}, has_sequence={has_sequence}"
         )
-        
+
         return ctx
-    
+
     def _get_action_safety(self, game_state: 'GameState') -> Dict[str, float]:
         """Get per-action safety weights from terminal pattern detector."""
         # Default: all actions safe
         safety = {action: 1.0 for action in self.ALL_ACTIONS}
-        
+
         terminal_detector = self.engines.get('terminal_pattern_detector')
         if terminal_detector:
             try:
@@ -122,14 +123,14 @@ class GroundTruthPhase:
                                 safety[action] = max(0.0, min(1.0, float(weight)))
             except Exception as e:
                 logger.debug(f"[GROUND_TRUTH] TerminalDetector error: {e}")
-        
+
         return safety
-    
+
     def _get_empirical_rankings(self, game_state: 'GameState') -> Dict[str, float]:
         """Get action rankings from network wisdom."""
         # Default: neutral rankings
         rankings = {action: 0.5 for action in self.ALL_ACTIONS}
-        
+
         # Try network wisdom via self_model
         self_model = self.engines.get('self_model')
         if self_model:
@@ -145,13 +146,13 @@ class GroundTruthPhase:
                                 rankings[action] = max(0.0, min(1.0, float(rank)))
             except Exception as e:
                 logger.debug(f"[GROUND_TRUTH] NetworkWisdom error: {e}")
-        
+
         return rankings
-    
+
     def _get_object_valences(self, game_state: 'GameState') -> Dict[str, str]:
         """Get object valences (positive/negative/neutral)."""
         valences: Dict[str, str] = {}
-        
+
         valence_engine = self.engines.get('valence_goals')
         if valence_engine:
             try:
@@ -164,9 +165,9 @@ class GroundTruthPhase:
                         valences.update(v)
             except Exception as e:
                 logger.debug(f"[GROUND_TRUTH] ValenceEngine error: {e}")
-        
+
         return valences
-    
+
     def _get_active_beliefs(
         self,
         game_state: 'GameState',
@@ -174,7 +175,7 @@ class GroundTruthPhase:
     ) -> List[Dict[str, Any]]:
         """Get agent's active beliefs."""
         beliefs: List[Dict[str, Any]] = []
-        
+
         belief_system = self.engines.get('belief_system')
         if belief_system:
             try:
@@ -187,13 +188,13 @@ class GroundTruthPhase:
                         beliefs.extend(b)
             except Exception as e:
                 logger.debug(f"[GROUND_TRUTH] BeliefSystem error: {e}")
-        
+
         return beliefs
-    
+
     def _get_pariah_actions(self, game_state: 'GameState') -> Set[str]:
         """Get actions marked as pariah (to avoid)."""
         pariahs: Set[str] = set()
-        
+
         viral_engine = self.engines.get('viral_package_engine')
         if viral_engine:
             try:
@@ -206,13 +207,13 @@ class GroundTruthPhase:
                         pariahs.update(p)
             except Exception as e:
                 logger.debug(f"[GROUND_TRUTH] ViralPackageEngine pariahs error: {e}")
-        
+
         return pariahs
-    
+
     def _get_death_risk(self, game_state: 'GameState') -> Dict[tuple, float]:
         """Get death risk by position."""
         risk: Dict[tuple, float] = {}
-        
+
         terminal_detector = self.engines.get('terminal_pattern_detector')
         if terminal_detector and game_state.position:
             try:
@@ -225,9 +226,9 @@ class GroundTruthPhase:
                         risk.update(r)
             except Exception as e:
                 logger.debug(f"[GROUND_TRUTH] Death risk error: {e}")
-        
+
         return risk
-    
+
     def _get_network_sequence(
         self, game_state: 'GameState'
     ) -> tuple[bool, Optional[List[str]]]:
@@ -245,5 +246,5 @@ class GroundTruthPhase:
                         return True, result['sequence']
             except Exception as e:
                 logger.debug(f"[GROUND_TRUTH] MultiStage error: {e}")
-        
+
         return False, None

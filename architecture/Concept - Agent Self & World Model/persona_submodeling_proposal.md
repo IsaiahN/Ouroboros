@@ -163,7 +163,7 @@ Different horizons serve different purposes:
 - Identity stability: measure core persona stability from retrospective vs. prospective formation.
 - SQL sketch:
 ```
-SELECT 
+SELECT
    problem_signature,
    persona_id,
    AVG(CASE WHEN learned_via='hindsight' THEN success_rate END) AS hindsight_learned_success,

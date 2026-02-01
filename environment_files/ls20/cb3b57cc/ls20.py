@@ -24,13 +24,7 @@ import math
 from typing import List, Tuple
 
 import numpy as np
-from arcengine import (
-    ARCBaseGame,
-    Camera,
-    Level,
-    RenderableUserDisplay,
-    Sprite,
-)
+from arcengine import ARCBaseGame, Camera, Level, RenderableUserDisplay, Sprite
 
 # Create sprites dictionary with all sprite definitions
 sprites = {

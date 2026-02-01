@@ -1,4 +1,5 @@
 import os
+
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 """DB validation helper: checks modes/booleans and PRAGMA settings.

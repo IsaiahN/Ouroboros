@@ -1,5 +1,5 @@
 # Hardcoded Limits Audit - core_gameplay.py
-**Generated**: January 8, 2026  
+**Generated**: January 8, 2026
 **Purpose**: Comprehensive list of all hardcoded limits, thresholds, and special modes that may impact gameplay, reasoning, discovery, and growth
 
 ---
@@ -164,10 +164,10 @@
 ## Special Modes & Conditions
 
 ### 1. ESCAPE MODE (L5060-5075)
-**Trigger**: `consecutive_no_frame_change >= STUCK_STATE_THRESHOLD` (200)  
+**Trigger**: `consecutive_no_frame_change >= STUCK_STATE_THRESHOLD` (200)
 **Stages**:
 - Stage 1 (attempts 1-7): Intelligent escape using CODS, Q1-Q5, network wisdom
-- Stage 2 (attempts 8-14): Reset biases, try different strategies  
+- Stage 2 (attempts 8-14): Reset biases, try different strategies
 - Stage 3 (attempts 15-21): Pure random exploration (last resort)
 
 **Flags**:
@@ -175,11 +175,11 @@
 - `pure_exploration_mode = True` after all 21 attempts fail
 
 ### 2. LEARNING MODES (L1563)
-**Options**: `'exploit'`, `'explore'`, `'smart_exploration'` (default)  
+**Options**: `'exploit'`, `'explore'`, `'smart_exploration'` (default)
 **Impact**: Determines sequence replay behavior and exploration strategy
 
 ### 3. FRONTIER LOCK MODE (L4635)
-**Trigger**: Game marked as frontier-only  
+**Trigger**: Game marked as frontier-only
 **Effect**: Skips sequence replay/validation, exploration-only
 
 ### 4. DIVERSITY MODE (L1568-1572)
@@ -192,7 +192,7 @@
 **Effect**: Prevents overfitting to specific games
 
 ### 5. SPECULATION MODE (L15363)
-**Trigger**: After 20 frames with no confirmed data  
+**Trigger**: After 20 frames with no confirmed data
 **Effect**: Changes from "425 Too Early" to:
 - `"SPECULATING: Object control not yet confirmed"`
 - `"EXPLORING: Testing game mechanics"`
@@ -206,11 +206,11 @@
 **Persona**: `stuckness_detector` spawned to investigate
 
 ### 7. AGENT ROLES (L4633)
-**Modes**: `'optimizer'`, `'generalist'`, `'pioneer'`, `'exploiter'`  
+**Modes**: `'optimizer'`, `'generalist'`, `'pioneer'`, `'exploiter'`
 **Impact**: Determines sequence replay behavior and game selection
 
 ### 8. ALLOWED SPINE MODES (L1091)
-**Values**: `{'LIVE', 'REPLAY_VALIDATION', 'EVAL', 'LEGACY'}`  
+**Values**: `{'LIVE', 'REPLAY_VALIDATION', 'EVAL', 'LEGACY'}`
 **Purpose**: Validate mode parameter for spine writes
 
 ### 9. COGNITIVE STAGE PROGRESSION (L8302-8303)

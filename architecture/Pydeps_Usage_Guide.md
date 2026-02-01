@@ -1,7 +1,7 @@
 # Master Guide: Using PyDeps for AGI System Debugging
-**System**: Unified AGI Architecture (Network + Metalearning + Consciousness Theories)  
-**Version**: 1.1  
-**Date**: January 12, 2026  
+**System**: Unified AGI Architecture (Network + Metalearning + Consciousness Theories)
+**Version**: 1.1
+**Date**: January 12, 2026
 **Purpose**: Fix circular dependencies, silent failures, and logic flow breaks in 100+ file Python codebase
 **Environment**: Windows + VS Code + Copilot
 
@@ -121,34 +121,34 @@ Based on the master ruleset, your system follows a three-layer agent architectur
 
 **Flow 1: Gameplay -> CODS -> Validation -> Unlocking**
 ```
-agent plays game -> generates RLVR data -> 
-CODS analyzes -> validates patterns -> 
+agent plays game -> generates RLVR data ->
+CODS analyzes -> validates patterns ->
 unlocks primitives -> creates viral packages
 ```
 
 **Flow 2: Stream B Knowledge Retrieval**
 ```
-agent queries Stream B -> 
-retrieves viral packages from database -> 
-integrates with Stream A -> 
+agent queries Stream B ->
+retrieves viral packages from database ->
+integrates with Stream A ->
 action selected
 ```
 
 **Flow 3: Persona Synthesis**
 ```
-streams conflict detected -> 
-personas generate proposals -> 
-synthesis proposal created -> 
-surprise measured -> 
+streams conflict detected ->
+personas generate proposals ->
+synthesis proposal created ->
+surprise measured ->
 action executed
 ```
 
 **Flow 4: Prestige -> Viral Spread**
 ```
-agent discovers pattern -> 
-RLVR validates -> 
-prestige awarded -> 
-viral package created -> 
+agent discovers pattern ->
+RLVR validates ->
+prestige awarded ->
+viral package created ->
 spreads to all agents
 ```
 
@@ -186,7 +186,7 @@ python -c "import sys; print(sys.prefix)"
 ```
 
 > **WARNING**: If you see "No module named pydeps" or similar errors, you likely forgot to activate the venv!
-> 
+>
 > **DIAGNOSTIC**: Run `python -c "import sys; print(sys.prefix)"` - if it shows system Python (e.g., `C:\Python313`), activate venv first!
 
 ### Step 1: Install Dependencies
@@ -317,7 +317,7 @@ oracle_interface.py             # Oracle access interface
 oracle_health_monitor.py        # Oracle system health
 oracle_stuck_game_diagnostics.py # Stuck game analysis
 
-# Primitives & Operators  
+# Primitives & Operators
 seed_primitives.py              # 110 innate primitive operations
 primitive_unlock_manager.py     # Granting discovered primitives
 operator_composer.py            # Operator combination/composition
@@ -337,7 +337,7 @@ concept_discovery_engine.py     # New concept identification
 # Persona System
 persona_runtime.py              # Persona ensemble management
                                 # - Action proposers
-                                # - Observer personas  
+                                # - Observer personas
                                 # - Strategy evaluators
 
 # Agent Identity & Self-Model
@@ -537,7 +537,7 @@ Verify that the theoretical architecture is actually implemented in code.
 
 ### Requirement 1: CODS is Centralized (Not Per-Agent)
 **Theory states**: CODS watches ALL agent gameplay, is external validator
-**Code should show**: 
+**Code should show**:
 - Single CODS instance
 - CODS receives data from all agents
 - Agents don't instantiate their own CODS
@@ -742,7 +742,7 @@ Use VS Code with Copilot for automated fixes. For large refactoring tasks, break
 
 ### Fix 1: Centralize CODS
 **Issue**: If agents create their own CODS instances
-**Fix**: 
+**Fix**:
 1. Create `cods/cods_singleton.py`
 2. Implement singleton pattern
 3. Update all agent files to use singleton
@@ -882,10 +882,10 @@ def test_cods_is_centralized():
     """Verify CODS is singleton, not per-agent"""
     agent1 = Agent(agent_id=1)
     agent2 = Agent(agent_id=2)
-    
+
     cods1 = get_cods_instance()
     cods2 = get_cods_instance()
-    
+
     assert cods1 is cods2, "CODS should be singleton"
     assert not hasattr(agent1, 'cods'), "Agent should not own CODS"
 
@@ -893,9 +893,9 @@ def test_stream_b_queries_database():
     """Verify Stream B gets data from database, not other agents"""
     agent = Agent(agent_id=1)
     stream_b = StreamB(agent_id=1)
-    
+
     packages = stream_b.query_knowledge(game_type='symmetry')
-    
+
     assert isinstance(packages, list), "Should return list of packages"
     assert len(packages) >= 0, "Should handle empty results"
     # Verify it came from database
@@ -906,15 +906,15 @@ def test_rlvr_to_unlock_flow():
     """Verify RLVR validation unlocks primitives"""
     agent = Agent(agent_id=1)
     initial_primitives = len(agent.get_primitives())
-    
+
     # Simulate high-performance gameplay
     agent.play_game(game_id='test_001')
     agent.record_performance(improvement=0.25)  # 25% improvement
-    
+
     # CODS should analyze and unlock
     cods = get_cods_instance()
     cods.analyze_agent_performance(agent.agent_id)
-    
+
     # Verify primitive unlocked
     final_primitives = len(agent.get_primitives())
     assert final_primitives > initial_primitives, "Should unlock primitive"
@@ -924,13 +924,13 @@ def test_persona_synthesis_on_conflict():
     agent = Agent(agent_id=1)
     agent.streams.A.prediction = "move_left"
     agent.streams.B.prediction = "move_right"  # Conflict!
-    
+
     proposals = agent.persona_ensemble.generate_proposals()
-    
+
     # Should have synthesis proposal
     synthesis_proposals = [p for p in proposals if p.is_synthesis]
     assert len(synthesis_proposals) > 0, "Should generate synthesis on conflict"
-    
+
     # Synthesis should have higher surprise potential
     synthesis = synthesis_proposals[0]
     assert synthesis.surprise_score > 0.3, "Synthesis should be surprising"
@@ -1088,11 +1088,11 @@ def check_architectural_violations():
         capture_output=True,
         text=True
     )
-    
+
     violations = []
     # Parse output and check for violations
     # (Implementation details depend on pydeps output format)
-    
+
     return violations
 
 if __name__ == "__main__":

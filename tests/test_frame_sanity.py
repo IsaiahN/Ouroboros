@@ -1,7 +1,8 @@
+from types import SimpleNamespace
+
 import pytest
 
 from core_gameplay import GameplayEngine
-from types import SimpleNamespace
 
 
 @pytest.fixture

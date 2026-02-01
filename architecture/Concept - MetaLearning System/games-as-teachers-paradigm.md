@@ -1,6 +1,6 @@
 # Games as Teachers Paradigm
-**Status**: TABLED - Implement if current changes don't breakthrough levels  
-**Date Conceived**: December 29, 2025  
+**Status**: TABLED - Implement if current changes don't breakthrough levels
+**Date Conceived**: December 29, 2025
 **Purpose**: Fundamental reframe from "solving puzzles" to "extracting lessons"
 
 ---
@@ -115,7 +115,7 @@ def extract_lesson(self, game_type, level, key_context):
 
 ### 3. CODS SYSTEM Reframe
 
-**Current Purpose:** "What operators can I use to play?"  
+**Current Purpose:** "What operators can I use to play?"
 **Reframed Purpose:** "What conceptual vocabulary do I have to describe the lesson?"
 
 - CODS isn't "tools to solve puzzles"
@@ -295,7 +295,7 @@ def record_misunderstanding(interpretation, contradiction):
 if my_win_rate > network_win_rate:
     trust_self()
 
-# Reframed  
+# Reframed
 if my_interpretations_transferred_successfully:
     trust_self()
 if peer_interpretations_helped_me_understand_new_games:

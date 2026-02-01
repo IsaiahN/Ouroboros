@@ -248,7 +248,7 @@ red_platform = detect_object(color=red)
 center_square = get_object(position=center)
 → "It's a square with white and gray pattern"
 
-# With affordance detection  
+# With affordance detection
 center_square = get_object(position=center)
 → "It's a reference object"
 → AFFORDANCE: "Defines rules for other objects"
@@ -448,11 +448,11 @@ surprise_level = surprise_magnitude(observation, prediction)
 if violates(solidity_bias):
     hypothesis = "Objects can pass through each other here"
     → Test teleportation/portal mechanics
-    
+
 if violates(contingency_bias):
     hypothesis = "My actions have delayed effects"
     → Test temporal dependencies
-    
+
 if violates(reference_object_affordance):
     hypothesis = "This object defines rules for others"
     → Test template/mapping mechanics
@@ -490,13 +490,13 @@ INNATE_PRIMITIVES = {
     'attention_primitives': REQUIRED,  # Can't learn without attention
     'affordance_primitives': REQUIRED, # Can't act without affordances
     'metacognitive_primitives': REQUIRED, # Can't learn to learn
-    
+
     # Physical intuition
     'physics_priors': WEAK,  # Help, but can be overridden
-    
+
     # Social learning
     'social_primitives': REQUIRED,  # Need for viral packages
-    
+
     # Everything else
     'higher_order_primitives': DISCOVERED,  # System must earn these
 }

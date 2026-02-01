@@ -15,11 +15,11 @@ import os
 
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
-import sqlite3
-from datetime import datetime
-from typing import Dict, List, Any
-import statistics
 import math
+import sqlite3
+import statistics
+from datetime import datetime
+from typing import Any, Dict, List
 
 
 class PrestigeAuditor:
@@ -41,11 +41,11 @@ class PrestigeAuditor:
         # Try to get prestige from agents table directly first
         try:
             cursor.execute("""
-                SELECT agent_id, 
+                SELECT agent_id,
                        json_extract(genome, '$.prestige_score') as prestige,
                        total_games_won,
                        avg_score_per_game
-                FROM agents 
+                FROM agents
                 WHERE is_active = 1
             """)
             agents = []

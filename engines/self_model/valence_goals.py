@@ -15,14 +15,15 @@ Design Principles:
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-import logging
 import json
+import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Set, Any
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +60,13 @@ class ValenceAssociation:
     game_type: str
     created_at: str = ""
     updated_at: str = ""
-    
+
     def update(self, new_valence: Valence, evidence_str: str) -> None:
         """Update with new evidence."""
         self.evidence_count += 1
         self.evidence.append(evidence_str)
         self.updated_at = datetime.now().isoformat()
-        
+
         # Adjust confidence based on consistency
         if new_valence == self.valence:
             self.confidence = min(1.0, self.confidence + 0.1)
@@ -91,7 +92,7 @@ class InferredGoal:
     evidence: List[str]
     achieved_count: int = 0
     failed_count: int = 0
-    
+
     @property
     def reliability(self) -> float:
         total = self.achieved_count + self.failed_count
@@ -115,10 +116,10 @@ class RegionClassification:
 class ValenceGoalEngine:
     """
     Manages valence associations and goal inference.
-    
+
     Usage:
         engine = ValenceGoalEngine(db_path)
-        
+
         # Record that touching red objects is bad
         engine.record_valence(
             object_id="color_3",
@@ -126,7 +127,7 @@ class ValenceGoalEngine:
             evidence="collision caused score decrease",
             game_type="sp80"
         )
-        
+
         # Infer goal from level end
         goal = engine.infer_goal_from_end(
             game_type="sp80",
@@ -135,23 +136,23 @@ class ValenceGoalEngine:
             final_frame=[[...]],
             score=100
         )
-        
+
         # Get valence for decision making
         valence = engine.get_valence("color_3", "sp80")
         if valence.valence == Valence.NEGATIVE:
             print("Avoid this object!")
     """
-    
+
     # Configurable thresholds
     CONFIDENCE_HIGH = 0.8
     CONFIDENCE_MEDIUM = 0.5
     CONFIDENCE_LOW = 0.3
     EVIDENCE_FOR_CERTAINTY = 5
-    
+
     def __init__(self, db_path: str = "core_data.db"):
         """
         Initialize valence goal engine.
-        
+
         Args:
             db_path: Path to database
         """
@@ -160,12 +161,12 @@ class ValenceGoalEngine:
             self.db = DatabaseInterface(db_path)
         except Exception as e:
             raise RuntimeError(f"[VALENCE] Failed to connect to database: {e}")
-        
+
         self._cache: Dict[str, ValenceAssociation] = {}
         self._goals: Dict[str, InferredGoal] = {}
         self._ensure_tables()
         logger.info("[VALENCE] Initialized")
-    
+
     def _ensure_tables(self) -> None:
         """Ensure required tables exist."""
         try:
@@ -184,7 +185,7 @@ class ValenceGoalEngine:
                     UNIQUE(object_id, game_type)
                 )
             """)
-            
+
             self.db.execute_query("""
                 CREATE TABLE IF NOT EXISTS inferred_goals (
                     goal_id TEXT PRIMARY KEY,
@@ -201,17 +202,17 @@ class ValenceGoalEngine:
                     UNIQUE(game_type, level)
                 )
             """)
-            
+
             self.db.execute_query("""
                 CREATE INDEX IF NOT EXISTS idx_valence_game
                 ON valence_associations(game_type)
             """)
-            
+
             logger.debug("[VALENCE] Tables verified")
         except Exception as e:
             logger.error(f"[VALENCE] Table creation failed: {e}")
             raise
-    
+
     def record_valence(
         self,
         object_id: str,
@@ -222,22 +223,22 @@ class ValenceGoalEngine:
     ) -> ValenceAssociation:
         """
         Record a valence association.
-        
+
         Args:
             object_id: Object identifier (e.g., "color_3")
             valence: The valence to associate
             evidence: Description of evidence
             game_type: Game type this applies to
             color: Optional explicit color value
-            
+
         Returns:
             Updated ValenceAssociation
         """
         if color is None:
             color = int(object_id.replace('color_', '')) if 'color_' in object_id else 0
-        
+
         cache_key = f"{object_id}_{game_type}"
-        
+
         # Check cache
         if cache_key in self._cache:
             assoc = self._cache[cache_key]
@@ -261,17 +262,17 @@ class ValenceGoalEngine:
                     created_at=datetime.now().isoformat(),
                     updated_at=datetime.now().isoformat()
                 )
-        
+
         self._cache[cache_key] = assoc
         self._save_valence(assoc)
-        
+
         logger.info(
             f"[VALENCE] {object_id} in {game_type}: "
             f"{valence.value} (conf={assoc.confidence:.2f})"
         )
-        
+
         return assoc
-    
+
     def get_valence(
         self,
         object_id: str,
@@ -279,24 +280,24 @@ class ValenceGoalEngine:
     ) -> Optional[ValenceAssociation]:
         """
         Get valence association for an object.
-        
+
         Args:
             object_id: Object identifier
             game_type: Game type
-            
+
         Returns:
             ValenceAssociation or None if unknown
         """
         cache_key = f"{object_id}_{game_type}"
-        
+
         if cache_key in self._cache:
             return self._cache[cache_key]
-        
+
         assoc = self._load_valence(object_id, game_type)
         if assoc:
             self._cache[cache_key] = assoc
         return assoc
-    
+
     def get_all_valences(
         self,
         game_type: str,
@@ -304,11 +305,11 @@ class ValenceGoalEngine:
     ) -> List[ValenceAssociation]:
         """
         Get all valence associations for a game type.
-        
+
         Args:
             game_type: Game type to query
             min_confidence: Minimum confidence threshold
-            
+
         Returns:
             List of ValenceAssociations
         """
@@ -318,19 +319,19 @@ class ValenceGoalEngine:
                 WHERE game_type = ? AND confidence >= ?
                 ORDER BY confidence DESC
             """, (game_type, min_confidence))
-            
+
             associations = []
             for row in rows:
                 assoc = self._row_to_valence(row)
                 if assoc:
                     associations.append(assoc)
-            
+
             return associations
-            
+
         except Exception as e:
             logger.error(f"[VALENCE] Failed to get valences: {e}")
             return []
-    
+
     def infer_goal_from_end(
         self,
         game_type: str,
@@ -342,7 +343,7 @@ class ValenceGoalEngine:
     ) -> Optional[InferredGoal]:
         """
         Infer goal from how a level ended.
-        
+
         Args:
             game_type: Game type
             level: Level number
@@ -350,33 +351,33 @@ class ValenceGoalEngine:
             final_frame: Frame at level end
             score: Final score
             action_history: Actions taken during level
-            
+
         Returns:
             InferredGoal or None
         """
         if not win:
             # Can't infer goal from loss (yet)
             return None
-        
+
         goal_id = f"goal_{game_type}_{level}"
-        
+
         # Analyze final frame for clues
         evidence = []
         goal_type = GoalType.UNKNOWN
         target_objects = []
         target_regions = []
-        
+
         # Check what's in final frame
         objects_present = self._find_objects_in_frame(final_frame)
-        
+
         # Heuristics for goal type
         if score > 0:
             evidence.append(f"Positive score ({score}) at win")
-            
+
             # If frame is mostly empty, might be "clear" goal
             total_cells = len(final_frame) * (len(final_frame[0]) if final_frame else 0)
             filled_cells = sum(1 for row in final_frame for c in row if c > 0)
-            
+
             if filled_cells < total_cells * 0.1:
                 goal_type = GoalType.CLEAR
                 evidence.append("Frame mostly cleared at win")
@@ -384,16 +385,16 @@ class ValenceGoalEngine:
                 goal_type = GoalType.REACH
                 evidence.append("Few objects remain - likely reached goal")
                 target_objects = [f"color_{c}" for c in objects_present]
-        
+
         # Check action patterns
         if action_history:
             click_count = sum(1 for a in action_history if a == "ACTION7")
             move_count = sum(1 for a in action_history if a in ["ACTION1", "ACTION2", "ACTION3", "ACTION4"])
-            
+
             if click_count > move_count * 2:
                 goal_type = GoalType.COLLECT
                 evidence.append(f"Many click actions ({click_count}) suggests collect goal")
-        
+
         # Create or update goal
         existing = self._load_goal(goal_id)
         if existing:
@@ -413,17 +414,17 @@ class ValenceGoalEngine:
                 evidence=evidence,
                 achieved_count=1
             )
-        
+
         self._save_goal(goal)
         self._goals[goal_id] = goal
-        
+
         logger.info(
             f"[VALENCE] Inferred goal for {game_type} L{level}: "
             f"{goal_type.value} (conf={goal.confidence:.2f})"
         )
-        
+
         return goal
-    
+
     def get_goal(
         self,
         game_type: str,
@@ -431,24 +432,24 @@ class ValenceGoalEngine:
     ) -> Optional[InferredGoal]:
         """
         Get inferred goal for a level.
-        
+
         Args:
             game_type: Game type
             level: Level number
-            
+
         Returns:
             InferredGoal or None
         """
         goal_id = f"goal_{game_type}_{level}"
-        
+
         if goal_id in self._goals:
             return self._goals[goal_id]
-        
+
         goal = self._load_goal(goal_id)
         if goal:
             self._goals[goal_id] = goal
         return goal
-    
+
     def classify_frame_regions(
         self,
         frame: List[List[int]],
@@ -457,40 +458,40 @@ class ValenceGoalEngine:
     ) -> List[RegionClassification]:
         """
         Classify regions of a frame based on valence.
-        
+
         Args:
             frame: Current frame
             game_type: Game type for valence lookup
             grid_size: Size of grid regions to classify
-            
+
         Returns:
             List of RegionClassifications
         """
         height = len(frame)
         width = len(frame[0]) if frame else 0
-        
+
         valences = {a.object_id: a for a in self.get_all_valences(game_type)}
-        
+
         regions = []
         region_id = 0
-        
+
         # Divide frame into grid
         step_y = max(1, height // grid_size)
         step_x = max(1, width // grid_size)
-        
+
         for gy in range(grid_size):
             for gx in range(grid_size):
                 min_y = gy * step_y
                 max_y = min((gy + 1) * step_y, height)
                 min_x = gx * step_x
                 max_x = min((gx + 1) * step_x, width)
-                
+
                 # Analyze region
                 positive_count = 0
                 negative_count = 0
                 has_goal = False
                 has_hazard = False
-                
+
                 for y in range(min_y, max_y):
                     for x in range(min_x, max_x):
                         color = frame[y][x]
@@ -504,7 +505,7 @@ class ValenceGoalEngine:
                                 elif v.valence == Valence.NEGATIVE:
                                     negative_count += 1
                                     has_hazard = True
-                
+
                 # Determine dominant valence
                 if positive_count > negative_count:
                     dominant = Valence.POSITIVE
@@ -512,7 +513,7 @@ class ValenceGoalEngine:
                     dominant = Valence.NEGATIVE
                 else:
                     dominant = Valence.NEUTRAL
-                
+
                 regions.append(RegionClassification(
                     region_id=f"region_{region_id}",
                     bounds=(min_y, min_x, max_y, max_x),
@@ -523,9 +524,9 @@ class ValenceGoalEngine:
                     visit_count=0
                 ))
                 region_id += 1
-        
+
         return regions
-    
+
     def predict_reward(
         self,
         action: str,
@@ -534,22 +535,22 @@ class ValenceGoalEngine:
     ) -> Tuple[float, float]:
         """
         Predict reward for an action.
-        
+
         Args:
             action: Action to take
             target_object: Object being targeted
             game_type: Game type
-            
+
         Returns:
             Tuple of (expected_reward, confidence)
         """
         if not target_object:
             return (0.0, 0.0)
-        
+
         valence = self.get_valence(target_object, game_type)
         if not valence:
             return (0.0, 0.0)
-        
+
         # Map valence to expected reward
         if valence.valence == Valence.POSITIVE:
             expected = 10.0
@@ -559,13 +560,13 @@ class ValenceGoalEngine:
             expected = 0.0
         else:
             expected = 0.0
-        
+
         return (expected, valence.confidence)
-    
+
     # =========================================================================
     # PRIVATE HELPERS
     # =========================================================================
-    
+
     def _load_valence(
         self,
         object_id: str,
@@ -577,15 +578,15 @@ class ValenceGoalEngine:
                 SELECT * FROM valence_associations
                 WHERE object_id = ? AND game_type = ?
             """, (object_id, game_type))
-            
+
             if rows:
                 return self._row_to_valence(rows[0])
             return None
-            
+
         except Exception as e:
             logger.warning(f"[VALENCE] Failed to load valence: {e}")
             return None
-    
+
     def _row_to_valence(self, row: Dict[str, Any]) -> Optional[ValenceAssociation]:
         """Convert database row to ValenceAssociation."""
         try:
@@ -604,13 +605,13 @@ class ValenceGoalEngine:
         except Exception as e:
             logger.warning(f"[VALENCE] Failed to parse valence row: {e}")
             return None
-    
+
     def _save_valence(self, assoc: ValenceAssociation) -> None:
         """Save valence to database."""
         try:
             self.db.execute_query("""
                 INSERT INTO valence_associations
-                (object_id, color, game_type, valence, confidence, evidence_count, 
+                (object_id, color, game_type, valence, confidence, evidence_count,
                  evidence_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(object_id, game_type) DO UPDATE SET
@@ -632,14 +633,14 @@ class ValenceGoalEngine:
             ))
         except Exception as e:
             logger.error(f"[VALENCE] Failed to save valence: {e}")
-    
+
     def _load_goal(self, goal_id: str) -> Optional[InferredGoal]:
         """Load goal from database."""
         try:
             rows = self.db.execute_query("""
                 SELECT * FROM inferred_goals WHERE goal_id = ?
             """, (goal_id,))
-            
+
             if rows:
                 row = rows[0]
                 return InferredGoal(
@@ -655,11 +656,11 @@ class ValenceGoalEngine:
                     failed_count=row['failed_count']
                 )
             return None
-            
+
         except Exception as e:
             logger.warning(f"[VALENCE] Failed to load goal: {e}")
             return None
-    
+
     def _save_goal(self, goal: InferredGoal) -> None:
         """Save goal to database."""
         try:
@@ -689,7 +690,7 @@ class ValenceGoalEngine:
             ))
         except Exception as e:
             logger.error(f"[VALENCE] Failed to save goal: {e}")
-    
+
     def _find_objects_in_frame(self, frame: List[List[int]]) -> Set[int]:
         """Find all object colors in frame."""
         colors = set()

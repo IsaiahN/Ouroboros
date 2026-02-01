@@ -14,9 +14,9 @@ Usage:
     python analyze_dependencies.py --orphans       # Find orphaned modules
 """
 
+import os
 import subprocess
 import sys
-import os
 from pathlib import Path
 
 # Key module groups for focused analysis
@@ -103,7 +103,7 @@ def analyze_cycles():
         "--show-cycles",
         "--no-output",
     ], capture_output=True, text=True)
-    
+
     if "No cycles found" in result.stdout or not result.stdout.strip():
         print("[OK] No circular imports detected")
     else:
@@ -135,10 +135,10 @@ def analyze_core_gameplay():
 def analyze_reasoning_system():
     """Analyze reasoning/consciousness modules."""
     print("\n=== Reasoning System Dependencies ===")
-    
+
     # Check which modules exist
     existing = [m for m in REASONING_MODULES if Path(f"{m}.py").exists()]
-    
+
     for module in existing[:3]:  # Limit to avoid cluttering
         run_pydeps([
             f"{module}.py",
@@ -152,11 +152,11 @@ def analyze_reasoning_system():
 def find_orphaned_modules():
     """Find modules that aren't imported by anything."""
     print("\n=== Orphaned Module Analysis ===")
-    
+
     # Get all Python files
-    all_py_files = set(p.stem for p in Path(".").glob("*.py") 
+    all_py_files = set(p.stem for p in Path(".").glob("*.py")
                        if not p.name.startswith("__"))
-    
+
     # Get all imports by scanning files
     imported_modules = set()
     for py_file in Path(".").glob("*.py"):
@@ -178,13 +178,13 @@ def find_orphaned_modules():
                         imported_modules.add(mod)
         except Exception as e:
             pass
-    
+
     # Find orphans (in project but never imported)
     orphans = all_py_files - imported_modules
-    
+
     # Filter out known entry points
     entry_points = {
-        "run_evolution", "autonomous_evolution_runner", 
+        "run_evolution", "autonomous_evolution_runner",
         "safe_cleanup", "diagnose_reasoning", "analyze_dependencies",
         "check_bugs", "quick_check", "revive_agents",
         "automated_assessment_runner", "fix_sequences",
@@ -194,16 +194,16 @@ def find_orphaned_modules():
         "pycache_guard", "theory_alignment_checker",
         "prestige_parasite_detector", "abstraction_schema",
     }
-    
+
     true_orphans = orphans - entry_points
-    
+
     if true_orphans:
         print(f"[WARNING] Potentially orphaned modules ({len(true_orphans)}):")
         for orphan in sorted(true_orphans):
             print(f"  - {orphan}.py")
     else:
         print("[OK] No orphaned modules detected")
-    
+
     print(f"\n[INFO] Entry points not checked: {len(entry_points)}")
     print(f"[INFO] Total modules: {len(all_py_files)}")
     print(f"[INFO] Imported modules: {len(imported_modules)}")
@@ -212,17 +212,17 @@ def find_orphaned_modules():
 def show_dependency_stats():
     """Show import statistics."""
     print("\n=== Dependency Statistics ===")
-    
+
     stats = {}
     for py_file in Path(".").glob("*.py"):
         if py_file.name.startswith("__"):
             continue
-        
+
         try:
             content = py_file.read_text(encoding='utf-8', errors='ignore')
             import_count = 0
             local_imports = 0
-            
+
             for line in content.split('\n'):
                 line = line.strip()
                 if line.startswith('import ') or line.startswith('from '):
@@ -233,7 +233,7 @@ def show_dependency_stats():
                         mod = parts[1].split('.')[0]
                         if Path(f"{mod}.py").exists():
                             local_imports += 1
-            
+
             stats[py_file.stem] = {
                 'total': import_count,
                 'local': local_imports,
@@ -241,15 +241,15 @@ def show_dependency_stats():
             }
         except Exception:
             pass
-    
+
     # Sort by local imports (most connected)
     sorted_stats = sorted(stats.items(), key=lambda x: x[1]['local'], reverse=True)
-    
+
     print("\nTop 15 Most Connected Modules (by local imports):")
     print("-" * 50)
     for name, data in sorted_stats[:15]:
         print(f"  {name:40} local:{data['local']:3} external:{data['external']:3}")
-    
+
     print("\nModules with ZERO local imports (isolated):")
     print("-" * 50)
     isolated = [(n, d) for n, d in sorted_stats if d['local'] == 0]
@@ -267,42 +267,42 @@ def main():
     parser.add_argument("--orphans", action="store_true", help="Find orphaned modules")
     parser.add_argument("--stats", action="store_true", help="Show dependency statistics")
     parser.add_argument("--all", action="store_true", help="Run all analyses")
-    
+
     args = parser.parse_args()
-    
+
     # Default to stats if no args
     if not any(vars(args).values()):
         args.stats = True
         args.orphans = True
-    
+
     print("=" * 60)
     print("BitterTruth-AI Dependency Analyzer")
     print("=" * 60)
-    
+
     # Check for graphviz for graph operations
     needs_graphviz = args.full or args.cycles or args.core or args.reasoning or args.all
     if needs_graphviz and not check_graphviz():
         print("\n[INFO] Running non-graphviz analyses only...")
         args.full = args.cycles = args.core = args.reasoning = False
-    
+
     if args.stats or args.all:
         show_dependency_stats()
-    
+
     if args.orphans or args.all:
         find_orphaned_modules()
-    
+
     if args.cycles or args.all:
         analyze_cycles()
-    
+
     if args.full or args.all:
         analyze_full_system()
-    
+
     if args.core or args.all:
         analyze_core_gameplay()
-    
+
     if args.reasoning or args.all:
         analyze_reasoning_system()
-    
+
     print("\n" + "=" * 60)
     print("Analysis complete!")
     if needs_graphviz and check_graphviz():

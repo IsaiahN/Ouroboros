@@ -21,7 +21,7 @@ import logging
 import random
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from database_interface import DatabaseInterface
@@ -43,42 +43,42 @@ except ImportError:
 class WeavingReporter:
     """
     Generates self-reflection "weaving reports" for every action.
-    
+
     DELEGATION: This class now delegates to IThread for report generation.
     IThread is the single source of truth for Two Streams consciousness.
-    
+
     This class is kept for backward compatibility and adds:
     - Local database storage with sampling
     - Outcome tracking
-    
+
     Local Database Storage: Uses sampling to prevent bloat:
     - Sampling Rate: Store 1 in 10 decisions locally (10%)
     - Exception: Always store if conflict_detected = True
     - Exception: Always store level completion / game end decisions
     """
-    
+
     # Sampling rate for local storage (10% of non-exceptional decisions)
     SAMPLING_RATE = 0.1
-    
+
     def __init__(self, db: 'DatabaseInterface', i_thread: Optional['IThreadType'] = None):
         """Initialize weaving reporter.
-        
+
         Args:
             db: Database interface
             i_thread: Optional IThread instance for delegation
         """
         self.db = db
         self._i_thread = i_thread
-        
+
         # Create IThread if not provided and available
         if self._i_thread is None and ITHREAD_AVAILABLE and IThread is not None:
             try:
                 self._i_thread = IThread(db)
             except Exception as e:
                 logger.debug(f"Could not create IThread for WeavingReporter: {e}")
-        
+
         self._ensure_tables()
-    
+
     def _ensure_tables(self) -> None:
         """Ensure decision_weaving_reports table exists."""
         # Table kept for backward compatibility and local storage
@@ -106,10 +106,10 @@ class WeavingReporter:
             )
         """)
         self.db.execute_query("""
-            CREATE INDEX IF NOT EXISTS idx_weaving_agent_game 
+            CREATE INDEX IF NOT EXISTS idx_weaving_agent_game
             ON decision_weaving_reports(agent_id, game_id)
         """)
-    
+
     def generate_report(
         self,
         agent_id: str,
@@ -128,10 +128,10 @@ class WeavingReporter:
     ) -> Dict[str, Any]:
         """
         Generate a weaving report for an action decision.
-        
+
         DELEGATION: Delegates to IThread.generate_weaving_report() when available.
         Falls back to local implementation for backward compatibility.
-        
+
         Args:
             agent_id: Agent making the decision
             game_id: Current game
@@ -146,7 +146,7 @@ class WeavingReporter:
             role_fit_score: How well agent fits their role (0-1)
             sensation_profile: Agent's sensation mappings
             alternative_action: What network recommended (if different)
-            
+
         Returns:
             Complete weaving report dictionary for API
         """
@@ -169,12 +169,12 @@ class WeavingReporter:
                 )
             except Exception as e:
                 logger.debug(f"IThread delegation failed, using fallback: {e}")
-        
+
         # FALLBACK: Original local implementation
         # Calculate internal network inputs
         # Emotional: Map navigation_state from [-1,1] to [0,1]
         emotional_input = (navigation_state + 1.0) / 2.0
-        
+
         # Semantic: Average of top sensation scores (if any)
         object_sensations = sensation_profile.get('object_sensations', {}) if sensation_profile else {}
         if object_sensations:
@@ -184,24 +184,24 @@ class WeavingReporter:
             semantic_input = (semantic_input + 1.0) / 2.0
         else:
             semantic_input = 0.5  # Neutral if no sensations
-        
+
         # Identity: Average of role_confidence and role_fit_score
         identity_input = (role_confidence + role_fit_score) / 2.0
-        
+
         # Calculate final decision weight using Two-Streams formula
         # final_weight = private * bias + network * (1 - bias)
         alpha = self_network_bias
         final_decision_weight = (
-            private_memory_strength * alpha + 
+            private_memory_strength * alpha +
             network_recommendation_strength * (1.0 - alpha)
         )
-        
+
         # Detect conflict (significant difference between private and network)
         conflict_detected = abs(private_memory_strength - network_recommendation_strength) > 0.3
-        
+
         # Build human-readable summary
         emotion_label = self._get_emotion_label(navigation_state)
-        
+
         report = {
             'report_id': f"weave_{uuid.uuid4().hex[:12]}",
             'agent_id': agent_id,
@@ -209,40 +209,40 @@ class WeavingReporter:
             'level_number': level_number,
             'action_number': action_number,
             'timestamp': datetime.now().isoformat(),
-            
+
             # Internal networks (Three Streams)
             'emotional_input': round(emotional_input, 3),
             'semantic_input': round(semantic_input, 3),
             'identity_input': round(identity_input, 3),
-            
+
             # Two-Streams weighting
             'private_memory_strength': round(private_memory_strength, 3),
             'network_recommendation_strength': round(network_recommendation_strength, 3),
             'self_network_bias': round(self_network_bias, 3),
             'final_decision_weight': round(final_decision_weight, 3),
-            
+
             # wA/wB state
             'w_a': round(self_network_bias, 3),  # wA = self_network_bias in fallback
             'w_b': round(1.0 - self_network_bias, 3),
-            
+
             # Decision
             'chosen_action': chosen_action,
             'alternative_action': alternative_action,
             'conflict_detected': conflict_detected,
             'consciousness_intensity': 'deliberative' if conflict_detected else 'automatic',
-            
+
             # Narrative summary
             'narrative': self._build_narrative(
                 emotion_label, private_memory_strength, network_recommendation_strength,
                 alpha, chosen_action, alternative_action, conflict_detected
             ),
-            
+
             # Outcome (to be filled in later)
             'outcome_correct': None
         }
-        
+
         return report
-    
+
     def _get_emotion_label(self, navigation_state: float) -> str:
         """Get human-readable emotion label from navigation state."""
         if navigation_state < -0.5:
@@ -255,7 +255,7 @@ class WeavingReporter:
             return 'curious'
         else:
             return 'confident'
-    
+
     def _build_narrative(
         self,
         emotion: str,
@@ -268,10 +268,10 @@ class WeavingReporter:
     ) -> str:
         """Build human-readable narrative of decision."""
         parts = []
-        
+
         # Emotional state
         parts.append(f"Feeling {emotion}")
-        
+
         # Stream preference with strength context
         if alpha > 0.6:
             parts.append(f"trusting own experience (strength={private_strength:.2f})")
@@ -279,25 +279,25 @@ class WeavingReporter:
             parts.append(f"following network wisdom (strength={network_strength:.2f})")
         else:
             parts.append(f"balancing self ({private_strength:.2f}) and network ({network_strength:.2f})")
-        
+
         # Conflict
         if conflict:
             if alternative:
                 parts.append(f"(conflicted: network suggested {alternative})")
             else:
                 parts.append("(internal conflict detected)")
-        
+
         # Decision
         parts.append(f"-> {chosen_action}")
-        
+
         return " | ".join(parts)
-    
+
     def format_for_api(self, report: Dict[str, Any]) -> Dict[str, Any]:
         """
         Format weaving report for inclusion in API reasoning payload.
-        
+
         DELEGATION: Uses IThread.format_weaving_for_api() when available.
-        
+
         Returns a compact version suitable for the 16KB limit.
         """
         # Delegate to IThread if available
@@ -306,7 +306,7 @@ class WeavingReporter:
                 return self._i_thread.format_weaving_for_api(report)
             except Exception:
                 pass  # Fall through to local implementation
-        
+
         # Fallback: local implementation
         return {
             'emotional_network': report.get('emotional_input', 0.5),
@@ -322,11 +322,11 @@ class WeavingReporter:
             'consciousness': report.get('consciousness_intensity', 'automatic'),
             'narrative': report.get('narrative', '')
         }
-    
+
     def should_store_locally(self, report: Dict[str, Any], is_terminal: bool = False) -> bool:
         """
         Determine if this report should be stored in local database.
-        
+
         Storage criteria (to prevent bloat):
         - Always store if conflict_detected = True
         - Always store if is_terminal (level/game end)
@@ -335,14 +335,14 @@ class WeavingReporter:
         # Always store conflicts
         if report.get('conflict_detected'):
             return True
-        
+
         # Always store terminal decisions
         if is_terminal:
             return True
-        
+
         # Otherwise, sample
         return random.random() < self.SAMPLING_RATE
-    
+
     def store_report(self, report: Dict[str, Any]) -> None:
         """Store a weaving report in the database."""
         self.db.execute_query("""
@@ -362,7 +362,7 @@ class WeavingReporter:
             report['chosen_action'], report['alternative_action'],
             report['conflict_detected'], report.get('outcome_correct')
         ))
-    
+
     def update_outcome(self, report_id: str, outcome_correct: bool) -> None:
         """Update the outcome for a stored report (for meta-learning)."""
         self.db.execute_query("""

@@ -783,7 +783,7 @@ Child might try:
 
 **For novel problems, the solution process is:**
 
-1. **Problem Recognition** 
+1. **Problem Recognition**
    - Observer-self notices: "This is new, I don't have a solution"
 
 2. **Ensemble Consultation**
@@ -1028,7 +1028,7 @@ Someone with rich, varied internal models will:
 
 **Expert learner:**
 - Has rich ensemble of cognitive models
-- Switches perspectives fluidly  
+- Switches perspectives fluidly
 - Synthesizes across frameworks
 - Constantly adding new models
 - Meta-aware of which models to deploy when

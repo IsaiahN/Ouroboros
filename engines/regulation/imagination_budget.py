@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 """
 Imagination/Mental Modeling Budget Helper
@@ -118,46 +119,46 @@ def compute_mental_modeling_budget(
 class ImaginationBudgetManager:
     """
     Manages imagination budget with performance-based adjustments.
-    
+
     Key Features:
     - Budget decreases on poor performance (fewer personas allowed)
     - Budget increases on wins (more cognitive exploration allowed)
     - Gates synthesis by grounding_score
     - Tracks budget over time for adaptive control
     """
-    
+
     def __init__(self, initial_budget: float = 1.0):
         self.current_budget = initial_budget
         self.base_budget = initial_budget
         self.min_budget = 0.1
         self.max_budget = 3.0
-        
+
         # Performance tracking
         self.recent_outcomes: list = []  # List of (score, timestamp)
         self.max_history = 50
-        
+
         # Win/loss tracking for adjustment
         self.consecutive_zeros = 0
         self.consecutive_wins = 0
-    
+
     def update_from_outcome(self, score: int, is_win: bool = False) -> float:
         """
         Update budget based on game outcome.
-        
+
         Args:
             score: Final score from game
             is_win: Whether this was a full win
-            
+
         Returns:
             New budget value
         """
         import time
-        
+
         # Track outcome
         self.recent_outcomes.append((score, time.time()))
         if len(self.recent_outcomes) > self.max_history:
             self.recent_outcomes = self.recent_outcomes[-self.max_history:]
-        
+
         # Update streaks
         if score == 0:
             self.consecutive_zeros += 1
@@ -169,28 +170,28 @@ class ImaginationBudgetManager:
             # Positive score but not win
             self.consecutive_zeros = 0
             self.consecutive_wins = 0
-        
+
         # Adjust budget
         if self.consecutive_zeros >= 3:
             # Poor performance - reduce budget (fewer personas/speculation)
             decay = 0.9 ** (self.consecutive_zeros - 2)
             self.current_budget = max(self.min_budget, self.current_budget * decay)
-        
+
         elif self.consecutive_wins >= 2:
             # Good performance - increase budget (more exploration allowed)
             boost = 1.1 ** min(self.consecutive_wins, 5)
             self.current_budget = min(self.max_budget, self.current_budget * boost)
-        
+
         elif score > 0:
             # Positive progress - slight recovery
             self.current_budget = min(self.base_budget, self.current_budget * 1.05)
-        
+
         return self.current_budget
-    
+
     def get_persona_allowance(self) -> int:
         """
         Get how many personas are allowed given current budget.
-        
+
         Budget -> Persona count mapping:
         - < 0.3: Only 3 personas (minimal)
         - 0.3-0.7: Up to 6 personas
@@ -205,11 +206,11 @@ class ImaginationBudgetManager:
             return 9
         else:
             return 12
-    
+
     def can_speculate(self, grounding_score: float = 1.0) -> bool:
         """
         Check if speculation (ungrounded thinking) is allowed.
-        
+
         Low grounding + low budget = no speculation allowed.
         """
         if self.current_budget < 0.3:
@@ -220,15 +221,15 @@ class ImaginationBudgetManager:
         else:
             # High budget - speculation allowed
             return True
-    
+
     def can_spawn_investigator(self) -> bool:
         """Check if we have budget to spawn investigating personas."""
         return self.current_budget >= 0.5
-    
+
     def get_synthesis_depth(self) -> int:
         """
         Get how many personas can participate in synthesis.
-        
+
         More budget = deeper synthesis with more voices.
         """
         if self.current_budget < 0.3:
@@ -239,19 +240,19 @@ class ImaginationBudgetManager:
             return 4
         else:
             return 5  # Full synthesis
-    
+
     def reset_budget(self) -> None:
         """Reset budget to base value (e.g., on new level)."""
         self.current_budget = self.base_budget
         self.consecutive_zeros = 0
         self.consecutive_wins = 0
-    
+
     def get_stats(self) -> Dict[str, float]:
         """Get current budget statistics."""
         avg_recent_score = 0.0
         if self.recent_outcomes:
             avg_recent_score = sum(o[0] for o in self.recent_outcomes) / len(self.recent_outcomes)
-        
+
         return {
             'current_budget': self.current_budget,
             'base_budget': self.base_budget,

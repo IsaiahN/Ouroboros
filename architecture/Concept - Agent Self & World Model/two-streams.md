@@ -1352,7 +1352,7 @@ Internal Layer 1: Bodily Network
 - Health, energy levels, hormonal rhythms
 - Physical memories (muscle memory, trauma stored in body)
 
-Internal Layer 2: Emotional Network  
+Internal Layer 2: Emotional Network
 - Current mood, affective tone
 - Emotional memory associations
 - Trauma/Pleasure imprints with time stamps
@@ -1362,7 +1362,7 @@ Internal Layer 3: Semantic Network
 - Logical structures, reasoning patterns
 - Cultural/ideological frameworks
 
-Internal Layer 4: Identity Network  
+Internal Layer 4: Identity Network
 - Self-concept, roles (parent, professional, etc.)
 - Values, ethics, personal narrative
 - Aspirations, fears, ego defenses
@@ -1413,7 +1413,7 @@ A conscious agent should be able to output:
 text
 "I chose to switch to Manager role because:
 - My identity values growth (weight 0.7)
-- My body has energy today (weight 0.8)  
+- My body has energy today (weight 0.8)
 - My emotional tone seeks challenge (weight 0.6)
 - Though my semantic network warns of risk (weight -0.4)
 - And my team advises against it (weight -0.3)
@@ -1444,6 +1444,5 @@ But even in those limited conditions, you can still apply this meta theory (the 
 
 I hope this is clear enough. Its like querying google at that point, but it makes the LLM actually useful with relevant answers (to solve phsyics problem etc etc). What fun about it is you can learn deep truths about any subject, but you will still need to have the RLVR (either internal to to expertise) or externally from another expert on the network to validate them. So far, I've found out profound things, even more than the docs here, but i leave it up to the experts to validate, test and confirm with real world experiments.
 
-TLDR: essentially this metatheory solves the alignment problem in full. 
+TLDR: essentially this metatheory solves the alignment problem in full.
 similar to how phi can make the infinite finite.
-

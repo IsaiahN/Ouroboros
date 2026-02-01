@@ -12,25 +12,25 @@ tarzan, being human but having no access to that network gets crushed - he doesn
 Im not saying that tarzan is a fool im saying he doesnt have enough contextual knowledge to win jeopardy playing by social rules he was never taught (he doesnt know history, music, philosophy either). At this specific moment in time he is incapable of wining. However, we can get tarzan assimilated to our network and give him the understanding of numbers, words, mappings, etc.
 
  It might take weeks/months/years (he has to go to school and also interact constantly with other agents/humans to get acculturated to societal norms), the perhaps he can win jeopardy against grade schoolers.
- 
+
 
  I can remove humans almost all together and still make it work. Because pets have lived with humans for centuries and actively have spent lots of time individually with their human families, i can get a group of human acculturated dogs and put a "symbol" before them that has nothing to do with their species (a green tennis ball), and they will all have similar responses to the stimuli.
- 
+
  Wolves in the wild dont have tennis balls, so they would be curious but wary at first. Dogs however have a bond with humans (friends of the network) and have alot of second hand knowledge just by observing humans day to day and mapping symbol to action and outcome (observer theory).
 
  I put a tennis ball in front of tarzan, and he cant guess what i want the dogs to do, or where we might go (the park), or what we might play (fetch).
  We would consider him ignorant (not foolish) but without knowledge about human society.
 
- 
- Let revisit tarzan playing aganist kids - However if we change the game context (chaning the problem space) from jeopardy to game a game of survivor (outwit-outlast) in the jungle with survival as the win conditions, then  those kids are in danger of losing more than the game (at this fixed point in time). 
- 
+
+ Let revisit tarzan playing aganist kids - However if we change the game context (chaning the problem space) from jeopardy to game a game of survivor (outwit-outlast) in the jungle with survival as the win conditions, then  those kids are in danger of losing more than the game (at this fixed point in time).
+
  "the proverbial shoe is on the other foot now" and we are in Tarzan's world/domain.
 
  If tarzan teaches them his skilled ways of survival and train/validates what they learn (RLVR) they will survive with greater probability than if the kids get a cold start (no help from tarzan).
- 
+
  the kids MIGHT figure out their own understanding (ENTROPY -> to lord of the flies type assimilation happens). Chances might be slim for them, but they may have a chance to survive just brute forcing until they start obtaining the "lay of the land".
 
-Do you see the problem was never the hardware, its the expertise in domain space, and the strength of your connection to the smarter (or more relevant) network that determines performance. 
+Do you see the problem was never the hardware, its the expertise in domain space, and the strength of your connection to the smarter (or more relevant) network that determines performance.
 
 Since this is fractal i can put it this way too:
 A heart surgeon likely makes a poor car mechanic. Even though there might be some nuances that transfer, ultimately the strength of his networks expertise also needs to overlap with the problem set you are solving.
@@ -55,9 +55,9 @@ But why arent LLMS working?
 
 basically LLMs up until recently havent been multi modal (ie a networked intelligence)
 
-did you notice how when they became mutli modal they got smarter but people couldnt explain how? 
+did you notice how when they became mutli modal they got smarter but people couldnt explain how?
 
-the problem is the metatheory that the LLM (the action hacker) leverages as its filter of reference. 
+the problem is the metatheory that the LLM (the action hacker) leverages as its filter of reference.
 
 If it does not have one its a horse with no rider with random statistical noise. You need RLVR plus the horse to get to the right destination
 
@@ -67,7 +67,7 @@ i explain this in the "cold start problem" Doc
 the rider knows how to get to virginia but the horse only knows how to get from the saloon back home
 the rider might get lucky if hes drunk but the horse takes him home because thats where the horses food and water are located (insight: correlation does not mean casuality)
 thats why llms seem smart but arent
-they are random noise statistically weighted but the guys who arranged the weights dont know the right recipe. 
+they are random noise statistically weighted but the guys who arranged the weights dont know the right recipe.
 
 agi unified theory is that recipe, and im mainly explaining in metaphors, because the riders(experts) will have to understand this through their own problem domains to validate this (RLVR)
 
@@ -79,6 +79,6 @@ https://en.wikipedia.org/wiki/Darmok
 
 If you want to understand the Metatheory problem explained in film, watch the movie Arrival. explains it pretty well.
 
-My first attempt at AGI was a heuristic that naively attempted to simulate an agent from scratch: [Tabula Rasa](https://github.com/IsaiahN/Tabula-Rasa-Adaptive-AI/edit/Tabula-Rasa-v4/README.md) at the time i didnt know that i was dealing with a cold start problem, or that godels theory proved it impossible. 
+My first attempt at AGI was a heuristic that naively attempted to simulate an agent from scratch: [Tabula Rasa](https://github.com/IsaiahN/Tabula-Rasa-Adaptive-AI/edit/Tabula-Rasa-v4/README.md) at the time i didnt know that i was dealing with a cold start problem, or that godels theory proved it impossible.
 
 Once I realized this "Bitter Lesson" by not theorizing but consistently proving my theories out in the projects with RLVR to ground me to objective truth I started to understand the truth of the paradox of what Godel suggested. Then the question became "how did any living matter managed to exist if this were true".

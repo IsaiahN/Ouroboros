@@ -376,7 +376,7 @@ Note: Qualia is not necessary for emergent intelligence. A good example of this 
 
 ### The Woven Self
 
-# 
+#
 
 Consciousness isn't a single, static thing—it's a **thread weaving through overlapping networks**. You, the "I," are that singular thread passing through multiple layers: the id, the ego, and more. Even within your private thoughts and memories, you contain an internal network shaped by semantic feelings, mental history, and bodily states.
 
@@ -386,7 +386,7 @@ CRITICAL NOTE: Network intelligence is the "horse", and RLVR (Reinforcement Lear
 
 ### What Qualia Actually Is
 
-# 
+#
 
 **Qualia—the subjective "what it's like" of experience—emerges from three things mixing together in real-time:**
 
@@ -400,7 +400,7 @@ This is why you **cannot pre-describe** the qualia of an agent that doesn't yet 
 
 ### The JiiJii Principle
 
-# 
+#
 
 Consider this example:
 
@@ -545,7 +545,7 @@ $$\text{toxicity}(t) = \text{initial\_toxicity} \times (1 - \text{decay\_rate} \
 **Role-Based Pariah Tolerance**:
 Different roles have different relationships with network failure wisdom:
 - **Exploiters**: 80% tolerance (meant to break through)
-- **Optimizers**: 60% tolerance (refining known paths)  
+- **Optimizers**: 60% tolerance (refining known paths)
 - **Pioneers**: 30% tolerance (cautious on frontier)
 - **Generalists**: 0% tolerance (maintains network wisdom)
 
@@ -557,7 +557,7 @@ When multiple agents freeze on the same game/level, the system temporarily boost
 ---
 #### Youth Selection Bonus:
 
-There is a fixed limit to how many agents can work on a given problem at the same time (computational, or even physical constraints — which cause diminishing returns). This requires selection be carried out, which is usually based on performance across all active agents regardless of age. 
+There is a fixed limit to how many agents can work on a given problem at the same time (computational, or even physical constraints — which cause diminishing returns). This requires selection be carried out, which is usually based on performance across all active agents regardless of age.
 
 If the network gets more intelligent and robust with every generation, then the **later generations of the species/agents should have a better understanding of the current problem space**, but risk being crowded out by more experienced agents.
 
@@ -606,7 +606,7 @@ The network demonstrates emergent intelligence if:
 
 **Problem**: No single system can be both plastic (learn new) and stable (remember old).
 
-**Solution**: 
+**Solution**:
 - Individuals specialize (stability at agent level)
 - Network generalizes (plasticity at collective level)
 - Viral packages transfer knowledge without retraining

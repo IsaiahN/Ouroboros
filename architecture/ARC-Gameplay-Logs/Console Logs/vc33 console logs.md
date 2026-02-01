@@ -3,7 +3,7 @@ ACTION6 to API with coordinates (31, 32)
 2026-01-09 07:16:12,559 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (52,12)
 2026-01-09 07:16:12,571 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:12,572 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 143x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:12,624 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:12,624 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:12,691 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:12,695 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -16,7 +16,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:12,854 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:12,861 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (27,61)
 2026-01-09 07:16:12,875 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:12,876 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 80x consecutively. Will try alternative prediction types.2026-01-09 07:16:12,936 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:12,876 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 80x consecutively. Will try alternative prediction types.2026-01-09 07:16:12,936 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:13,008 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:13,011 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -38,7 +38,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:13,506 - core_gameplay - INFO - [QUESTIONING] ACTION1 blocked by ['Q9'], substituting ACTION6
 2026-01-09 07:16:13,508 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION1... -> forced exploration' then 1 should cause 'object_control'
 2026-01-09 07:16:13,557 - agent_self_model - INFO - [NETWORK-INVENTORY] ls20 L2: 2 toggleable, 25 moveable, 0 interactable positions
-2026-01-09 07:16:13,569 - core_gameplay - INFO - [FRAME->SELF] ACTION4 caused color_9 
+2026-01-09 07:16:13,569 - core_gameplay - INFO - [FRAME->SELF] ACTION4 caused color_9
 to move right
 2026-01-09 07:16:13,660 - arc_api_client - INFO - Sending ACTION1 to API
 2026-01-09 07:16:13,675 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
@@ -46,7 +46,7 @@ to move right
 2026-01-09 07:16:13,805 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:13,810 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (60,12)
 2026-01-09 07:16:13,873 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:13,874 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 90x consecutively. Will try alternative prediction types.2026-01-09 07:16:13,890 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:13,874 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 90x consecutively. Will try alternative prediction types.2026-01-09 07:16:13,890 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:13,979 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:13,984 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -58,8 +58,8 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:14,156 - arc_api_client - INFO - ACTION2 API response - State: NOT_FINISHED, Score: 2
 2026-01-09 07:16:14,323 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:14,326 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'object_control', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:14,344 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
-from explore: [DISCOVERY] Testing obj_2 control with ACTION2' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_2 control with ACTION2 [failed: object_control]'    
+2026-01-09 07:16:14,344 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
+from explore: [DISCOVERY] Testing obj_2 control with ACTION2' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_2 control with ACTION2 [failed: object_control]'
 2026-01-09 07:16:14,423 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=vc33-6ae7bf49eea5
 2026-01-09 07:16:14,438 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION3 - Testing obj_2 control with ACTION3
 2026-01-09 07:16:14,441 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: [DISCOVERY] Testing obj_2 control with ACTION3' then ACTION3 should cause 'object_control'
@@ -68,7 +68,7 @@ from explore: [DISCOVERY] Testing obj_2 control with ACTION2' -> 'REVISED: Actio
 2026-01-09 07:16:14,582 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (60,12)
 2026-01-09 07:16:14,593 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:14,594 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 144x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:14,614 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:14,614 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:14,670 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:14,725 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -81,7 +81,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:14,860 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:14,902 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (37,61)
 2026-01-09 07:16:14,926 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:14,928 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 81x consecutively. Will try alternative prediction types.2026-01-09 07:16:14,950 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:14,928 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 81x consecutively. Will try alternative prediction types.2026-01-09 07:16:14,950 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:15,239 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:15,271 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -96,9 +96,9 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:15,542 - arc_api_client - INFO - ACTION1 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:15,722 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:15,739 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'object_control', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:15,757 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
-from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION1... -> 
-forced exploration' -> 'REVISED: Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION1... -> forced exploration [failed: object_control]'  
+2026-01-09 07:16:15,757 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
+from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION1... ->
+forced exploration' -> 'REVISED: Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION1... -> forced exploration [failed: object_control]'
 2026-01-09 07:16:15,812 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=ls20-fa137e247ce6
 2026-01-09 07:16:15,841 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION2 - Testing obj_5 control with ACTION2
 2026-01-09 07:16:15,842 - core_gameplay - INFO - [QUESTIONING] ACTION2 blocked by ['Q9'], substituting ACTION6
@@ -113,7 +113,7 @@ forced exploration' -> 'REVISED: Action from explore: BLOCKED by ['Q9']: [DISCOV
 2026-01-09 07:16:16,383 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:16,388 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (52,20)
 2026-01-09 07:16:16,397 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:16,398 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 91x consecutively. Will try alternative prediction types.2026-01-09 07:16:16,426 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:16,398 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 91x consecutively. Will try alternative prediction types.2026-01-09 07:16:16,426 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:16,514 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:16,562 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -127,8 +127,8 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:16,831 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:16,834 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'object_control', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:16,835 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'object_control' failed 5x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:16,885 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
-from explore: [DISCOVERY] Testing obj_2 control with ACTION3' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_2 control with ACTION3 [failed: object_control]'    
+2026-01-09 07:16:16,885 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
+from explore: [DISCOVERY] Testing obj_2 control with ACTION3' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_2 control with ACTION3 [failed: object_control]'
 2026-01-09 07:16:16,923 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=vc33-6ae7bf49eea5
 2026-01-09 07:16:16,925 - visual_analyzer - INFO - Stagnation detected - expanding exploration radius: 9 -> 13 (+4)
 2026-01-09 07:16:16,939 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION4 - Testing obj_2 control with ACTION4
@@ -138,7 +138,7 @@ from explore: [DISCOVERY] Testing obj_2 control with ACTION3' -> 'REVISED: Actio
 2026-01-09 07:16:17,075 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (52,20)
 2026-01-09 07:16:17,086 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:17,087 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 145x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:17,102 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:17,102 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:17,167 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:17,222 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -152,7 +152,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:17,399 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:17,404 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (32,61)
 2026-01-09 07:16:17,413 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:17,414 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 82x consecutively. Will try alternative prediction types.2026-01-09 07:16:17,467 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:17,414 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 82x consecutively. Will try alternative prediction types.2026-01-09 07:16:17,467 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:17,528 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:17,533 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -176,13 +176,13 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:18,106 - core_gameplay - INFO - [QUESTIONING] ACTION3 blocked by ['Q9'], substituting ACTION6
 2026-01-09 07:16:18,109 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION3... -> forced exploration' then 2 should cause 'object_control'
 2026-01-09 07:16:18,144 - agent_self_model - INFO - [NETWORK-INVENTORY] ls20 L2: 2 toggleable, 25 moveable, 0 interactable positions
-2026-01-09 07:16:18,152 - core_gameplay - INFO - [FRAME->SELF] ACTION3 caused color_9 
+2026-01-09 07:16:18,152 - core_gameplay - INFO - [FRAME->SELF] ACTION3 caused color_9
 to move left
 2026-01-09 07:16:18,230 - arc_api_client - INFO - Sending ACTION2 to API
 2026-01-09 07:16:18,248 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:18,252 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (30,0)
 2026-01-09 07:16:18,263 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:18,264 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 92x consecutively. Will try alternative prediction types.2026-01-09 07:16:18,280 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:18,264 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 92x consecutively. Will try alternative prediction types.2026-01-09 07:16:18,280 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:18,348 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:18,403 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -194,9 +194,9 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:18,557 - arc_api_client - INFO - ACTION4 API response - State: NOT_FINISHED, Score: 2
 2026-01-09 07:16:18,643 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:18,648 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:18,650 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 7x consecutively. Will try alternative prediction types. 
-2026-01-09 07:16:18,677 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
-from explore: [DISCOVERY] Testing obj_2 control with ACTION4' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_2 control with ACTION4 [failed: frame_change]'      
+2026-01-09 07:16:18,650 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 7x consecutively. Will try alternative prediction types.
+2026-01-09 07:16:18,677 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
+from explore: [DISCOVERY] Testing obj_2 control with ACTION4' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_2 control with ACTION4 [failed: frame_change]'
 2026-01-09 07:16:18,751 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=vc33-6ae7bf49eea5
 2026-01-09 07:16:18,770 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION1 - Testing obj_11 control with ACTION1
 2026-01-09 07:16:18,774 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: [DISCOVERY] Testing obj_11 control with ACTION1' then ACTION1 should cause 'discover_pattern'
@@ -205,7 +205,7 @@ from explore: [DISCOVERY] Testing obj_2 control with ACTION4' -> 'REVISED: Actio
 2026-01-09 07:16:18,916 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (30,0)
 2026-01-09 07:16:18,929 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:18,929 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 146x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:18,946 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:18,946 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:18,999 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:19,044 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -220,7 +220,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:19,247 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:19,289 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (34,61)
 2026-01-09 07:16:19,313 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:19,314 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 83x consecutively. Will try alternative prediction types.2026-01-09 07:16:19,330 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:19,314 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 83x consecutively. Will try alternative prediction types.2026-01-09 07:16:19,330 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:19,408 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:19,413 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -238,9 +238,9 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:19,813 - arc_api_client - INFO - ACTION2 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:19,961 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:19,965 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'object_control', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:19,981 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
-from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION3... -> 
-forced exploration' -> 'REVISED: Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION3... -> forced exploration [failed: object_control]'  
+2026-01-09 07:16:19,981 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
+from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION3... ->
+forced exploration' -> 'REVISED: Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_5 control with ACTION3... -> forced exploration [failed: object_control]'
 2026-01-09 07:16:20,034 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=ls20-fa137e247ce6
 2026-01-09 07:16:20,048 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION4 - Testing obj_5 control with ACTION4
 ^A2026-01-09 07:16:20,049 - core_gameplay - INFO - [QUESTIONING] ACTION4 blocked by ['Q9'], substituting ACTION6
@@ -250,7 +250,7 @@ forced exploration' -> 'REVISED: Action from explore: BLOCKED by ['Q9']: [DISCOV
 2026-01-09 07:16:20,200 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:20,204 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 4 at (14,29)
 2026-01-09 07:16:20,221 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:20,222 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 93x consecutively. Will try alternative prediction types.2026-01-09 07:16:20,482 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:20,222 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 93x consecutively. Will try alternative prediction types.2026-01-09 07:16:20,482 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:20,557 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:20,559 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -263,7 +263,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:20,817 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:20,821 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'discover_pattern', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:20,821 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'discover_pattern' failed 6x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:20,853 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:20,853 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from explore: [DISCOVERY] Testing obj_11 control with ACTION1' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_11 control with ACTION1 [failed: discover_pattern]'2026-01-09 07:16:20,873 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=vc33-6ae7bf49eea5
 2026-01-09 07:16:20,886 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION2 - Testing obj_11 control with ACTION2
 2026-01-09 07:16:20,889 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: [DISCOVERY] Testing obj_11 control with ACTION2' then ACTION2 should cause 'object_control'
@@ -272,7 +272,7 @@ from explore: [DISCOVERY] Testing obj_11 control with ACTION1' -> 'REVISED: Acti
 2026-01-09 07:16:21,028 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 4 at (14,29)
 2026-01-09 07:16:21,048 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:21,050 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 147x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:21,071 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:21,071 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:21,130 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:21,144 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -292,16 +292,16 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:21,509 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=ls20-fa137e247ce6
 2026-01-09 07:16:21,559 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION1 - Testing obj_14 control with ACTION1
 2026-01-09 07:16:21,560 - core_gameplay - INFO - [QUESTIONING] ACTION1 blocked by ['Q9'], substituting ACTION6
-2026-01-09 07:16:21,564 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_14 control with ACTION1... -> 
+2026-01-09 07:16:21,564 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_14 control with ACTION1... ->
 forced exploration' then 3 should cause 'object_control'
 2026-01-09 07:16:21,604 - agent_self_model - INFO - [NETWORK-INVENTORY] ls20 L2: 2 toggleable, 25 moveable, 0 interactable positions
-2026-01-09 07:16:21,616 - core_gameplay - INFO - [FRAME->SELF] ACTION4 caused color_9 
+2026-01-09 07:16:21,616 - core_gameplay - INFO - [FRAME->SELF] ACTION4 caused color_9
 to move right
 2026-01-09 07:16:21,671 - arc_api_client - INFO - Sending ACTION3 to API
 2026-01-09 07:16:21,675 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:21,681 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (33,61)
 2026-01-09 07:16:21,693 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:21,694 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 84x consecutively. Will try alternative prediction types.2026-01-09 07:16:21,719 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:21,694 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 84x consecutively. Will try alternative prediction types.2026-01-09 07:16:21,719 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:21,804 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:21,806 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -316,7 +316,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:21,936 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:21,951 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 4 at (34,32)
 2026-01-09 07:16:21,960 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:21,962 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 94x consecutively. Will try alternative prediction types.2026-01-09 07:16:21,978 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:21,962 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 94x consecutively. Will try alternative prediction types.2026-01-09 07:16:21,978 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:22,039 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:22,042 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -329,8 +329,8 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:22,329 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:22,333 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'object_control', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:22,335 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'object_control' failed 6x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:22,367 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
-from explore: [DISCOVERY] Testing obj_11 control with ACTION2' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_11 control with ACTION2 [failed: object_control]'  
+2026-01-09 07:16:22,367 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
+from explore: [DISCOVERY] Testing obj_11 control with ACTION2' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_11 control with ACTION2 [failed: object_control]'
 2026-01-09 07:16:22,400 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=vc33-6ae7bf49eea5
 2026-01-09 07:16:22,415 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION3 - Testing obj_11 control with ACTION3
 2026-01-09 07:16:22,418 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: [DISCOVERY] Testing obj_11 control with ACTION3' then ACTION3 should cause 'frame_change'
@@ -342,9 +342,9 @@ from explore: [DISCOVERY] Testing obj_11 control with ACTION2' -> 'REVISED: Acti
 2026-01-09 07:16:22,680 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 9 at (7,53)
 2026-01-09 07:16:22,686 - agent_self_model - INFO - [DISCOVERY] Toggle detected: obj_9 color 9 -> 12
 2026-01-09 07:16:22,688 - agent_self_model - INFO - [TOGGLE-DISCOVERY] Recorded toggle at (7,53): color 9 <-> 12
-2026-01-09 07:16:22,689 - agent_self_model - INFO - [DISCOVERY] Click effect: color_9 
+2026-01-09 07:16:22,689 - agent_self_model - INFO - [DISCOVERY] Click effect: color_9
 -> color_12 at (7,53) type=toggle
-2026-01-09 07:16:22,690 - agent_self_model - WARNING - Network click effect sharing failed: table network_object_control_hypotheses has no column named controlled_color    
+2026-01-09 07:16:22,690 - agent_self_model - WARNING - Network click effect sharing failed: table network_object_control_hypotheses has no column named controlled_color
 2026-01-09 07:16:22,713 - agent_self_model - INFO - [METACOG] PREDICTION CORRECT: Theory 'Action from explore: Network hypotheses (3 insights, 0 validated) | ACTION6 salience target' confirmed!
 2026-01-09 07:16:22,785 - agent_self_model - INFO - Stored control map for offspring_eabafe34 on ft09-b8377d4b7815 L2: 1 objects (confidence: 1.00)
 2026-01-09 07:16:22,810 - agent_self_model - INFO - [NETWORK] Agent offsprin shared 'I am object' hypothesis: oc_ft09_L2_99ed9846 for ft09 L2 (1 objects)
@@ -358,7 +358,7 @@ from explore: [DISCOVERY] Testing obj_11 control with ACTION2' -> 'REVISED: Acti
 2026-01-09 07:16:23,087 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 4 at (34,32)
 2026-01-09 07:16:23,097 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:23,098 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 148x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:23,118 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:23,118 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:23,230 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:23,233 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -376,16 +376,16 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:23,620 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=ls20-fa137e247ce6
 2026-01-09 07:16:23,642 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION2 - Testing obj_14 control with ACTION2
 2026-01-09 07:16:23,644 - core_gameplay - INFO - [QUESTIONING] ACTION2 blocked by ['Q9'], substituting ACTION6
-2026-01-09 07:16:23,668 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_14 control with ACTION2... -> 
+2026-01-09 07:16:23,668 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_14 control with ACTION2... ->
 forced exploration' then 2 should cause 'object_control'
 2026-01-09 07:16:23,708 - agent_self_model - INFO - [NETWORK-INVENTORY] ls20 L2: 2 toggleable, 25 moveable, 0 interactable positions
-2026-01-09 07:16:23,717 - core_gameplay - INFO - [FRAME->SELF] ACTION3 caused color_9 
+2026-01-09 07:16:23,717 - core_gameplay - INFO - [FRAME->SELF] ACTION3 caused color_9
 to move left
 2026-01-09 07:16:23,765 - arc_api_client - INFO - Sending ACTION2 to API
 2026-01-09 07:16:23,771 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:23,776 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (53,61)
 2026-01-09 07:16:23,794 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:23,795 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 85x consecutively. Will try alternative prediction types.2026-01-09 07:16:23,839 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:23,795 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 85x consecutively. Will try alternative prediction types.2026-01-09 07:16:23,839 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:23,928 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:23,931 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -400,7 +400,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:24,072 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:24,076 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (52,12)
 2026-01-09 07:16:24,109 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:24,109 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 95x consecutively. Will try alternative prediction types.2026-01-09 07:16:24,126 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:24,109 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 95x consecutively. Will try alternative prediction types.2026-01-09 07:16:24,126 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:24,178 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:24,180 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -412,9 +412,9 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:24,295 - arc_api_client - INFO - ACTION3 API response - State: NOT_FINISHED, Score: 2
 2026-01-09 07:16:24,396 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:24,400 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:24,400 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 8x consecutively. Will try alternative prediction types. 
-2026-01-09 07:16:24,431 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
-from explore: [DISCOVERY] Testing obj_11 control with ACTION3' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_11 control with ACTION3 [failed: frame_change]'    
+2026-01-09 07:16:24,400 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 8x consecutively. Will try alternative prediction types.
+2026-01-09 07:16:24,431 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
+from explore: [DISCOVERY] Testing obj_11 control with ACTION3' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_11 control with ACTION3 [failed: frame_change]'
 2026-01-09 07:16:24,474 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=vc33-6ae7bf49eea5
 2026-01-09 07:16:24,492 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION4 - Testing obj_11 control with ACTION4
 2026-01-09 07:16:24,495 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: [DISCOVERY] Testing obj_11 control with ACTION4' then ACTION4 should cause 'discover_pattern'
@@ -422,7 +422,7 @@ from explore: [DISCOVERY] Testing obj_11 control with ACTION3' -> 'REVISED: Acti
 2026-01-09 07:16:24,605 - arc_api_client - INFO - ACTION2 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:24,773 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:24,777 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:24,817 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:24,817 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from explore: Preoperational exploration: Random ACTION2' -> 'REVISED: Action from explore: Preoperational exploration: Random ACTION2 [failed: frame_change]'
 2026-01-09 07:16:24,891 - agent_self_model - INFO - Stored control map for offspring_eabafe34 on ft09-b8377d4b7815 L2: 1 objects (confidence: 1.00)
 2026-01-09 07:16:25,002 - core_gameplay - INFO - [HYPOTHESIS] Level 2: 3 hypotheses (0 validated)
@@ -435,7 +435,7 @@ from explore: Preoperational exploration: Random ACTION2' -> 'REVISED: Action fr
 2026-01-09 07:16:25,151 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (52,12)
 2026-01-09 07:16:25,160 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:25,161 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 149x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:25,194 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:25,194 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:25,251 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:25,255 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -449,12 +449,12 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:25,788 - arc_api_client - INFO - ACTION2 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:26,306 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:26,314 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'object_control', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:26,348 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
-from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_14 control with ACTION2... -> forced exploration' -> 'REVISED: Action from explore: BLOCKED by ['Q9']: [DISCOVERY] 
+2026-01-09 07:16:26,348 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
+from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_14 control with ACTION2... -> forced exploration' -> 'REVISED: Action from explore: BLOCKED by ['Q9']: [DISCOVERY]
 Testing obj_14 control with ACTION2... -> forced exploration [failed: object_control]'2026-01-09 07:16:26,376 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=ls20-fa137e247ce6
 2026-01-09 07:16:26,415 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION3 - Testing obj_14 control with ACTION3
 2026-01-09 07:16:26,418 - core_gameplay - INFO - [QUESTIONING] ACTION3 blocked by ['Q9'], substituting ACTION6
-2026-01-09 07:16:26,423 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_14 control with ACTION3... -> 
+2026-01-09 07:16:26,423 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: BLOCKED by ['Q9']: [DISCOVERY] Testing obj_14 control with ACTION3... ->
 forced exploration' then 3 should cause 'object_control'
 2026-01-09 07:16:26,491 - agent_self_model - INFO - [NETWORK-INVENTORY] ls20 L2: 2 toggleable, 25 moveable, 0 interactable positions
 2026-01-09 07:16:26,570 - arc_api_client - INFO - Sending ACTION3 to API
@@ -464,7 +464,7 @@ forced exploration' then 3 should cause 'object_control'
 2026-01-09 07:16:26,771 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:26,779 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (43,61)
 2026-01-09 07:16:26,801 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:26,802 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 86x consecutively. Will try alternative prediction types.2026-01-09 07:16:26,838 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:26,802 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 86x consecutively. Will try alternative prediction types.2026-01-09 07:16:26,838 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:26,902 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:26,927 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -479,7 +479,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:27,069 - arc_api_client - INFO - ACTION6 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:27,076 - core_gameplay - INFO - [SELECTION] ACTION6 clicked on object color 3 at (60,12)
 2026-01-09 07:16:27,102 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:27,103 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 96x consecutively. Will try alternative prediction types.2026-01-09 07:16:27,119 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:27,103 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 96x consecutively. Will try alternative prediction types.2026-01-09 07:16:27,119 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf: micro rollout: probe salience [failed: frame_change]'
 2026-01-09 07:16:27,173 - core_gameplay - INFO - [MICRO-CF] micro rollout: probe salience
 2026-01-09 07:16:27,176 - agent_self_model - INFO - [METACOG] PREDICTION (suppressed type 'frame_change'): Skipping - failed too many times
@@ -492,7 +492,7 @@ from micro_cf: micro rollout: probe salience' -> 'REVISED: Action from micro_cf:
 2026-01-09 07:16:27,424 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:27,428 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'discover_pattern', got 'score_delta=0.0, frame_changed=False'
 2026-01-09 07:16:27,429 - agent_self_model - WARNING - [METACOG] PREDICTION TYPE SUPPRESSED: 'discover_pattern' failed 7x consecutively. Will try alternative prediction types.
-2026-01-09 07:16:27,442 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:27,442 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from explore: [DISCOVERY] Testing obj_11 control with ACTION4' -> 'REVISED: Action from explore: [DISCOVERY] Testing obj_11 control with ACTION4 [failed: discover_pattern]'2026-01-09 07:16:27,482 - cods_engine - INFO - [CODS] Testing operators: reason=discovery_mode, game=vc33-6ae7bf49eea5
 2026-01-09 07:16:27,494 - core_gameplay - INFO - [DISCOVERY PHASE] ACTION1 - Testing obj_5 control with ACTION1
 2026-01-09 07:16:27,496 - agent_self_model - INFO - [METACOG] PREDICTION: If 'Action from explore: [DISCOVERY] Testing obj_5 control with ACTION1' then ACTION1 should cause 'object_control'
@@ -500,7 +500,7 @@ from explore: [DISCOVERY] Testing obj_11 control with ACTION4' -> 'REVISED: Acti
 2026-01-09 07:16:27,598 - arc_api_client - INFO - ACTION2 API response - State: NOT_FINISHED, Score: 1
 2026-01-09 07:16:27,722 - core_gameplay - INFO - [PRIMITIVE] Stuck pattern detected by primitives
 2026-01-09 07:16:27,726 - agent_self_model - INFO - [METACOG] PREDICTION WRONG: Expected 'frame_change', got 'score_delta=0.0, frame_changed=False'
-2026-01-09 07:16:27,771 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action 
+2026-01-09 07:16:27,771 - agent_self_model - INFO - [METACOG] THEORY REVISED: 'Action
 from explore: Preoperational exploration: Random ACTION2' -> 'REVISED: Action from explore: Preoperational exploration: Random ACTION2 [failed: frame_change]'
 2026-01-09 07:16:27,820 - agent_self_model - INFO - Stored control map for offspring_eabafe34 on ft09-b8377d4b7815 L2: 1 objects (confidence: 1.00)
 2026-01-09 07:16:27,911 - core_gameplay - INFO - [HYPOTHESIS] Level 2: 3 hypotheses (0 validated)

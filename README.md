@@ -70,7 +70,7 @@ cp .env.example .env
 ## Quick Start
 
 ```bash
-# Activate virtual environment 
+# Activate virtual environment
 & .venv/Scripts/Activate.ps1  # PowerShell
 
 # Start the autonomous evolution loop (Recommended)
@@ -339,7 +339,7 @@ python manual_tools/check_cods_status.py
 # Database validation
 python manual_tools/db_validation.py
 
-# Schema inspection  
+# Schema inspection
 python manual_tools/database/schema_inspector.py --table agents --sample
 ```
 
@@ -370,7 +370,7 @@ pytest tests/test_cods.py -v
 ## 🛠️ Configuration
 
 1. **Environment**: Copy `.env.example` to `.env`, set `ARC_API_KEY`
-2. **Dependencies**: 
+2. **Dependencies**:
    ```bash
    & .venv/Scripts/Activate.ps1  # Activate venv first!
    pip install -r requirements.txt

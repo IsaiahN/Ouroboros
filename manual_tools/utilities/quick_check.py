@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Quick telemetry check after evolution run."""
-import sys
 import os
+import sys
+
 sys.dont_write_bytecode = True
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
@@ -13,7 +14,7 @@ db = DatabaseInterface()
 print("=== TELEMETRY CHECK (Last 1 Hour) ===\n")
 
 result = db.execute_query("""
-    SELECT 
+    SELECT
         COUNT(*) as total_actions,
         SUM(CASE WHEN persona_proposal_count > 1 THEN 1 ELSE 0 END) as multi_proposal,
         SUM(CASE WHEN synthesis_enabled = 1 THEN 1 ELSE 0 END) as synthesis_enabled,
@@ -21,7 +22,7 @@ result = db.execute_query("""
         SUM(CASE WHEN counterfactual_rollouts_used > 0 THEN 1 ELSE 0 END) as cf_used,
         AVG(COALESCE(persona_proposal_count, 0)) as avg_proposals,
         AVG(COALESCE(budget_spend, 0)) as avg_budget_spend
-    FROM action_traces 
+    FROM action_traces
     WHERE created_at >= datetime('now', '-1 hour')
 """)
 
@@ -34,7 +35,7 @@ if result and result[0]:
     cf = r.get('cf_used', 0) or 0
     avg_prop = r.get('avg_proposals', 0) or 0
     avg_spend = r.get('avg_budget_spend', 0) or 0
-    
+
     print(f"Total Actions:      {total:,}")
     print(f"Multi-Proposal:     {multi:,} ({100*multi/total if total else 0:.1f}%)")
     print(f"Synthesis Enabled:  {synth:,} ({100*synth/total if total else 0:.1f}%)")
@@ -64,8 +65,8 @@ if dist:
 # Check budget_spend distribution
 print("\n=== BUDGET SPEND DISTRIBUTION ===\n")
 budget_dist = db.execute_query("""
-    SELECT 
-        CASE 
+    SELECT
+        CASE
             WHEN budget_spend IS NULL THEN 'NULL'
             WHEN budget_spend = 0 THEN '0'
             WHEN budget_spend > 0 AND budget_spend <= 0.1 THEN '0-0.1'
@@ -87,7 +88,7 @@ if budget_dist:
 # Check game results
 print("\n=== GAME RESULTS (Last 1 Hour) ===\n")
 games = db.execute_query("""
-    SELECT 
+    SELECT
         COUNT(*) as total_games,
         SUM(CASE WHEN final_score > 0 THEN 1 ELSE 0 END) as positive_score,
         AVG(final_score) as avg_score,
@@ -102,7 +103,7 @@ if games and games[0]:
     pos = g.get('positive_score', 0) or 0
     avg_score = g.get('avg_score', 0) or 0
     avg_actions = g.get('avg_actions', 0) or 0
-    
+
     print(f"Total Games:        {total:,}")
     print(f"Positive Score:     {pos:,} ({100*pos/total if total else 0:.1f}%)")
     print(f"Avg Score:          {avg_score:.2f}")
@@ -112,8 +113,8 @@ else:
 
 print("\n=== COGNITIVE STAGES ===\n")
 stages = db.execute_query("""
-    SELECT current_stage, COUNT(*) as cnt 
-    FROM agent_cognitive_stages 
+    SELECT current_stage, COUNT(*) as cnt
+    FROM agent_cognitive_stages
     GROUP BY current_stage
 """)
 if stages:

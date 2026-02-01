@@ -1,65 +1,65 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
-Core Game Mechanics
+BitterTruth-AI - ARC-AGI-3 Evolution System
 
-A clean, modular implementation of essential ARC-AGI-3 game functionality.
-Contains only the core mechanics needed to play games without the complexity
-of architect, governor, or director systems.
+A clean, modular implementation for autonomous ARC-AGI-3 game playing.
 
 Main Components:
-- ARCClient: API client for ARC-AGI-3
-- GameSessionManager: Session lifecycle management
-- ActionHandler: Action sending and validation
-- GameplayEngine: Core gameplay logic
+- ArcadeWrapper: Official arc_agi SDK wrapper (arc_api_adapter.py)
+- GameplayEngine: Core gameplay logic (core_gameplay.py)
 - DatabaseInterface: Game data persistence
 
 Example Usage:
-    from CORE_GAME_MECHANICS import GameplayEngine
+    from arc_api_adapter import ArcadeWrapper, GameAction
 
-    async def play_game():
-        async with GameplayEngine(api_key="your_key") as engine:
-            result = await engine.play_single_game("game_123")
-            print(f"Final score: {result['final_score']}")
-
-    asyncio.run(play_game())
+    wrapper = ArcadeWrapper()
+    env = wrapper.make("ls20")
+    obs = env.step(GameAction.ACTION1)
 """
 
 # Handle both package imports and direct execution
 try:
-    # When imported as a package (e.g., from BitterTruth-AI import ...)
-    from .arc_api_client import ARCClient, GameState, Scorecard, ARCError, ARCAuthenticationError, ARCAPIError
+    # When imported as a package
+    from .arc_api_adapter import (
+        ArcadeWrapper,
+        GameConfig,
+        GameEnvironment,
+        GameInfo,
+        Observation,
+    )
+    from .core_gameplay import (
+        GameplayEngine,
+        conservative_strategy,
+        exploration_strategy,
+        random_strategy,
+    )
     from .database_interface import DatabaseInterface
-    from .game_session_manager import GameSessionManager, SessionContext
-    from .action_handler import ActionHandler
-    from .core_gameplay import GameplayEngine, random_strategy, conservative_strategy, exploration_strategy
 except ImportError:
     # When run directly or imported from a script in the same directory
-    # This prevents pytest from failing when it tries to import this file
     pass
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "Tabula Rasa Team"
 
 __all__ = [
-    # Core classes
-    "ARCClient",
-    "GameState",
-    "Scorecard",
+    # Core classes (arc_api_adapter - official SDK wrapper)
+    "ArcadeWrapper",
+    "GameConfig",
+    "GameEnvironment",
+    "GameInfo",
+    "Observation",
+
+    # Database
     "DatabaseInterface",
-    "GameSessionManager",
-    "SessionContext",
-    "ActionHandler",
+
+    # Gameplay
     "GameplayEngine",
 
     # Strategies
     "random_strategy",
     "conservative_strategy",
     "exploration_strategy",
-
-    # Exceptions
-    "ARCError",
-    "ARCAuthenticationError",
-    "ARCAPIError",
 ]

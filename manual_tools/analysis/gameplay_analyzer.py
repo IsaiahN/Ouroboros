@@ -11,11 +11,12 @@ Usage:
     python manual_tools/gameplay_analyzer.py --full             # Full analysis with all options
 """
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
-import sqlite3
 import argparse
 import os
+import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -30,7 +31,7 @@ def get_db_connection(db_path: str | None = None) -> sqlite3.Connection:
         # Find core_data.db relative to this script (go up 2 levels: analysis -> manual_tools -> project root)
         script_dir = Path(__file__).parent.parent.parent
         db_path = str(script_dir / 'core_data.db')
-    
+
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
@@ -40,7 +41,7 @@ def analyze_recent_games(conn: sqlite3.Connection, hours: int = 3, limit: int = 
     """Analyze recent game results. limit=-1 means no limit."""
     if limit == -1:
         recent = conn.execute('''
-            SELECT 
+            SELECT
                 strftime('%H:%M', created_at) as time,
                 game_id,
                 final_score,
@@ -54,7 +55,7 @@ def analyze_recent_games(conn: sqlite3.Connection, hours: int = 3, limit: int = 
         ''', (f'-{hours}',)).fetchall()
     else:
         recent = conn.execute('''
-            SELECT 
+            SELECT
                 strftime('%H:%M', created_at) as time,
                 game_id,
                 final_score,
@@ -67,14 +68,14 @@ def analyze_recent_games(conn: sqlite3.Connection, hours: int = 3, limit: int = 
             ORDER BY created_at DESC
             LIMIT ?
         ''', (f'-{hours}', limit)).fetchall()
-    
+
     return [dict(r) for r in recent]
 
 
 def get_summary_stats(conn: sqlite3.Connection, hours: int = 3) -> dict:
     """Get summary statistics for recent games."""
     summary = conn.execute('''
-        SELECT 
+        SELECT
             COUNT(*) as total_games,
             SUM(CASE WHEN final_score > 0 THEN 1 ELSE 0 END) as positive_scores,
             SUM(CASE WHEN win_detected = 1 THEN 1 ELSE 0 END) as games_won,
@@ -85,28 +86,28 @@ def get_summary_stats(conn: sqlite3.Connection, hours: int = 3) -> dict:
         FROM game_results
         WHERE created_at >= datetime('now', ? || ' hours')
     ''', (f'-{hours}',)).fetchone()
-    
+
     return dict(summary)
 
 
 def get_winning_sequences(conn: sqlite3.Connection, hours: int = 3) -> dict:
     """Get new winning sequences in time period."""
     seqs = conn.execute('''
-        SELECT 
+        SELECT
             COUNT(*) as total,
             SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
             COUNT(DISTINCT game_id) as unique_games
         FROM winning_sequences
         WHERE discovered_at >= datetime('now', ? || ' hours')
     ''', (f'-{hours}',)).fetchone()
-    
+
     return dict(seqs)
 
 
 def get_agents_by_generation(conn: sqlite3.Connection, min_generation: int = 0) -> list:
     """Get active agents grouped by generation."""
     agents = conn.execute('''
-        SELECT 
+        SELECT
             generation,
             COUNT(*) as count,
             AVG(total_games_played) as avg_games,
@@ -116,30 +117,30 @@ def get_agents_by_generation(conn: sqlite3.Connection, min_generation: int = 0) 
         GROUP BY generation
         ORDER BY generation
     ''', (min_generation,)).fetchall()
-    
+
     return [dict(a) for a in agents]
 
 
 def get_baseline_comparison(conn: sqlite3.Connection, current_hours: int = 3, baseline_hours: int = 24) -> dict:
     """Compare current performance against baseline."""
     baseline = conn.execute('''
-        SELECT 
+        SELECT
             AVG(final_score) as avg_score,
             AVG(level_completions) as avg_levels,
             COUNT(*) as games
         FROM game_results
         WHERE created_at BETWEEN datetime('now', ? || ' hours') AND datetime('now', ? || ' hours')
     ''', (f'-{baseline_hours}', f'-{current_hours}')).fetchone()
-    
+
     current = conn.execute('''
-        SELECT 
+        SELECT
             AVG(final_score) as avg_score,
             AVG(level_completions) as avg_levels,
             COUNT(*) as games
         FROM game_results
         WHERE created_at >= datetime('now', ? || ' hours')
     ''', (f'-{current_hours}',)).fetchone()
-    
+
     return {
         'baseline': dict(baseline),
         'current': dict(current)
@@ -149,7 +150,7 @@ def get_baseline_comparison(conn: sqlite3.Connection, current_hours: int = 3, ba
 def get_game_distribution(conn: sqlite3.Connection, hours: int = 3) -> list:
     """Get distribution of games played."""
     dist = conn.execute('''
-        SELECT 
+        SELECT
             SUBSTR(game_id, 1, 4) as game_type,
             COUNT(*) as count,
             AVG(final_score) as avg_score,
@@ -160,20 +161,20 @@ def get_game_distribution(conn: sqlite3.Connection, hours: int = 3) -> list:
         GROUP BY SUBSTR(game_id, 1, 4)
         ORDER BY count DESC
     ''', (f'-{hours}',)).fetchall()
-    
+
     return [dict(d) for d in dist]
 
 
-def print_analysis(hours: int = 3, min_generation: int = 0, include_baseline: bool = True, 
+def print_analysis(hours: int = 3, min_generation: int = 0, include_baseline: bool = True,
                    include_games: bool = True, limit: int = 30):
     """Print full gameplay analysis."""
     conn = get_db_connection()
-    
+
     print('=' * 70)
     print(f'GAMEPLAY PROGRESSION ANALYSIS')
     print(f'Time Range: Last {hours} hours | Min Generation: {min_generation}')
     print('=' * 70)
-    
+
     # Recent games
     if include_games:
         recent = analyze_recent_games(conn, hours, limit)
@@ -189,7 +190,7 @@ def print_analysis(hours: int = 3, min_generation: int = 0, include_baseline: bo
             actions = r["total_actions"] or 0
             won = "YES" if r["win_detected"] else "no"
             print(f'{r["time"]:5} | {gid:25} | {score:5} | {lvls:4} | {actions:7} | {won:3}')
-    
+
     # Summary stats
     summary = get_summary_stats(conn, hours)
     print(f'\n\nSUMMARY (Last {hours} Hours):')
@@ -203,7 +204,7 @@ def print_analysis(hours: int = 3, min_generation: int = 0, include_baseline: bo
     print(f'  Avg Levels: {summary["avg_levels"] or 0:.2f}')
     print(f'  Best Score: {summary["best_score"]}')
     print(f'  Best Levels: {summary["best_levels"]}')
-    
+
     # Game distribution
     dist = get_game_distribution(conn, hours)
     if dist:
@@ -213,7 +214,7 @@ def print_analysis(hours: int = 3, min_generation: int = 0, include_baseline: bo
         print('-' * 70)
         for d in dist[:10]:
             print(f'{d["game_type"]:6} | {d["count"]:5} | {d["avg_score"] or 0:9.2f} | {d["best_score"] or 0:5} | {d["total_levels"] or 0:10}')
-    
+
     # Winning sequences
     seqs = get_winning_sequences(conn, hours)
     print(f'\n\nNEW WINNING SEQUENCES (Last {hours} Hours):')
@@ -221,7 +222,7 @@ def print_analysis(hours: int = 3, min_generation: int = 0, include_baseline: bo
     print(f'  Total New: {seqs["total"]}')
     print(f'  Active: {seqs["active"]}')
     print(f'  Unique Games: {seqs["unique_games"]}')
-    
+
     # Agents by generation
     if min_generation > 0:
         agents = get_agents_by_generation(conn, min_generation)
@@ -232,13 +233,13 @@ def print_analysis(hours: int = 3, min_generation: int = 0, include_baseline: bo
             print('-' * 70)
             for a in agents:
                 print(f'{a["generation"]:4} | {a["count"]:5} | {a["avg_games"] or 0:9.1f} | {a["avg_score"] or 0:.1f}')
-    
+
     # Baseline comparison
     if include_baseline:
         comp = get_baseline_comparison(conn, hours, 24)
         baseline = comp['baseline']
         current = comp['current']
-        
+
         print(f'\n\nBASELINE COMPARISON:')
         print('-' * 70)
         if baseline["games"] and baseline["games"] > 0:
@@ -256,7 +257,7 @@ def print_analysis(hours: int = 3, min_generation: int = 0, include_baseline: bo
                 print(f'  Level Change: {lvl_diff:+.1f}%')
         else:
             print(f'  No baseline data available')
-    
+
     conn.close()
     print('\n' + '=' * 70)
 
@@ -269,16 +270,16 @@ def main():
     parser.add_argument('--no-games', action='store_true', help='Skip individual game listing')
     parser.add_argument('--limit', type=int, default=None, help='Max games to show (default: all games in time range)')
     parser.add_argument('--full', action='store_true', help='Full analysis with all options')
-    
+
     args = parser.parse_args()
-    
+
     if args.full:
         args.compare = True
         args.hours = 6
-    
+
     # If no limit specified, show all games in time range (use -1 to indicate no limit)
     limit = args.limit if args.limit is not None else -1
-    
+
     print_analysis(
         hours=args.hours,
         min_generation=args.generations,

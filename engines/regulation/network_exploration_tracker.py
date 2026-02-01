@@ -11,10 +11,10 @@ Key Insight: Instead of each agent starting blind, they inherit the network's
 spatial knowledge and can focus on filling gaps rather than re-exploring.
 """
 import json
-import uuid
 import logging
-from typing import Dict, List, Tuple, Optional, Any, Set
+import uuid
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -22,44 +22,44 @@ logger = logging.getLogger(__name__)
 class NetworkExplorationTracker:
     """
     Tracks and queries collective exploration data across all agents.
-    
+
     The network builds a shared "world map" for each level:
     - Where have agents been?
     - What did they find there?
     - What actions were tried?
     - Where is dangerous vs productive?
-    
+
     New agents query this map to explore UNEXPLORED areas efficiently.
     """
-    
+
     # Grid quantization: divide frame into NxN regions
     GRID_SIZE = 8  # 8x8 = 64 regions per level
-    
+
     def __init__(self, db):
         """
         Initialize tracker with database connection.
-        
+
         Args:
             db: Database interface with execute_query method
         """
         self.db = db
         self._ensure_tables()
-        
+
         # Local cache for current game session
         self._current_game_type: Optional[str] = None
         self._current_level: Optional[int] = None
         self._session_visited: Set[Tuple[int, int]] = set()
         self._session_actions: Dict[int, int] = {}  # action -> count
-    
+
     def _ensure_tables(self):
         """Ensure exploration tables exist."""
         try:
             # Check if table exists
             result = self.db.execute_query("""
-                SELECT name FROM sqlite_master 
+                SELECT name FROM sqlite_master
                 WHERE type='table' AND name='network_exploration_map'
             """)
-            
+
             if not result:
                 # Create tables
                 self.db.execute_query("""
@@ -84,7 +84,7 @@ class NetworkExplorationTracker:
                         UNIQUE(game_type, level_number, region_x, region_y)
                     )
                 """)
-                
+
                 self.db.execute_query("""
                     CREATE TABLE IF NOT EXISTS network_action_coverage (
                         coverage_id TEXT PRIMARY KEY,
@@ -103,61 +103,61 @@ class NetworkExplorationTracker:
                         UNIQUE(game_type, level_number, action_number)
                     )
                 """)
-                
+
                 # Create indexes
                 self.db.execute_query("""
-                    CREATE INDEX IF NOT EXISTS idx_exploration_map_game_level 
+                    CREATE INDEX IF NOT EXISTS idx_exploration_map_game_level
                     ON network_exploration_map(game_type, level_number)
                 """)
                 self.db.execute_query("""
-                    CREATE INDEX IF NOT EXISTS idx_action_coverage_game_level 
+                    CREATE INDEX IF NOT EXISTS idx_action_coverage_game_level
                     ON network_action_coverage(game_type, level_number)
                 """)
-                
+
                 logger.info("[EXPLORATION] Created network_exploration_map tables")
         except Exception as e:
             logger.debug(f"[EXPLORATION] Table check/create failed: {e}")
-    
+
     def _position_to_region(
-        self, 
-        x: int, 
-        y: int, 
-        frame_width: int, 
+        self,
+        x: int,
+        y: int,
+        frame_width: int,
         frame_height: int
     ) -> Tuple[int, int]:
         """
         Convert pixel position to grid region.
-        
+
         Args:
             x, y: Pixel coordinates
             frame_width, frame_height: Frame dimensions
-            
+
         Returns:
             (region_x, region_y) tuple
         """
         region_x = min(self.GRID_SIZE - 1, max(0, int(x * self.GRID_SIZE / max(1, frame_width))))
         region_y = min(self.GRID_SIZE - 1, max(0, int(y * self.GRID_SIZE / max(1, frame_height))))
         return (region_x, region_y)
-    
+
     # =========================================================================
     # QUERY METHODS: Get network's collective exploration knowledge
     # =========================================================================
-    
+
     def get_network_exploration_map(
-        self, 
-        game_type: str, 
+        self,
+        game_type: str,
         level: int
     ) -> Dict[str, Any]:
         """
         Get the network's collective exploration map for a level.
-        
+
         This is the key method - returns what the NETWORK knows about this level
         from all previous agents' explorations.
-        
+
         Args:
             game_type: Game type (e.g., 'ls20')
             level: Level number
-            
+
         Returns:
             Dict with:
             - explored_regions: List of {x, y, visits, productivity, danger}
@@ -177,7 +177,7 @@ class NetworkExplorationTracker:
             'total_network_visits': 0,
             'unique_agents_explored': 0
         }
-        
+
         try:
             # Get all explored regions
             rows = self.db.execute_query("""
@@ -188,17 +188,17 @@ class NetworkExplorationTracker:
                 WHERE game_type = ? AND level_number = ?
                 ORDER BY novelty_score DESC
             """, (game_type, level))
-            
+
             explored_set = set()
             total_visits = 0
             max_agents = 0
-            
+
             for row in (rows or []):
                 rx, ry = row['region_x'], row['region_y']
                 explored_set.add((rx, ry))
                 total_visits += row['times_visited']
                 max_agents = max(max_agents, row['unique_agents'])
-                
+
                 region_info = {
                     'x': rx,
                     'y': ry,
@@ -210,25 +210,25 @@ class NetworkExplorationTracker:
                     'score_changes': row['score_changes_here'],
                     'deaths': row['deaths_here']
                 }
-                
+
                 result['explored_regions'].append(region_info)
-                
+
                 # Categorize
                 if row['productivity_score'] > 0.5:
                     result['hotspots'].append(region_info)
                 if row['danger_score'] > 0.5:
                     result['danger_zones'].append(region_info)
-            
+
             result['total_network_visits'] = total_visits
             result['unique_agents_explored'] = max_agents
-            
+
             # Find unexplored regions
             all_regions = {(x, y) for x in range(self.GRID_SIZE) for y in range(self.GRID_SIZE)}
             unexplored = all_regions - explored_set
-            
+
             result['unexplored_regions'] = [{'x': x, 'y': y} for x, y in unexplored]
             result['coverage_percent'] = round(len(explored_set) / len(all_regions) * 100, 1)
-            
+
             # Recommend exploration targets (unexplored + adjacent to productive)
             recommended = []
             for ux, uy in unexplored:
@@ -243,33 +243,33 @@ class NetworkExplorationTracker:
                                 if region['productivity'] > 0.3:
                                     adjacent_productive = True
                                     break
-                
+
                 priority = 2 if adjacent_productive else 1
                 recommended.append({'x': ux, 'y': uy, 'priority': priority})
-            
+
             # Sort by priority (higher first)
             recommended.sort(key=lambda r: r['priority'], reverse=True)
             result['recommended_exploration'] = recommended[:10]  # Top 10
-            
+
         except Exception as e:
             logger.debug(f"[EXPLORATION] Query failed: {e}")
-        
+
         return result
-    
+
     def get_network_action_coverage(
-        self, 
-        game_type: str, 
+        self,
+        game_type: str,
         level: int
     ) -> Dict[str, Any]:
         """
         Get the network's action usage statistics for a level.
-        
+
         Returns what actions have been tried, how often, and their outcomes.
-        
+
         Args:
             game_type: Game type
             level: Level number
-            
+
         Returns:
             Dict with:
             - action_stats: {action: {uses, success_rate, avg_score_change}}
@@ -285,7 +285,7 @@ class NetworkExplorationTracker:
             'dangerous_actions': [],
             'total_action_attempts': 0
         }
-        
+
         try:
             rows = self.db.execute_query("""
                 SELECT action_number, times_used, unique_agents,
@@ -294,14 +294,14 @@ class NetworkExplorationTracker:
                 FROM network_action_coverage
                 WHERE game_type = ? AND level_number = ?
             """, (game_type, level))
-            
+
             tried_actions = set()
-            
+
             for row in (rows or []):
                 action = row['action_number']
                 tried_actions.add(action)
                 result['total_action_attempts'] += row['times_used']
-                
+
                 stats = {
                     'uses': row['times_used'],
                     'agents': row['unique_agents'],
@@ -312,7 +312,7 @@ class NetworkExplorationTracker:
                     'deaths': row['caused_death']
                 }
                 result['action_stats'][action] = stats
-                
+
                 # Categorize
                 if row['times_used'] < 3:
                     result['underexplored_actions'].append(action)
@@ -320,20 +320,20 @@ class NetworkExplorationTracker:
                     result['best_actions'].append((action, row['success_rate']))
                 if row['caused_death'] > 0:
                     result['dangerous_actions'].append((action, row['caused_death']))
-            
+
             # Find completely untried actions (1-7)
             all_actions = set(range(1, 8))
             result['untried_actions'] = list(all_actions - tried_actions)
-            
+
             # Sort best actions by success rate
             result['best_actions'].sort(key=lambda x: x[1], reverse=True)
             result['best_actions'] = [a[0] for a in result['best_actions'][:3]]
-            
+
         except Exception as e:
             logger.debug(f"[EXPLORATION] Action coverage query failed: {e}")
-        
+
         return result
-    
+
     def get_exploration_context_for_reasoning(
         self,
         game_type: str,
@@ -344,23 +344,23 @@ class NetworkExplorationTracker:
     ) -> Dict[str, Any]:
         """
         Get complete exploration context for the reasoning payload.
-        
+
         This is the main integration point - returns everything an agent needs
         to make exploration-aware decisions.
-        
+
         Args:
             game_type: Current game type
             level: Current level
             current_position: Agent's current (x, y) position
             frame_width, frame_height: Frame dimensions
-            
+
         Returns:
             Dict suitable for inclusion in reasoning payload
         """
         # Get network maps
         exploration_map = self.get_network_exploration_map(game_type, level)
         action_coverage = self.get_network_action_coverage(game_type, level)
-        
+
         context = {
             'network_exploration': {
                 'coverage_percent': exploration_map['coverage_percent'],
@@ -380,13 +380,13 @@ class NetworkExplorationTracker:
             'current_region_known': False,
             'suggested_direction': None
         }
-        
+
         # If we have current position, determine which region we're in
         if current_position:
             cx, cy = current_position
             region = self._position_to_region(cx, cy, frame_width, frame_height)
             context['current_region'] = {'x': region[0], 'y': region[1]}
-            
+
             # Check if current region is known
             for explored in exploration_map['explored_regions']:
                 if explored['x'] == region[0] and explored['y'] == region[1]:
@@ -397,25 +397,25 @@ class NetworkExplorationTracker:
                         'danger': explored['danger']
                     }
                     break
-            
+
             # Suggest direction toward nearest unexplored region
             if exploration_map['recommended_exploration']:
                 best_target = exploration_map['recommended_exploration'][0]
                 tx, ty = best_target['x'], best_target['y']
                 rx, ry = region
-                
+
                 # Determine direction
                 if abs(tx - rx) >= abs(ty - ry):
                     context['suggested_direction'] = 'right' if tx > rx else 'left'
                 else:
                     context['suggested_direction'] = 'down' if ty > ry else 'up'
-        
+
         return context
-    
+
     # =========================================================================
     # SAVE METHODS: Record agent's exploration for future agents
     # =========================================================================
-    
+
     def record_position_visit(
         self,
         game_type: str,
@@ -431,9 +431,9 @@ class NetworkExplorationTracker:
     ):
         """
         Record that an agent visited a position.
-        
+
         Updates the network's collective exploration map.
-        
+
         Args:
             game_type: Game type
             level: Level number
@@ -446,7 +446,7 @@ class NetworkExplorationTracker:
         """
         region = self._position_to_region(x, y, frame_width, frame_height)
         rx, ry = region
-        
+
         # Track in session cache to count unique visits
         session_key = (game_type, level)
         if session_key != (self._current_game_type, self._current_level):
@@ -454,44 +454,44 @@ class NetworkExplorationTracker:
             self._current_level = level
             self._session_visited = set()
             self._session_actions = {}
-        
+
         is_new_region_this_session = region not in self._session_visited
         self._session_visited.add(region)
-        
+
         try:
             # Check if region exists
             existing = self.db.execute_query("""
-                SELECT exploration_id, times_visited, unique_agents, 
+                SELECT exploration_id, times_visited, unique_agents,
                        score_changes_here, deaths_here, novelty_score,
                        productivity_score, danger_score, objects_found
                 FROM network_exploration_map
-                WHERE game_type = ? AND level_number = ? 
+                WHERE game_type = ? AND level_number = ?
                   AND region_x = ? AND region_y = ?
             """, (game_type, level, rx, ry))
-            
+
             if existing:
                 row = existing[0]
                 new_visits = row['times_visited'] + 1
                 new_agents = row['unique_agents'] + (1 if is_new_region_this_session else 0)
                 new_score_changes = row['score_changes_here'] + (1 if score_changed else 0)
                 new_deaths = row['deaths_here'] + (1 if caused_death else 0)
-                
+
                 # Update novelty (decays with visits)
                 new_novelty = max(0.0, 1.0 - (new_visits / 20.0))
-                
+
                 # Update productivity (based on score changes)
                 new_productivity = new_score_changes / max(1, new_visits)
-                
+
                 # Update danger (based on deaths)
                 new_danger = new_deaths / max(1, new_visits)
-                
+
                 # Merge objects found
                 old_objects = json.loads(row['objects_found'] or '[]')
                 if objects_at_position:
                     for obj in objects_at_position:
                         if obj not in old_objects:
                             old_objects.append(obj)
-                
+
                 self.db.execute_query("""
                     UPDATE network_exploration_map
                     SET times_visited = ?,
@@ -529,10 +529,10 @@ class NetworkExplorationTracker:
                     1.0 if score_changed else 0.0,
                     1.0 if caused_death else 0.0
                 ))
-                
+
         except Exception as e:
             logger.debug(f"[EXPLORATION] Record visit failed: {e}")
-    
+
     def record_action_use(
         self,
         game_type: str,
@@ -545,9 +545,9 @@ class NetworkExplorationTracker:
     ):
         """
         Record that an agent used an action.
-        
+
         Updates the network's action coverage statistics.
-        
+
         Args:
             game_type: Game type
             level: Level number
@@ -558,9 +558,9 @@ class NetworkExplorationTracker:
         """
         if action < 1 or action > 7:
             return
-        
+
         score_change = score_after - score_before
-        
+
         try:
             existing = self.db.execute_query("""
                 SELECT coverage_id, times_used, unique_agents,
@@ -569,7 +569,7 @@ class NetworkExplorationTracker:
                 FROM network_action_coverage
                 WHERE game_type = ? AND level_number = ? AND action_number = ?
             """, (game_type, level, action))
-            
+
             if existing:
                 row = existing[0]
                 new_uses = row['times_used'] + 1
@@ -577,14 +577,14 @@ class NetworkExplorationTracker:
                 new_decreases = row['score_decreases'] + (1 if score_change < 0 else 0)
                 new_no_change = row['no_change'] + (1 if score_change == 0 else 0)
                 new_deaths = row['caused_death'] + (1 if caused_death else 0)
-                
+
                 # Calculate new success rate (positive score changes)
                 new_success_rate = new_increases / max(1, new_uses)
-                
+
                 # Calculate running average score change
                 old_avg = row['avg_score_change']
                 new_avg = (old_avg * row['times_used'] + score_change) / new_uses
-                
+
                 self.db.execute_query("""
                     UPDATE network_action_coverage
                     SET times_used = ?,
@@ -617,14 +617,14 @@ class NetworkExplorationTracker:
                     1 if caused_death else 0,
                     success_rate, float(score_change)
                 ))
-                
+
         except Exception as e:
             logger.debug(f"[EXPLORATION] Record action failed: {e}")
-    
+
     # =========================================================================
     # UTILITY METHODS
     # =========================================================================
-    
+
     def get_exploration_priority_action(
         self,
         game_type: str,
@@ -635,29 +635,29 @@ class NetworkExplorationTracker:
     ) -> Optional[int]:
         """
         Get the best action to take for exploration purposes.
-        
+
         Prioritizes:
         1. Untried actions
         2. Actions that move toward unexplored regions
         3. Underexplored actions
-        
+
         Args:
             game_type: Current game
             level: Current level
             current_position: Agent position
             frame_width, frame_height: Frame dimensions
-            
+
         Returns:
             Recommended action number, or None
         """
         context = self.get_exploration_context_for_reasoning(
             game_type, level, current_position, frame_width, frame_height
         )
-        
+
         # Priority 1: Completely untried actions
         if context['exploration_recommendations']['untried_actions']:
             return context['exploration_recommendations']['untried_actions'][0]
-        
+
         # Priority 2: Action toward unexplored region
         direction = context.get('suggested_direction')
         if direction:
@@ -669,13 +669,13 @@ class NetworkExplorationTracker:
             }
             if direction in direction_to_action:
                 return direction_to_action[direction]
-        
+
         # Priority 3: Underexplored actions
         if context['exploration_recommendations']['underexplored_actions']:
             return context['exploration_recommendations']['underexplored_actions'][0]
-        
+
         return None
-    
+
     def clear_level_exploration(self, game_type: str, level: int):
         """Clear exploration data for a specific level (use sparingly)."""
         try:
@@ -699,26 +699,26 @@ class NetworkExplorationTracker:
     ) -> int:
         """
         Flush current session's exploration to the network database.
-        
+
         Called before proactive reset to ensure all learned exploration
         data is persisted before the reset occurs.
-        
+
         Args:
             game_type: Game type
             level: Level number
             agent_id: Agent saving the exploration
-            
+
         Returns:
             Number of regions saved/updated
         """
         if not self._session_visited:
             return 0
-        
+
         saved = 0
         try:
             for region in self._session_visited:
                 rx, ry = region
-                
+
                 # Update or insert the region (simplified - just mark as visited)
                 existing = self.db.execute_query("""
                     SELECT exploration_id, times_visited
@@ -726,7 +726,7 @@ class NetworkExplorationTracker:
                     WHERE game_type = ? AND level_number = ?
                       AND region_x = ? AND region_y = ?
                 """, (game_type, level, rx, ry))
-                
+
                 if existing:
                     # Already exists - increment visit count
                     self.db.execute_query("""
@@ -745,12 +745,12 @@ class NetworkExplorationTracker:
                          novelty_score, productivity_score, danger_score)
                         VALUES (?, ?, ?, ?, ?, 1, 1, ?, 0.95, 0.0, 0.0)
                     """, (str(uuid.uuid4()), game_type, level, rx, ry, agent_id))
-                    
+
                 saved += 1
-            
+
             logger.info(f"[EXPLORATION] Saved {saved} explored regions for {game_type} L{level}")
-            
+
         except Exception as e:
             logger.debug(f"[EXPLORATION] Session save failed: {e}")
-        
+
         return saved

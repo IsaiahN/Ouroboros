@@ -24,7 +24,7 @@ changes_made = 0
 for gl in game_levels:
     game_type = gl['game_type']
     level = gl['level_number']
-    
+
     # Get the absolute best sequence for this game/level
     c.execute("""
         SELECT sequence_id, is_active,
@@ -34,17 +34,17 @@ for gl in game_levels:
                flag_reason
         FROM winning_sequences
         WHERE game_type = ? AND level_number = ?
-        ORDER BY 
+        ORDER BY
             COALESCE(success_rate_when_reused, 0) DESC,
             COALESCE(times_referenced, 0) DESC,
             total_actions ASC
         LIMIT 1
     """, (game_type, level))
-    
+
     best = c.fetchone()
     if not best:
         continue
-    
+
     # Get current active sequence
     c.execute("""
         SELECT sequence_id,
@@ -53,18 +53,18 @@ for gl in game_levels:
                total_actions
         FROM winning_sequences
         WHERE game_type = ? AND level_number = ? AND is_active = 1
-        ORDER BY 
+        ORDER BY
             COALESCE(success_rate_when_reused, 0) DESC,
             COALESCE(times_referenced, 0) DESC
         LIMIT 1
     """, (game_type, level))
-    
+
     current_active = c.fetchone()
-    
+
     # Check if we need to swap
     need_swap = False
     reason = ""
-    
+
     if not current_active:
         # No active sequence - definitely activate best
         need_swap = True
@@ -77,12 +77,12 @@ for gl in game_levels:
         elif best['success_rate'] == current_active['success_rate'] and best['refs'] > current_active['refs'] * 2:
             need_swap = True
             reason = f"Same success, much more refs: {best['refs']} vs {current_active['refs']}"
-    
+
     if need_swap and best['is_active'] == 0:
         print(f"\n{game_type} L{level}: {reason}")
         print(f"  Deactivating current: {current_active['sequence_id'][:16] if current_active else 'None'}...")
         print(f"  Activating best: {best['sequence_id'][:16]}... ({best['success_rate']*100:.0f}% success, {best['refs']} refs)")
-        
+
         # Deactivate current active (if any)
         if current_active:
             c.execute("""
@@ -90,14 +90,14 @@ for gl in game_levels:
                 SET is_active = 0, flag_reason = 'replaced_by_better'
                 WHERE sequence_id = ?
             """, (current_active['sequence_id'],))
-        
+
         # Activate the best
         c.execute("""
             UPDATE winning_sequences
             SET is_active = 1, flag_reason = 'reactivated_best_in_class'
             WHERE sequence_id = ?
         """, (best['sequence_id'],))
-        
+
         changes_made += 1
 
 conn.commit()
@@ -110,7 +110,7 @@ print("FINAL STATUS - ACTIVE SEQUENCES PER GAME/LEVEL")
 print("=" * 100)
 
 c.execute("""
-    SELECT 
+    SELECT
         game_type,
         level_number,
         sequence_id,

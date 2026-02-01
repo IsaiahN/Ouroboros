@@ -11,8 +11,8 @@ Tables:
 
 From LS20 DEFEAT PLAN (renamed to SYMBOLIC MECHANICS for universal applicability).
 """
-import sqlite3
 import os
+import sqlite3
 from datetime import datetime
 
 
@@ -20,9 +20,9 @@ def migrate(db_path: str = "core_data.db"):
     """Apply the symbolic mechanics migration."""
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    
+
     print("[MIGRATION] Adding SYMBOLIC MECHANICS tables...")
-    
+
     # 1. Symbolic state tracking for key/lock puzzles
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS symbolic_state_hypotheses (
@@ -44,7 +44,7 @@ def migrate(db_path: str = "core_data.db"):
         )
     """)
     print("[OK] Created symbolic_state_hypotheses table")
-    
+
     # 2. Tool effect hypotheses for transformation puzzles
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tool_effect_hypotheses (
@@ -64,7 +64,7 @@ def migrate(db_path: str = "core_data.db"):
         )
     """)
     print("[OK] Created tool_effect_hypotheses table")
-    
+
     # 3. UI layout hypotheses for HUD detection
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ui_layout_hypotheses (
@@ -84,7 +84,7 @@ def migrate(db_path: str = "core_data.db"):
         )
     """)
     print("[OK] Created ui_layout_hypotheses table")
-    
+
     # 4. Remote effect hypotheses for action-at-distance
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS remote_effect_hypotheses (
@@ -105,7 +105,7 @@ def migrate(db_path: str = "core_data.db"):
         )
     """)
     print("[OK] Created remote_effect_hypotheses table")
-    
+
     # 5. Goal structure hypotheses for compound goals
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS goal_structure_hypotheses (
@@ -124,7 +124,7 @@ def migrate(db_path: str = "core_data.db"):
         )
     """)
     print("[OK] Created goal_structure_hypotheses table")
-    
+
     # Create indexes for fast lookup
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_symbolic_state_game ON symbolic_state_hypotheses(game_type, level_number)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_symbolic_state_role ON symbolic_state_hypotheses(object_role, is_active)")
@@ -136,10 +136,10 @@ def migrate(db_path: str = "core_data.db"):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_goal_structure_game ON goal_structure_hypotheses(game_type)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_goal_structure_type ON goal_structure_hypotheses(goal_type, is_active)")
     print("[OK] Created indexes")
-    
+
     conn.commit()
     conn.close()
-    
+
     print(f"[MIGRATION] SYMBOLIC MECHANICS tables added to {db_path}")
     return True
 

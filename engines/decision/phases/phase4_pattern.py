@@ -14,10 +14,11 @@ This phase answers: "Does this situation match any known pattern?"
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import logging
-from typing import List, Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from engines.registry import EngineRegistry
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 class PatternPhase:
     """
     Phase 4: Pattern matching across all sources.
-    
+
     Queries:
     - EmbeddingMatcher for neural similarity
     - CODSEngine for operator suggestions
@@ -42,10 +43,10 @@ class PatternPhase:
     - TriggerSequenceTracker for trigger chains
     - AbstractionEngine for templates
     """
-    
+
     def __init__(self, engines: 'EngineRegistry'):
         self.engines = engines
-    
+
     def execute(
         self,
         game_state: 'GameState',
@@ -56,15 +57,15 @@ class PatternPhase:
     ) -> PatternContext:
         """
         Gather all pattern matches.
-        
+
         Queries multiple engines and combines results into ranked suggestions.
         """
         suggestions: List[PatternMatch] = []
-        
+
         # === Embedding Matches ===
         embedding_matches = self._get_embedding_matches(game_state, orient_ctx)
         suggestions.extend(embedding_matches)
-        
+
         # === CODS Suggestion ===
         cods_suggestion = self._get_cods_suggestion(game_state, reason_ctx)
         if cods_suggestion and cods_suggestion.get('action'):
@@ -74,14 +75,14 @@ class PatternPhase:
                 source="cods",
                 evidence=cods_suggestion.get('operator', 'unknown operator'),
             ))
-        
+
         # === Universal Patterns ===
         universal_matches = self._get_universal_patterns(game_state, orient_ctx)
         suggestions.extend(universal_matches)
-        
+
         # === Resonance Score ===
         resonance_score = self._get_resonance_score(game_state)
-        
+
         # === Trigger Chains ===
         trigger_chains = self._get_trigger_chains(game_state)
         for chain in trigger_chains:
@@ -92,7 +93,7 @@ class PatternPhase:
                     source="trigger",
                     evidence=f"Trigger chain: {chain.get('pattern', 'unknown')}",
                 ))
-        
+
         # === Abstraction Template ===
         template = self._get_abstraction_template(game_state)
         if template and template.get('suggested_action'):
@@ -102,13 +103,13 @@ class PatternPhase:
                 source="abstraction",
                 evidence=f"Template: {template.get('name', 'unknown')}",
             ))
-        
+
         # === Sort by confidence ===
         suggestions.sort(key=lambda x: -x.confidence)
-        
+
         # === Check for proven sequence ===
         has_proven = ground_ctx.network_sequence_available
-        
+
         # Build context
         ctx = PatternContext(
             pattern_suggestions=suggestions,
@@ -118,17 +119,17 @@ class PatternPhase:
             resonance_score=resonance_score,
             trigger_chains=trigger_chains,
         )
-        
+
         # Validate contract
         ctx.validate()
-        
+
         logger.debug(
             f"[PATTERN] suggestions={len(suggestions)}, resonance={resonance_score:.2f}, "
             f"cods={'yes' if cods_suggestion else 'no'}, proven_seq={has_proven}"
         )
-        
+
         return ctx
-    
+
     def _get_embedding_matches(
         self,
         game_state: 'GameState',
@@ -136,14 +137,14 @@ class PatternPhase:
     ) -> List[PatternMatch]:
         """Get matches from embedding similarity."""
         matches: List[PatternMatch] = []
-        
+
         embedding_matcher = self.engines.get('embedding_matcher')
         if not embedding_matcher:
             # Try self_model as fallback
             self_model = self.engines.get('self_model')
             if self_model and hasattr(self_model, 'get_embedding_suggested_action'):
                 embedding_matcher = self_model
-        
+
         if embedding_matcher:
             try:
                 if hasattr(embedding_matcher, 'find_similar'):
@@ -178,9 +179,9 @@ class PatternPhase:
                         ))
             except Exception as e:
                 logger.debug(f"[PATTERN] EmbeddingMatcher error: {e}")
-        
+
         return matches
-    
+
     def _get_cods_suggestion(
         self,
         game_state: 'GameState',
@@ -201,9 +202,9 @@ class PatternPhase:
                         return result
             except Exception as e:
                 logger.debug(f"[PATTERN] CODSEngine error: {e}")
-        
+
         return None
-    
+
     def _get_universal_patterns(
         self,
         game_state: 'GameState',
@@ -211,7 +212,7 @@ class PatternPhase:
     ) -> List[PatternMatch]:
         """Get matches from universal pattern engine."""
         matches: List[PatternMatch] = []
-        
+
         universal_engine = self.engines.get('universal_patterns')
         if universal_engine:
             try:
@@ -231,9 +232,9 @@ class PatternPhase:
                                 ))
             except Exception as e:
                 logger.debug(f"[PATTERN] UniversalPatternEngine error: {e}")
-        
+
         return matches
-    
+
     def _get_resonance_score(self, game_state: 'GameState') -> float:
         """Get cross-domain resonance score."""
         resonance_detector = self.engines.get('resonance_detector')
@@ -257,13 +258,13 @@ class PatternPhase:
                         return min(1.0, total / len(patterns))
             except Exception as e:
                 logger.debug(f"[PATTERN] ResonanceDetector error: {e}")
-        
+
         return 0.0
-    
+
     def _get_trigger_chains(self, game_state: 'GameState') -> List[Dict[str, Any]]:
         """Get trigger sequence chains."""
         chains: List[Dict[str, Any]] = []
-        
+
         trigger_tracker = self.engines.get('trigger_sequences')
         if trigger_tracker:
             try:
@@ -277,9 +278,9 @@ class PatternPhase:
                         chains.extend(result)
             except Exception as e:
                 logger.debug(f"[PATTERN] TriggerSequenceTracker error: {e}")
-        
+
         return chains
-    
+
     def _get_abstraction_template(
         self, game_state: 'GameState'
     ) -> Optional[Dict[str, Any]]:
@@ -304,5 +305,5 @@ class PatternPhase:
                         return {'should_use': True, 'confidence': 0.6}
             except Exception as e:
                 logger.debug(f"[PATTERN] AbstractionEngine error: {e}")
-        
+
         return None

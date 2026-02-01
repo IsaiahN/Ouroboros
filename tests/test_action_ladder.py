@@ -5,7 +5,6 @@ import pytest
 
 from core_gameplay import GameplayEngine
 
-
 # These tests require extensive mocking due to GameplayEngine's many dependencies.
 # Skip until mocking infrastructure is updated to match current codebase.
 pytestmark = pytest.mark.skip(reason="Tests require extensive mocking updates for current GameplayEngine")

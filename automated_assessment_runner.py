@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 """
@@ -21,11 +22,11 @@ Called from autonomous_evolution_runner.py after each generation completes
 """
 
 import logging
-import subprocess
 import sqlite3
+import subprocess
 from datetime import datetime
-from typing import Dict, Any, List
 from pathlib import Path
+from typing import Any, Dict, List
 
 from database_interface import DatabaseInterface
 from engines.social.resonance_detector import ResonanceDetector
@@ -37,11 +38,11 @@ class AutomatedAssessmentRunner:
     """
     Runs automated system assessment after each evolution generation.
     """
-    
+
     def __init__(self, db_path: str = "core_data.db"):
         self.db_path = db_path
         self.assessment_history: List[Dict[str, Any]] = []
-    
+
     def run_post_generation_assessment(
         self,
         generation_number: int,
@@ -50,7 +51,7 @@ class AutomatedAssessmentRunner:
     ) -> Dict[str, Any]:
         """
         Run comprehensive assessment after generation completes.
-        
+
         Returns:
             Dictionary with assessment results:
             - level_completion_rate
@@ -61,56 +62,56 @@ class AutomatedAssessmentRunner:
             - recommendations
         """
         logger.info(f"[AutoAssessment] Running post-generation assessment for Gen {generation_number}")
-        
+
         assessment = {
             'generation_number': generation_number,
             'timestamp': datetime.now().isoformat(),
             'games_played': games_played,
             'agents_active': agents_active
         }
-        
+
         # Metric 1: Level completion rate
         assessment['level_completion'] = self._assess_level_completion()
-        
+
         # Metric 2: Abstraction engine usage
         assessment['abstraction_usage'] = self._assess_abstraction_usage()
-        
+
         # Metric 3: Breakthrough momentum detection
         assessment['breakthrough_momentum'] = self._assess_breakthrough_momentum()
-        
+
         # Metric 4: Sequence validation rate
         assessment['sequence_validation'] = self._assess_sequence_validation()
-        
+
         # Metric 5: Prestige distribution
         assessment['prestige_distribution'] = self._assess_prestige_distribution()
-        
+
         # Metric 6: Multi-stage matching effectiveness
         assessment['matching_pipeline'] = self._assess_matching_pipeline()
-        
+
         # Metric 7: Subgoal planning effectiveness
         assessment['subgoal_planning'] = self._assess_subgoal_planning()
-        
+
         # Metric 8: Resonance detection (cross-role pattern convergence)
         # FIX 2026-01-16: Run resonance detection every generation to populate resonance_patterns table
         assessment['resonance_detection'] = self._run_resonance_detection()
-        
+
         # Generate recommendations
         assessment['recommendations'] = self._generate_recommendations(assessment)
-        
+
         # Store assessment in database
         self._store_assessment(assessment)
-        
+
         # Store in memory
         self.assessment_history.append(assessment)
-        
+
         logger.info(f"[AutoAssessment] Completed for Gen {generation_number}")
         return assessment
-    
+
     def _assess_level_completion(self) -> Dict[str, Any]:
         """Measure level completion rate trends."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         try:
             # Get recent level wins
             cursor.execute("""
@@ -118,18 +119,18 @@ class AutomatedAssessmentRunner:
                 WHERE discovered_at >= datetime('now', '-24 hours')
             """)
             recent_wins = cursor.fetchone()[0]
-            
+
             # Get total games played recently (use agent_arc_performance table which definitely exists)
             cursor.execute("""
                 SELECT COUNT(*) FROM agent_arc_performance
                 WHERE timestamp >= datetime('now', '-24 hours')
             """)
             recent_games = cursor.fetchone()[0]
-            
+
             conn.close()
-            
+
             rate = (recent_wins / recent_games * 100) if recent_games > 0 else 0
-            
+
             return {
                 'recent_wins': recent_wins,
                 'recent_games': recent_games,
@@ -145,39 +146,39 @@ class AutomatedAssessmentRunner:
                 'status': 'insufficient_data',
                 'error': str(e)
             }
-    
+
     def _assess_abstraction_usage(self, generations_lookback: int = 5) -> Dict[str, Any]:
         """Track abstraction engine usage and effectiveness based on generations."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # First check if abstraction is configured as enabled
         try:
-            from abstraction_config import is_abstraction_enabled, ENABLE_ABSTRACTION
+            from abstraction_config import ENABLE_ABSTRACTION, is_abstraction_enabled
             config_enabled = is_abstraction_enabled()
         except ImportError:
             config_enabled = False
-        
+
         try:
             # Check for winning sequences (evidence of gameplay)
             cursor.execute("""
                 SELECT COUNT(*) FROM winning_sequences
             """)
             total_sequences = cursor.fetchone()[0]
-            
+
             # Check for game_results with actions
             cursor.execute("""
                 SELECT COUNT(*) FROM game_results
                 WHERE actions_taken > 0
             """)
             games_with_actions = cursor.fetchone()[0]
-            
+
             conn.close()
-            
+
             # Abstraction is "active" if configured AND there's gameplay happening
             # OR if we simply haven't run enough games yet
             has_activity = total_sequences > 0 or games_with_actions > 0
-            
+
             if config_enabled and has_activity:
                 status = 'active'
                 recommendation = 'Abstraction engine enabled and working'
@@ -187,7 +188,7 @@ class AutomatedAssessmentRunner:
             else:
                 status = 'disabled'
                 recommendation = 'Set ENABLE_ABSTRACTION=true in abstraction_config.py'
-            
+
             return {
                 'config_enabled': config_enabled,
                 'total_sequences': total_sequences,
@@ -202,12 +203,12 @@ class AutomatedAssessmentRunner:
                 'status': 'active' if config_enabled else 'disabled',
                 'recommendation': 'Abstraction enabled (no game data yet)' if config_enabled else 'Enable abstraction in config'
             }
-    
+
     def _assess_breakthrough_momentum(self, generations_lookback: int = 5) -> Dict[str, Any]:
         """Track breakthrough momentum detections based on generations."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         try:
             # Get the minimum generation to look back at
             cursor.execute("""
@@ -216,7 +217,7 @@ class AutomatedAssessmentRunner:
             result = cursor.fetchone()
             max_gen = result[0] if result and result[0] else 0
             min_gen = max(0, max_gen - generations_lookback)
-            
+
             # Count breakthrough detections from game_results in recent generations
             cursor.execute("""
                 SELECT COUNT(*) FROM game_results gr
@@ -225,19 +226,19 @@ class AutomatedAssessmentRunner:
                 AND gr.level_wins > 0
             """, (min_gen,))
             level_wins_count = cursor.fetchone()[0]
-            
+
             # Also check for breakthrough logs
             cursor.execute("""
                 SELECT COUNT(*) FROM database_logs
                 WHERE message LIKE '%BREAKTHROUGH%' OR message LIKE '%breakthrough%'
             """)
             breakthrough_logs = cursor.fetchone()[0]
-            
+
             conn.close()
-            
+
             # Combined breakthrough count
             breakthrough_count = level_wins_count + breakthrough_logs
-            
+
             return {
                 'breakthrough_detections': breakthrough_count,
                 'level_wins_recent': level_wins_count,
@@ -252,12 +253,12 @@ class AutomatedAssessmentRunner:
                 'status': 'no_data',
                 'error': str(e)
             }
-    
+
     def _assess_sequence_validation(self) -> Dict[str, Any]:
         """Monitor sequence validation success rate."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         try:
             # Get recent sequence validation attempts
             cursor.execute("""
@@ -265,10 +266,10 @@ class AutomatedAssessmentRunner:
                 WHERE is_active = 1 AND discovered_at >= datetime('now', '-7 days')
             """)
             active_sequences = cursor.fetchone()[0]
-            
+
             # Get validation success rate
             cursor.execute("""
-                SELECT 
+                SELECT
                     COUNT(*) as total,
                     SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful
                 FROM sequence_validation_attempts
@@ -277,11 +278,11 @@ class AutomatedAssessmentRunner:
             validation_data = cursor.fetchone()
             total_validations = validation_data[0] if validation_data else 0
             successful_validations = validation_data[1] if validation_data else 0
-            
+
             conn.close()
-            
+
             success_rate = (successful_validations / total_validations * 100) if total_validations > 0 else 0
-            
+
             return {
                 'active_sequences': active_sequences,
                 'total_validations': total_validations,
@@ -296,31 +297,31 @@ class AutomatedAssessmentRunner:
                 'status': 'no_data',
                 'error': str(e)
             }
-    
+
     def _assess_prestige_distribution(self) -> Dict[str, Any]:
         """Check for prestige parasites and distribution health."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         try:
             # Get prestige statistics (using discovery_prestige column)
             cursor.execute("""
-                SELECT AVG(discovery_prestige), MAX(discovery_prestige), MIN(discovery_prestige) 
+                SELECT AVG(discovery_prestige), MAX(discovery_prestige), MIN(discovery_prestige)
                 FROM agents
                 WHERE is_active = 1
             """)
             result = cursor.fetchone()
-            
+
             conn.close()
-            
+
             if not result or result[0] is None:
                 return {'status': 'no_data', 'avg_prestige': 0, 'has_parasite': False}
-            
+
             avg_prestige, max_prestige, min_prestige = result
-            
+
             # Check for parasites (>10x average)
             has_parasite = max_prestige > (avg_prestige * 10) if avg_prestige > 0 else False
-            
+
             return {
                 'avg_prestige': avg_prestige,
                 'max_prestige': max_prestige,
@@ -336,7 +337,7 @@ class AutomatedAssessmentRunner:
                 'has_parasite': False,
                 'error': str(e)
             }
-    
+
     def _assess_matching_pipeline(self) -> Dict[str, Any]:
         """Evaluate multi-stage matching pipeline effectiveness."""
         # This would query logs or pipeline statistics
@@ -345,12 +346,12 @@ class AutomatedAssessmentRunner:
             'status': 'needs_logging',
             'recommendation': 'Add pipeline statistics logging'
         }
-    
+
     def _assess_subgoal_planning(self) -> Dict[str, Any]:
         """Evaluate subgoal planning activation and success."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         try:
             # Check for subgoal-related logs
             cursor.execute("""
@@ -358,7 +359,7 @@ class AutomatedAssessmentRunner:
                 WHERE message LIKE '%subgoal%' AND timestamp >= datetime('now', '-24 hours')
             """)
             subgoal_logs = cursor.fetchone()[0]
-            
+
             # Check for actual subgoal plans in database
             cursor.execute("""
                 SELECT COUNT(*) as total_plans,
@@ -369,11 +370,11 @@ class AutomatedAssessmentRunner:
             plan_data = cursor.fetchone()
             total_plans = plan_data[0] if plan_data else 0
             completed_plans = plan_data[1] if plan_data else 0
-            
+
             conn.close()
-            
+
             completion_rate = (completed_plans / total_plans * 100) if total_plans > 0 else 0
-            
+
             return {
                 'subgoal_activations': subgoal_logs,
                 'total_plans': total_plans,
@@ -390,11 +391,11 @@ class AutomatedAssessmentRunner:
                 'status': 'no_data',
                 'recommendation': 'Subgoal tables not available'
             }
-    
+
     def _run_resonance_detection(self) -> Dict[str, Any]:
         """
         Run resonance detection to find cross-role pattern convergence.
-        
+
         FIX 2026-01-16: Added to populate resonance_patterns table which was empty.
         Resonance = when agents with different roles independently discover same patterns.
         This is strong evidence of objective truth (not bias-driven).
@@ -402,13 +403,13 @@ class AutomatedAssessmentRunner:
         try:
             db = DatabaseInterface(self.db_path)
             detector = ResonanceDetector(db)
-            
+
             # Run detection - this finds patterns and stores them
             resonant_patterns = detector.detect_resonance()
-            
+
             # Get summary stats
             summary = detector.get_resonance_summary()
-            
+
             return {
                 'patterns_detected_this_run': len(resonant_patterns),
                 'total_resonant_patterns': summary.get('total_resonant_patterns', 0),
@@ -417,7 +418,7 @@ class AutomatedAssessmentRunner:
                 'status': 'active' if len(resonant_patterns) > 0 else 'no_patterns',
                 'recommendation': 'Resonance detection working' if resonant_patterns else 'Need more diverse role discoveries'
             }
-            
+
         except Exception as e:
             logger.error(f"[RESONANCE] Detection failed: {e}")
             return {
@@ -427,15 +428,15 @@ class AutomatedAssessmentRunner:
                 'error': str(e),
                 'recommendation': 'Fix resonance detector errors'
             }
-    
+
     def _generate_recommendations(self, assessment: Dict[str, Any]) -> List[str]:
         """Generate actionable recommendations based on assessment."""
         recommendations = []
-        
+
         # Level completion
         if assessment['level_completion']['completion_rate'] < 40:
             recommendations.append("CRITICAL: Level completion rate below 40%. Review budget allocation and sequence matching.")
-        
+
         # Abstraction usage - check config status
         abstraction_status = assessment['abstraction_usage']['status']
         if abstraction_status == 'disabled':
@@ -443,32 +444,32 @@ class AutomatedAssessmentRunner:
         elif abstraction_status == 'waiting':
             recommendations.append("INFO: Abstraction engine enabled. Run more games to see activity.")
         # 'active' status = no warning needed
-        
+
         # Breakthrough momentum - context-aware
         breakthrough_status = assessment['breakthrough_momentum']['status']
         if breakthrough_status == 'low':
             recommendations.append("INFO: Low breakthrough detections. Consider adjusting detection thresholds.")
         elif breakthrough_status == 'no_activity':
             recommendations.append("INFO: No breakthroughs yet. Run more generations to accumulate data.")
-        
+
         # Prestige parasites
         if assessment['prestige_distribution'].get('has_parasite'):
             recommendations.append("ACTION REQUIRED: Prestige parasite detected. Review prestige dampening system.")
-        
+
         # Subgoal planning
         if assessment['subgoal_planning']['status'] == 'inactive':
             recommendations.append("INTEGRATION NEEDED: Subgoal planning not active. Integrate subgoal_planning_activator.py")
-        
+
         if not recommendations:
             recommendations.append("EXCELLENT: All systems operating within normal parameters.")
-        
+
         return recommendations
-    
+
     def _store_assessment(self, assessment: Dict[str, Any]):
         """Store assessment results in database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # Create table if not exists
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS automated_assessments (
@@ -483,7 +484,7 @@ class AutomatedAssessmentRunner:
                 full_data TEXT
             )
         """)
-        
+
         # Insert assessment
         cursor.execute("""
             INSERT INTO automated_assessments (
@@ -501,27 +502,27 @@ class AutomatedAssessmentRunner:
             '\n'.join(assessment['recommendations']),
             str(assessment)
         ))
-        
+
         conn.commit()
         conn.close()
-    
+
     def get_trend_analysis(self, last_n_generations: int = 10) -> Dict[str, Any]:
         """Analyze trends over last N generations."""
         if len(self.assessment_history) < 2:
             return {'status': 'insufficient_data'}
-        
+
         recent = self.assessment_history[-last_n_generations:]
-        
+
         # Track completion rate trend
         completion_rates = [a['level_completion'].get('completion_rate', 0) for a in recent]
-        
+
         trend = {
             'completion_rate_trend': 'improving' if completion_rates[-1] > completion_rates[0] else 'declining',
             'avg_completion_rate': sum(completion_rates) / len(completion_rates),
             'best_generation': max(recent, key=lambda x: x['level_completion'].get('completion_rate', 0))['generation_number'],
             'total_breakthroughs': sum(a['breakthrough_momentum'].get('breakthrough_detections', 0) for a in recent)
         }
-        
+
         return trend
 
 
@@ -529,18 +530,18 @@ class AutomatedAssessmentRunner:
 if __name__ == "__main__":
     # Quick verification
     runner = AutomatedAssessmentRunner()
-    
+
     # Run test assessment
     assessment = runner.run_post_generation_assessment(
         generation_number=1,
         games_played=100,
         agents_active=50
     )
-    
+
     print(f"Assessment complete:")
     print(f"  Level completion: {assessment['level_completion']['completion_rate']:.1f}%")
     print(f"  Breakthroughs: {assessment['breakthrough_momentum']['breakthrough_detections']}")
     print(f"  Recommendations: {len(assessment['recommendations'])}")
-    
+
     for rec in assessment['recommendations']:
         print(f"    - {rec}")

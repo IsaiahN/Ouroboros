@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
 
 import json
@@ -7,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from database_interface import DatabaseInterface
-
 
 # =============================================================================
 # PERSONA BUDGET MANAGER CONSTANTS (from agent_consciousness_synthesis.md)
@@ -34,7 +34,7 @@ class PersonaDecision:
 
 class PersonaManager:
     """Lightweight persona runtime for proposal/outcome logging and reliability updates.
-    
+
     Includes PersonaBudgetManager functionality from agent_consciousness_synthesis.md:
     - Hard limits on total personas (MAX_ACTIVE_PERSONAS = 12)
     - Hard limits on temporary personas (MAX_TEMPORARY_PERSONAS = 5)
@@ -64,19 +64,19 @@ class PersonaManager:
     def can_spawn_persona(self, persona_type: str = 'experimental', imagination_remaining: Optional[float] = None) -> tuple[bool, str]:
         """
         Check if spawning a new persona is allowed within budget.
-        
+
         Part of PersonaBudgetManager functionality.
-        
+
         Args:
             persona_type: Type of persona ('core', 'experimental', 'temporary')
             imagination_remaining: Remaining imagination budget (0.0-1.0)
-            
+
         Returns:
             Tuple of (allowed: bool, reason: str)
         """
         if not self.agent_id:
             return False, 'no_agent_id'
-        
+
         # Query current persona count
         try:
             rows = self.db.execute_query(
@@ -86,7 +86,7 @@ class PersonaManager:
             personas = rows or []
         except Exception:
             return True, 'db_error_allowing'
-        
+
         current_count = len(personas)
         temp_count = sum(1 for p in personas if (p.get('persistence_class') or '').lower() == 'temporary')
 
@@ -94,41 +94,41 @@ class PersonaManager:
         allowance_cap = self._persona_allowance or MAX_ACTIVE_PERSONAS
         if current_count >= allowance_cap:
             return False, 'allowance_limit'
-        
+
         # Check against hard limits
         if current_count >= MAX_ACTIVE_PERSONAS:
             return False, 'at_hard_limit'
 
         if persona_type.lower() == 'temporary' and temp_count >= MAX_TEMPORARY_PERSONAS:
             return False, 'temporary_limit'
-        
+
         # Check imagination budget
         effective_imagination = self._imagination_remaining if imagination_remaining is None else imagination_remaining
         if effective_imagination is None:
             effective_imagination = 1.0
         if effective_imagination < 0.1:
             return False, 'imagination_exhausted'
-        
+
         return True, 'allowed'
 
     def spawn_temporary_persona(self, spec: Dict[str, Any]) -> Optional[str]:
         """
         Spawn a temporary investigating persona if budget allows.
-        
+
         Used by QuestioningEngineWithTeeth to spawn investigators.
-        
+
         Args:
             spec: Persona specification with type, investigating, query, etc.
-            
+
         Returns:
             Persona ID if spawned, None if blocked by budget
         """
         allowed, reason = self.can_spawn_persona('temporary')
         if not allowed:
             return None
-        
+
         persona_id = f"persona_tmp_{spec.get('investigating', 'unknown')}_{uuid.uuid4().hex[:6]}"
-        
+
         try:
             self.ensure_persona(
                 persona_id,
@@ -144,31 +144,31 @@ class PersonaManager:
     # PERSONA-THEORY BINDING (from agent_consciousness_synthesis.md)
     # Personas bound to theories die when theories are contradicted
     # =========================================================================
-    
+
     def bind_persona_to_theory(self, persona_id: str, theory: Dict[str, Any]) -> bool:
         """
         Bind a persona to a specific theory.
-        
+
         When the theory is contradicted, the persona dies with it.
         This prevents zombie personas advocating for dead theories.
-        
+
         Args:
             persona_id: The persona to bind
             theory: The theory dict with at least 'theory_id' and 'formed_at_action'
-            
+
         Returns:
             True if binding succeeded
         """
         if not persona_id or not theory:
             return False
-        
+
         theory_id = theory.get('theory_id') or theory.get('hypothesis')
         formed_at = theory.get('formed_at_action') or theory.get('formed_at', 0)
-        
+
         # Store binding in database
         try:
             self.db.execute_query(
-                """INSERT OR REPLACE INTO persona_theory_bindings 
+                """INSERT OR REPLACE INTO persona_theory_bindings
                    (persona_id, theory_id, bound_at_action, agent_id, created_at)
                    VALUES (?, ?, ?, ?, datetime('now'))""",
                 (persona_id, str(theory_id), formed_at, self.agent_id)
@@ -177,16 +177,16 @@ class PersonaManager:
         except Exception:
             # Table might not exist - that's okay, binding is optional
             return False
-    
+
     def unbind_personas_for_theory(self, theory_id: str) -> int:
         """
         When a theory is contradicted, unbind and optionally prune its personas.
-        
+
         Returns count of personas unbound.
         """
         if not theory_id:
             return 0
-        
+
         try:
             rows = self.db.execute_query(
                 "SELECT persona_id FROM persona_theory_bindings WHERE theory_id=? AND agent_id=?",
@@ -194,7 +194,7 @@ class PersonaManager:
             )
             if not rows:
                 return 0
-            
+
             count = 0
             for row in rows:
                 pid = row.get('persona_id')
@@ -205,43 +205,43 @@ class PersonaManager:
                         (pid, self.agent_id)
                     )
                     count += 1
-            
+
             return count
         except Exception:
             return 0
-    
+
     def prune_theory_orphans(self, working_theory: Optional[Dict[str, Any]] = None) -> int:
         """
         Aggressive pruning of personas not bound to current theory.
-        
+
         Called when theory changes significantly.
-        
+
         Args:
             working_theory: Current active theory (personas not bound to this die)
-            
+
         Returns:
             Number of personas pruned
         """
         if not self.agent_id:
             return 0
-        
+
         pruned = 0
         current_theory_id = None
         if working_theory:
             current_theory_id = str(working_theory.get('theory_id') or working_theory.get('hypothesis', ''))
-        
+
         try:
             # Get all bound personas
             rows = self.db.execute_query(
                 "SELECT persona_id, theory_id FROM persona_theory_bindings WHERE agent_id=?",
                 (self.agent_id,)
             )
-            
+
             if rows:
                 for row in rows:
                     bound_theory = row.get('theory_id')
                     pid = row.get('persona_id')
-                    
+
                     # If bound to a different theory and not core, consider pruning
                     if bound_theory and bound_theory != current_theory_id and pid:
                         # Check if persona is temporary
@@ -262,11 +262,11 @@ class PersonaManager:
                                     (pid,)
                                 )
                                 pruned += 1
-            
+
             return pruned
         except Exception:
             return 0
-    
+
     def generate_proposals(
         self,
         game_state: Any,
@@ -275,16 +275,16 @@ class PersonaManager:
     ) -> List[Dict[str, Any]]:
         """
         Generate diverse action proposals from multiple personas.
-        
+
         Each persona has a different bias/personality that influences
         its action preference:
         - Explorer: prefers novel actions, high risk tolerance
         - Cautious: prefers safe actions, avoids known dangers
         - Optimizer: prefers efficient actions, follows proven paths
         - Pioneer: prefers unknown territory, discovery-oriented
-        
+
         This is the key function for Consciousness Theory CON-002.
-        
+
         Returns:
             List of proposals, each with:
             - action: proposed action (ACTION1-7)
@@ -294,11 +294,11 @@ class PersonaManager:
         """
         # FIX: Don't require agent_id - use default personas if not available
         # The agent_id check was causing ALL proposals to return empty
-        
+
         proposals = []
-        available = available_actions or ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 
+        available = available_actions or ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4',
                                           'ACTION5', 'ACTION6', 'ACTION7']
-        
+
         # Get active personas for this agent (if agent_id available)
         personas = []
         if self.agent_id:
@@ -311,7 +311,7 @@ class PersonaManager:
                 personas = list(rows) if rows else []
             except Exception:
                 personas = []
-        
+
         # If no personas from DB, create default ensemble
         # This ensures we ALWAYS have proposals for deliberation
         if not personas:
@@ -320,20 +320,20 @@ class PersonaManager:
                 {'persona_id': 'cautious', 'persona_type': 'cautious', 'bias_risk': 0.2, 'novelty_bias': 0.3, 'reliability_global': 0.5},
                 {'persona_id': 'optimizer', 'persona_type': 'optimizer', 'bias_risk': 0.5, 'novelty_bias': 0.1, 'reliability_global': 0.5},
             ]
-        
+
         # Context for decision-making
         ctx = context or {}
         recent_actions = ctx.get('recent_actions', [])
         failed_actions = ctx.get('failed_actions', [])
         network_suggested = ctx.get('network_suggested', [])
-        
+
         for persona in personas:
             pid = persona.get('persona_id', 'unknown')
             ptype = (persona.get('persona_type') or 'explorer').lower()
             risk_bias = persona.get('bias_risk', 0.5) or 0.5
             novelty_bias = persona.get('novelty_bias', 0.5) or 0.5
             reliability = persona.get('reliability_global', 0.5) or 0.5
-            
+
             # Each persona type has different action preferences
             if ptype in ('explorer', 'pioneer', 'discovery'):
                 # Prefers novel actions, avoids recently tried
@@ -353,7 +353,7 @@ class PersonaManager:
                     'persona_type': ptype,
                     'reasoning': f"Explorer persona prefers novel action {best}"
                 })
-            
+
             elif ptype in ('cautious', 'validator'):
                 # Prefers safe actions, follows network
                 action_scores = {}
@@ -372,7 +372,7 @@ class PersonaManager:
                     'persona_type': ptype,
                     'reasoning': f"Cautious persona prefers safe action {best}"
                 })
-            
+
             elif ptype in ('optimizer', 'network'):
                 # Follows network suggestions closely
                 action_scores = {}
@@ -391,7 +391,7 @@ class PersonaManager:
                     'persona_type': ptype,
                     'reasoning': f"Optimizer persona follows network with {best}"
                 })
-            
+
             else:
                 # Default: random selection with slight exploration bias
                 import random
@@ -403,66 +403,66 @@ class PersonaManager:
                     'persona_type': ptype,
                     'reasoning': f"Default persona proposes {action}"
                 })
-        
+
         return proposals
-    
+
     def allocate_attention(self) -> Dict[str, float]:
         """
         Allocate attention budget across active personas.
-        
+
         More personas = less attention each.
         This prevents cognitive explosion.
-        
+
         Returns:
             Dict mapping persona_id to attention weight (0.0-1.0)
         """
         if not self.agent_id:
             return {}
-        
+
         try:
             rows = self.db.execute_query(
-                """SELECT persona_id, persistence_class, reliability_global 
+                """SELECT persona_id, persistence_class, reliability_global
                    FROM persona_profiles WHERE agent_id=?""",
                 (self.agent_id,)
             )
             if not rows:
                 return {}
-            
+
             personas = list(rows)
             total_count = len(personas)
-            
+
             if total_count == 0:
                 return {}
-            
+
             # Base attention per persona (inversely proportional to count)
             base_attention = 1.0 / total_count
-            
+
             # Weight by persistence class and reliability
             attention = {}
             total_weight = 0.0
-            
+
             for p in personas:
                 pid = p.get('persona_id')
                 cls = (p.get('persistence_class') or 'experimental').lower()
                 rel = p.get('reliability_global') or 0.5
-                
+
                 # Core personas get more attention
                 class_weight = 1.5 if cls == 'core' else (0.7 if cls == 'temporary' else 1.0)
-                
+
                 # Reliable personas get more attention
                 rel_weight = 0.5 + rel
-                
+
                 weight = class_weight * rel_weight
                 attention[pid] = weight
                 total_weight += weight
-            
+
             # Normalize to sum to 1.0
             if total_weight > 0:
                 for pid in attention:
                     attention[pid] /= total_weight
-            
+
             return attention
-            
+
         except Exception:
             return {}
 
@@ -485,7 +485,7 @@ class PersonaManager:
     ) -> None:
         if persona_id in self._persona_cache:
             return
-        
+
         # FIX #9: Derive stream_type from persona_type if not provided
         # Action Proposers = Stream A (private experience)
         # Observers/Evaluators = Stream B (network wisdom)
@@ -499,7 +499,7 @@ class PersonaManager:
                 stream_type = 'neutral'  # Both streams equally
             else:
                 stream_type = 'neutral'  # Default
-        
+
         bias_str = json.dumps(bias_vector) if bias_vector is not None else None
         self.db.upsert_persona_profile(
             persona_id=persona_id,
@@ -754,7 +754,7 @@ class PersonaManager:
         ladder_trace: Dict[str, Dict[str, Any]],
         *,
         chosen_action: str,
-        chosen_reason: str,
+        _chosen_reason: str,
         chosen_rung: str,
         game_id: Optional[str],
         level_number: Optional[int],
@@ -1156,7 +1156,7 @@ class PersonaManager:
         - MAX_ACTIVE_PERSONAS = 12 (absolute cap)
         - MAX_TEMPORARY_PERSONAS = 5
         - Aggressive pruning if over limit
-        
+
         Stage gating: no-op below stage 3 unless stalled.
         """
         if not self.agent_id:
@@ -1181,7 +1181,7 @@ class PersonaManager:
                 0 if (p.get('persistence_class') or '').lower() == 'core' else 1,  # Core last
                 p.get('reliability_global') or 0.0  # Low reliability first
             ))
-            
+
             pruned_count = 0
             for p in sorted_by_rel:
                 if len(personas) - pruned_count <= MAX_ACTIVE_PERSONAS:

@@ -4,13 +4,14 @@ NOTE: This script was updated in Jan 2026.
 Original purpose was to test frame hash matching with terminal_patterns.
 Now tests position_death_patterns bucket-based death tracking.
 """
+import hashlib
 import os
 import sys
-import hashlib
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from engines.perception.terminal_pattern_detector import TerminalPatternDetector
 from database_interface import DatabaseInterface
+from engines.perception.terminal_pattern_detector import TerminalPatternDetector
 
 db = DatabaseInterface()
 detector = TerminalPatternDetector(db)
@@ -40,7 +41,7 @@ print()
 print("=== High-frequency death patterns for as66 Level 5 ===")
 r = db.execute_query("""
     SELECT bucket_x, bucket_y, bucket_size, fatal_action, death_count, danger_score
-    FROM position_death_patterns 
+    FROM position_death_patterns
     WHERE game_type = 'as66' AND level_number = 5 AND death_count >= 3
     ORDER BY death_count DESC
     LIMIT 10

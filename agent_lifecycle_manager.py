@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 """
@@ -13,12 +14,14 @@ Implements "Megaman Net Navi" philosophy:
 Author: Claude Code (Ouroboros System)
 """
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-from database_interface import DatabaseInterface
-from typing import Dict, Any, List
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import Any, Dict, List
+
+from database_interface import DatabaseInterface
 
 logger = logging.getLogger(__name__)
 
@@ -26,70 +29,70 @@ logger = logging.getLogger(__name__)
 class AgentLifecycleManager:
     """
     Manage agent lifecycle from birth → retirement → eventual deletion.
-    
+
     Philosophy: Net Navis should live their lives. Don't delete good players.
     """
-    
+
     def __init__(self, db: DatabaseInterface):
         self.db = db
-        
+
         # Lifecycle thresholds
         self.permanent_deletion_generations = 500  # Only delete after 500+ generations inactive
         self.zero_score_deletion_generations = 50  # Zero-score agents deleted faster
         self.good_player_threshold = 1.0  # Score >= 1.0 = completed at least one level
-        
+
     def retire_underperformers(self, generation: int, culling_config: Dict[str, Any]) -> Dict[str, int]:
         """
         Retire (deactivate) underperforming agents without deleting them.
-        
+
         This is the normal evolutionary pressure mechanism.
         Agents stay in database for analysis/revival.
-        
+
         Args:
             generation: Current generation
             culling_config: Configuration for culling (kept for compatibility)
-            
+
         Returns:
             Dict with retirement stats
         """
         # This function is now a wrapper - actual retirement happens in evolutionary_engine
         # and autonomous_evolution_runner. This just tracks stats.
-        
+
         with self.db._get_connection() as conn:
             # Count recently retired agents
             cursor = conn.execute("""
-                SELECT COUNT(*) 
-                FROM agents 
+                SELECT COUNT(*)
+                FROM agents
                 WHERE generation = ? AND is_active = 0
             """, (generation,))
-            
+
             retired_count = cursor.fetchone()[0]
-            
+
             return {
                 'retired': retired_count,
                 'generation': generation,
                 'permanent_deletions': 0  # Not done here
             }
-    
+
     def cleanup_ancient_inactive_agents(self, current_generation: int, dry_run: bool = False) -> Dict[str, Any]:
         """
         Permanently delete ancient inactive agents.
-        
+
         Deletion rules (safest possible):
         1. Zero-score agents: Deleted after 50 generations inactive
-        2. Low-score agents (< 1.0): Deleted after 200 generations inactive  
+        2. Low-score agents (< 1.0): Deleted after 200 generations inactive
         3. Good players (>= 1.0): Deleted after 500 generations inactive
         4. High prestige agents: NEVER deleted (archived permanently)
-        
+
         Args:
             current_generation: Current generation number
             dry_run: If True, only report what would be deleted
-            
+
         Returns:
             Deletion statistics
         """
         logger.info(f"🗑️  Agent cleanup: Generation {current_generation}")
-        
+
         stats = {
             'zero_score_deleted': 0,
             'low_score_deleted': 0,
@@ -97,11 +100,11 @@ class AgentLifecycleManager:
             'high_prestige_archived': 0,
             'total_deleted': 0
         }
-        
+
         with self.db._get_connection() as conn:
             # 1. Find ancient zero-score agents (never contributed)
             zero_score_threshold = current_generation - self.zero_score_deletion_generations
-            
+
             cursor = conn.execute("""
                 SELECT agent_id, generation, best_single_game_score, discovery_prestige
                 FROM agents
@@ -111,9 +114,9 @@ class AgentLifecycleManager:
                     AND COALESCE(total_games_won, 0) = 0
                     AND COALESCE(discovery_prestige, 0) < 10  -- Low prestige
             """, (zero_score_threshold,))
-            
+
             zero_score_agents = cursor.fetchall()
-            
+
             if not dry_run and zero_score_agents:
                 for agent_id, gen, score, prestige in zero_score_agents:
                     # Phase 2: Archive agent's knowledge before deletion
@@ -121,12 +124,12 @@ class AgentLifecycleManager:
                     conn.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
                     logger.debug(f"  Deleted zero-score agent: {agent_id} (Gen {gen})")
                 conn.commit()
-            
+
             stats['zero_score_deleted'] = len(zero_score_agents)
-            
+
             # 2. Find ancient low-score agents (minimal contribution)
             low_score_threshold = current_generation - 200  # More lenient
-            
+
             cursor = conn.execute("""
                 SELECT agent_id, generation, best_single_game_score, discovery_prestige
                 FROM agents
@@ -136,9 +139,9 @@ class AgentLifecycleManager:
                     AND COALESCE(best_single_game_score, 0) < 1.0
                     AND COALESCE(discovery_prestige, 0) < 50  -- Medium prestige
             """, (low_score_threshold,))
-            
+
             low_score_agents = cursor.fetchall()
-            
+
             if not dry_run and low_score_agents:
                 for agent_id, gen, score, prestige in low_score_agents:
                     # Phase 2: Archive agent's knowledge before deletion
@@ -146,12 +149,12 @@ class AgentLifecycleManager:
                     conn.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
                     logger.debug(f"  Deleted low-score agent: {agent_id} (Gen {gen}, Score: {score:.2f})")
                 conn.commit()
-            
+
             stats['low_score_deleted'] = len(low_score_agents)
-            
+
             # 3. Find ancient good players (respectful deletion)
             good_player_threshold = current_generation - self.permanent_deletion_generations
-            
+
             cursor = conn.execute("""
                 SELECT agent_id, generation, best_single_game_score, discovery_prestige
                 FROM agents
@@ -160,9 +163,9 @@ class AgentLifecycleManager:
                     AND COALESCE(best_single_game_score, 0) >= 1.0
                     AND COALESCE(discovery_prestige, 0) < 100  -- Not elite
             """, (good_player_threshold,))
-            
+
             good_player_agents = cursor.fetchall()
-            
+
             if not dry_run and good_player_agents:
                 for agent_id, gen, score, prestige in good_player_agents:
                     # Phase 2: Archive agent's knowledge before deletion (good players have valuable knowledge)
@@ -170,9 +173,9 @@ class AgentLifecycleManager:
                     conn.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
                     logger.debug(f"  Deleted good player (ancient): {agent_id} (Gen {gen}, Score: {score:.2f})")
                 conn.commit()
-            
+
             stats['good_player_deleted'] = len(good_player_agents)
-            
+
             # 4. Archive high-prestige agents (never delete)
             cursor = conn.execute("""
                 SELECT COUNT(*)
@@ -180,48 +183,48 @@ class AgentLifecycleManager:
                 WHERE is_active = 0
                     AND COALESCE(discovery_prestige, 0) >= 100
             """)
-            
+
             stats['high_prestige_archived'] = cursor.fetchone()[0]
-            
+
             stats['total_deleted'] = (
-                stats['zero_score_deleted'] + 
-                stats['low_score_deleted'] + 
+                stats['zero_score_deleted'] +
+                stats['low_score_deleted'] +
                 stats['good_player_deleted']
             )
-        
+
         # Logging
         if dry_run:
             logger.info(f"  [DRY RUN] Would delete {stats['total_deleted']} agents:")
         else:
             logger.info(f"  Deleted {stats['total_deleted']} ancient agents:")
-        
+
         logger.info(f"    Zero-score (50+ gen old): {stats['zero_score_deleted']}")
         logger.info(f"    Low-score (200+ gen old): {stats['low_score_deleted']}")
         logger.info(f"    Good players (500+ gen old): {stats['good_player_deleted']}")
         logger.info(f"    High prestige archived: {stats['high_prestige_archived']} (NEVER deleted)")
-        
+
         return stats
-    
+
     def _archive_agent_knowledge(self, conn, agent_id: str) -> None:
         """
         Archive agent's knowledge before deletion (Phase 2 of Biome Theory).
-        
+
         Extracts and stores:
         - Agent metadata (genome, epigenetics, sensation profile)
         - Performance stats
         - Winning sequences (already in DB, just mark creator)
         - Object control maps
         - Rule discoveries
-        
+
         This ensures no knowledge is lost when agents die - their "genetic material"
         is released into the horizontal gene transfer pool.
-        
+
         Args:
             conn: Database connection
             agent_id: Agent to archive
         """
         import json
-        
+
         try:
             # Get agent data
             cursor = conn.execute("""
@@ -231,11 +234,11 @@ class AgentLifecycleManager:
                 FROM agents
                 WHERE agent_id = ?
             """, (agent_id,))
-            
+
             agent_data = cursor.fetchone()
             if not agent_data:
                 return
-            
+
             # Archive to agent_archive table
             archive_data = {
                 'genome': agent_data[1],
@@ -247,45 +250,45 @@ class AgentLifecycleManager:
                 'prestige': agent_data[8],
                 'social_rule_adherence': agent_data[9]
             }
-            
+
             conn.execute("""
-                INSERT OR REPLACE INTO agent_archive 
+                INSERT OR REPLACE INTO agent_archive
                 (agent_id, archived_at, agent_data, generation)
                 VALUES (?, datetime('now'), ?, ?)
             """, (agent_id, json.dumps(archive_data), agent_data[4]))
-            
+
             # Archive any object control maps this agent discovered
             conn.execute("""
-                INSERT OR IGNORE INTO archived_agent_discoveries 
+                INSERT OR IGNORE INTO archived_agent_discoveries
                 (agent_id, discovery_type, discovery_data, archived_at)
-                SELECT agent_id, 'object_control', 
-                       json_object('game_id', game_id, 'level_number', level_number, 
+                SELECT agent_id, 'object_control',
+                       json_object('game_id', game_id, 'level_number', level_number,
                                    'controlled_objects', controlled_objects, 'confidence', confidence),
                        datetime('now')
                 FROM agent_object_control
                 WHERE agent_id = ?
             """, (agent_id,))
-            
+
             logger.debug(f"  Archived knowledge for agent {agent_id[:12]}")
-            
+
         except Exception as e:
             logger.debug(f"  Failed to archive agent {agent_id[:12]}: {e}")
-    
+
     def get_lifecycle_stats(self) -> Dict[str, Any]:
         """Get current agent lifecycle statistics."""
-        
+
         with self.db._get_connection() as conn:
             # Active agents
             cursor = conn.execute("SELECT COUNT(*) FROM agents WHERE is_active = 1")
             active_count = cursor.fetchone()[0]
-            
+
             # Retired agents (inactive but not deleted)
             cursor = conn.execute("SELECT COUNT(*) FROM agents WHERE is_active = 0")
             retired_count = cursor.fetchone()[0]
-            
+
             # Retired by score category
             cursor = conn.execute("""
-                SELECT 
+                SELECT
                     COUNT(*) FILTER (WHERE COALESCE(best_single_game_score, 0) = 0) as zero_score,
                     COUNT(*) FILTER (WHERE COALESCE(best_single_game_score, 0) > 0 AND COALESCE(best_single_game_score, 0) < 1.0) as low_score,
                     COUNT(*) FILTER (WHERE COALESCE(best_single_game_score, 0) >= 1.0) as good_players,
@@ -293,9 +296,9 @@ class AgentLifecycleManager:
                 FROM agents
                 WHERE is_active = 0
             """)
-            
+
             result = cursor.fetchone()
-            
+
             return {
                 'active_agents': active_count,
                 'retired_agents': retired_count,
@@ -311,13 +314,13 @@ class AgentLifecycleManager:
 
 if __name__ == "__main__":
     """Test lifecycle management"""
-    
+
     db = DatabaseInterface()
     manager = AgentLifecycleManager(db)
-    
+
     # Get current stats
     stats = manager.get_lifecycle_stats()
-    
+
     print("=" * 80)
     print("AGENT LIFECYCLE STATS")
     print("=" * 80)
@@ -331,11 +334,11 @@ if __name__ == "__main__":
     print(f"  Good players: {stats['retired_breakdown']['good_players']:,}")
     print(f"  High prestige (archived): {stats['retired_breakdown']['high_prestige']:,}")
     print()
-    
+
     # Check what would be deleted
     cursor = db.execute_query("SELECT MAX(generation) FROM agents")
     current_gen = cursor[0]['MAX(generation)'] if cursor else 0
-    
+
     print(f"Current generation: {current_gen}")
     print()
     print("Checking cleanup eligibility (DRY RUN)...")

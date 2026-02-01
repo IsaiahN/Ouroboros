@@ -1,6 +1,6 @@
 # Unified Theory Integration Architecture
-**Version**: 1.0  
-**Date**: January 2025  
+**Version**: 1.0
+**Date**: January 2025
 **Purpose**: Comprehensive integration of Network Theory, Metalearning Theory, and Consciousness Theory into a coherent cognitive architecture
 
 ---
@@ -15,11 +15,11 @@ This document synthesizes three complementary theories into a unified architectu
 
 **The Master Equation**:
 ```
-NETWORK INTELLIGENCE = 
-    Σ(Agent Consciousness) × 
-    CODS Validation × 
-    Viral Distribution × 
-    Stream Integration × 
+NETWORK INTELLIGENCE =
+    Σ(Agent Consciousness) ×
+    CODS Validation ×
+    Viral Distribution ×
+    Stream Integration ×
     Persona Synthesis
 ```
 
@@ -146,10 +146,10 @@ ELIF context.is_saturated AND w_A > 0.5:
 ```
 Stage 1: Agents learn concrete patterns
     "In game X, clicking red works"
-    
+
 Stage 2: Meta-representation unlocks (CODS validates)
     "I can treat my own strategies as objects to analyze"
-    
+
 Stage 3: Resonance detection becomes possible
     "This pattern in game X is structurally identical to game Y"
     "The 'reference object' concept transfers across domains"
@@ -239,7 +239,7 @@ CODS has foundational primitives (SEED - ~110 operations):
     - Attention, affordance detection
     - Object interaction, contingency detection
     - Social learning, motivation
-    
+
 Human-curated "polished" metaprimitives exist but are LOCKED:
     - flood_fill, detect_symmetry, flow_simulation
     - containment_check, constraint_satisfaction
@@ -272,17 +272,17 @@ INSERT INTO composed_operators (operator_id, composition_tree, status)
 VALUES ('op_123', '{"chain": ["detect_change", "filter", "map"]}', 'cobbled');
 
 -- 2. Operator proves effective through RLVR
-UPDATE composed_operators 
+UPDATE composed_operators
 SET success_rate = 0.23, cross_game_rate = 0.18, times_tested = 15
 WHERE operator_id = 'op_123';
 
 -- 3. CODS evaluates for unlock
-INSERT INTO primitive_unlock_attempts 
+INSERT INTO primitive_unlock_attempts
     (attempt_id, primitive_name, discovered_pattern, success_rate, oracle_verdict)
 VALUES ('att_456', 'detect_symmetry', '{"chain":...}', 0.23, 'approved');
 
 -- 4. Primitive unlocked for discoverer
-UPDATE primitive_status 
+UPDATE primitive_status
 SET status = 'unlocked', unlocked_by_agent = 'agent_X', unlocked_at = NOW()
 WHERE primitive_name = 'detect_symmetry';
 ```
@@ -309,7 +309,7 @@ Agents operate **outside the formal system** initially:
 ```
 IF agent_composition matches locked_primitive:
     UNLOCK → agent gets optimized human version
-    
+
 ELIF agent_composition exceeds locked_primitive performance:
     REGISTER NOVEL → humans learn from agent
     This is the "Victory 3" condition in Metalearning Theory
@@ -321,16 +321,16 @@ The unlock sequence is NOT predefined—it emerges from what agents can actually
 
 ```
 Natural difficulty progression:
-    
+
     Easy to discover (unlocked early):
     - detect_change, pattern_detection, object_tracking
-    
+
     Medium difficulty (unlocked mid-game):
     - detect_symmetry, containment_check, spatial_relationships
-    
+
     Hard to discover (unlocked late):
     - meta_representation, constraint_satisfaction, analogical_projection
-    
+
     May never be discovered (or discovered as novel):
     - Concepts humans haven't formalized
     - Novel combinations that outperform human designs
@@ -626,7 +626,7 @@ Level 7: Transfer learning (apply patterns to novel domains)
 
 ### 5.1 Individual Specialization + Collective Generality
 
-**Mechanism**: 
+**Mechanism**:
 - Stream A narrows through personal experience (agent specializes)
 - Stream B aggregates all specialists' discoveries (network generalizes)
 - New agents inherit Stream B wisdom but develop unique Stream A
@@ -634,11 +634,11 @@ Level 7: Transfer learning (apply patterns to novel domains)
 **Database Evidence**:
 ```sql
 -- Individual specialization (Stream A narrows)
-SELECT agent_id, 
+SELECT agent_id,
        COUNT(DISTINCT game_type) as games_played,
        MAX(success_rate) as peak_expertise,
        AVG(success_rate) as avg_expertise
-FROM game_results 
+FROM game_results
 GROUP BY agent_id;
 
 -- Collective generality (Stream B broadens)
@@ -796,7 +796,7 @@ WHERE pp.synthesis_source IS NOT NULL
 ```sql
 -- High-performing operators should have unlock attempts
 SELECT co.operator_id, co.success_rate, co.cross_game_rate,
-       EXISTS(SELECT 1 FROM primitive_unlock_attempts pua 
+       EXISTS(SELECT 1 FROM primitive_unlock_attempts pua
               WHERE pua.discovered_pattern LIKE '%' || co.operator_id || '%') as unlock_attempted
 FROM composed_operators co
 WHERE co.success_rate > 0.18
@@ -892,7 +892,7 @@ WHERE json_array_length(rp.game_types) >= 2
 ### A. What is an agent thinking? (Current cognitive state)
 
 ```sql
-SELECT 
+SELECT
     a.agent_id,
     a.self_network_bias as w_A_w_B,
     aom.operating_mode as cognitive_stance,
@@ -910,14 +910,14 @@ ORDER BY aom.created_at DESC LIMIT 1;
 ### B. What does Stream B know about a game?
 
 ```sql
-SELECT 
+SELECT
     vip.package_name,
     vip.action_sequence,
     vip.success_rate,
     noch.control_pattern,
     noch.reliability_score
 FROM viral_information_packages vip
-LEFT JOIN network_object_control_hypotheses noch 
+LEFT JOIN network_object_control_hypotheses noch
     ON vip.game_type = noch.game_type
 WHERE vip.game_type = ?
   AND vip.is_active = TRUE
@@ -928,7 +928,7 @@ ORDER BY vip.success_rate DESC;
 ### C. Which operators are ready for CODS review?
 
 ```sql
-SELECT 
+SELECT
     co.operator_id,
     co.name,
     co.success_rate,
@@ -945,7 +945,7 @@ ORDER BY co.success_rate DESC;
 ### D. What resonance patterns exist?
 
 ```sql
-SELECT 
+SELECT
     pattern_hash,
     resonance_score,
     role_diversity,

@@ -1,0 +1,41 @@
+# Pre-commit hooks for BitterTruth-AI
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Vulture - Dead code detection (Rule 3: No Orphaned Code)
+  - repo: https://github.com/jendrikseipp/vulture
+    rev: v2.14
+    hooks:
+      - id: vulture
+        name: vulture (dead code detection)
+        args:
+          - --min-confidence=80
+          - --exclude=deprecated/,tests/,manual_tools/
+          # Whitelist file for intentionally unused code
+          - --ignore-names=_*
+          - vulture_whitelist.py
+        files: ^(engines/|core_gameplay\.py|decision_rung_system\.py|autonomous_evolution_runner\.py)
+        pass_filenames: true
+
+  # Basic Python checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+        exclude: ^(deprecated/|\.svg$)
+      - id: trailing-whitespace
+        exclude: ^(deprecated/|\.svg$)
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-ast
+        exclude: ^deprecated/
+
+  # Import sorting
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile", "black", "--skip", "deprecated"]
+        exclude: ^deprecated/

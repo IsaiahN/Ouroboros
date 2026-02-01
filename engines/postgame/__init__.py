@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 """
@@ -29,9 +30,9 @@ This module consolidates ALL post-game processing into one location:
 
 Usage:
     from engines.postgame import PostGameProcessor
-    
+
     processor = PostGameProcessor(db)
-    
+
     # Call at game end from game_loop.py
     result = processor.process_game_end(
         game_result=result,
@@ -46,9 +47,10 @@ Following Rules:
 - Rule 10: Enhance existing architecture
 """
 
-from .orchestrator import PostGameProcessor
 from .fitness_calculator import FitnessCalculator
 from .lessons_extractor import LessonsExtractor
+from .lessons_learned import DeathCauseHypothesis, LessonsLearnedEngine
+from .orchestrator import PostGameProcessor
 from .replay_learning import ReplayLearner
 
 __all__ = [

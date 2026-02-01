@@ -1,8 +1,8 @@
 # Cognitive Operator Discovery System (CODS)
 
-**Version**: 3.0  
-**Date**: 2025-12-23  
-**Purpose**: Self-evolving cognitive vocabulary through compositional primitives, RLVR validation, and recursive self-improvement  
+**Version**: 3.0
+**Date**: 2025-12-23
+**Purpose**: Self-evolving cognitive vocabulary through compositional primitives, RLVR validation, and recursive self-improvement
 **Status**: Implementation Guide
 
 ---
@@ -493,18 +493,18 @@ REMIX_OPERATIONS = {
     'compose': lambda a, b: [a, b],                    # A then B
     'parallel': lambda a, b: (a(), b()),              # A and B simultaneously
     'conditional': lambda cond, a, b: a if cond else b,  # A or B based on condition
-    
+
     # Mutate single primitive
     'parameter_shift': lambda p, delta: p.with_params(p.params + delta),
     'invert': lambda p: not p(),                       # Negate output
     'amplify': lambda p, k: p() * k,                   # Scale output
     'threshold': lambda p, t: p() > t,                 # Binarize output
-    
+
     # Temporal remix
     'delay': lambda p, n: p.at_step(step - n),        # Use past value
     'diff': lambda p: p() - p.at_step(step - 1),      # Rate of change
     'accumulate': lambda p: sum(p.history()),          # Running sum
-    
+
     # Structural remix
     'slice_region': lambda p, region: p.over(region), # Apply to subframe
     'rotate_input': lambda p, angle: p.rotated(angle), # Rotated perception
@@ -524,7 +524,7 @@ class PrimitiveTheory:
         self.test_history = []
         self.games_helped = set()
         self.status = 'cobbled'  # cobbled → tested → validated → solid → canonical
-    
+
     def record_test(self, game_id: str, success: bool, level_improvement: float):
         self.test_history.append({
             'game_id': game_id,
@@ -532,29 +532,29 @@ class PrimitiveTheory:
             'level_improvement': level_improvement,
             'timestamp': now()
         })
-        
+
         if success:
             self.games_helped.add(game_id)
-        
+
         # Update confidence based on test history
         self.confidence = self._calculate_confidence()
         self._update_status()
-    
+
     def _calculate_confidence(self) -> float:
         if len(self.test_history) < 10:
             return 0.0
-        
+
         success_rate = sum(1 for t in self.test_history if t['success']) / len(self.test_history)
         game_diversity = len(self.games_helped) / 10  # Normalize to ~10 games
         avg_improvement = sum(t['level_improvement'] for t in self.test_history) / len(self.test_history)
-        
+
         # Cross-game transfer is heavily weighted
         return (
             success_rate * 0.3 +
             min(game_diversity, 1.0) * 0.4 +  # Cross-game transfer is critical
             min(avg_improvement * 5, 1.0) * 0.3
         )
-    
+
     def _update_status(self):
         if self.confidence >= 0.8 and len(self.games_helped) >= 3:
             self.status = 'solid'
@@ -573,18 +573,18 @@ When a primitive reaches "solid" status, Oracle checks for unlock:
 ```python
 def oracle_unlock_check(theory: PrimitiveTheory) -> dict:
     """Oracle checks if solid theory matches a locked primitive."""
-    
+
     if theory.status != 'solid':
         return {'action': 'WAIT', 'reason': 'Not yet solid'}
-    
+
     # Check cross-game transfer (critical for unlock)
     if len(theory.games_helped) < 3:
         return {'action': 'WAIT', 'reason': 'Needs more cross-game validation'}
-    
+
     # Try to match against locked primitives
     for locked_name, locked_impl in LOCKED_PRIMITIVES.items():
         similarity = compare_behavior(theory.composition, locked_impl)
-        
+
         if similarity > 0.85:
             return {
                 'action': 'UNLOCK_WITH_COMPETITION',
@@ -592,7 +592,7 @@ def oracle_unlock_check(theory: PrimitiveTheory) -> dict:
                 'similarity': similarity,
                 'keep_discovered': True,  # Both compete!
             }
-    
+
     # No match - register as novel
     return {
         'action': 'REGISTER_NOVEL',
@@ -628,7 +628,7 @@ When Oracle unlocks a human primitive, **DON'T replace the discovered version**:
 class PrimitiveRegistry:
     def __init__(self):
         self.primitives = {}  # name → list of implementations
-    
+
     def register_unlock(self, name: str, discovered: Operator, human_impl: callable):
         """Register both discovered and human versions."""
         self.primitives[name] = {
@@ -647,21 +647,21 @@ class PrimitiveRegistry:
                 'successes': 0,
             }
         }
-    
+
     def get_primitive(self, name: str, context: dict) -> callable:
         """Select best version based on performance history."""
         if name not in self.primitives:
             return None
-        
+
         versions = self.primitives[name]
-        
+
         # Thompson sampling for exploration/exploitation
         discovered_score = self._thompson_sample(versions['discovered'])
         human_score = self._thompson_sample(versions['human'])
-        
+
         winner = 'discovered' if discovered_score > human_score else 'human'
         return versions[winner]['impl']
-    
+
     def record_outcome(self, name: str, version: str, success: bool):
         """Update performance stats after use."""
         v = self.primitives[name][version]
@@ -678,46 +678,46 @@ When an operator keeps winning, spawn simplified versions that compete:
 ```python
 class OperatorSimplifier:
     """Spawn simplified versions of winning operators."""
-    
+
     SIMPLIFICATION_THRESHOLD = 100  # Wins before attempting simplification
     MIN_COMPOSITION_LENGTH = 2      # Can't simplify below this
-    
+
     def check_for_simplification(self, operator: Operator) -> list[Operator]:
         """If operator is winning consistently, try to simplify it."""
-        
+
         if operator.wins < self.SIMPLIFICATION_THRESHOLD:
             return []  # Not enough evidence yet
-        
+
         if len(operator.composition) <= self.MIN_COMPOSITION_LENGTH:
             return []  # Already minimal
-        
+
         simplified_variants = []
-        
+
         # Strategy 1: Remove each step one at a time
         for i in range(len(operator.composition)):
             variant = self._remove_step(operator, i)
             if variant:
                 simplified_variants.append(variant)
-        
+
         # Strategy 2: Remove consecutive step pairs
         for i in range(len(operator.composition) - 1):
             variant = self._remove_steps(operator, i, i+1)
             if variant:
                 simplified_variants.append(variant)
-        
+
         # Strategy 3: Replace sub-compositions with single primitives
         for i in range(len(operator.composition)):
             variant = self._collapse_subcomposition(operator, i)
             if variant:
                 simplified_variants.append(variant)
-        
+
         # Strategy 4: Parameter simplification (round to nice numbers)
         variant = self._simplify_parameters(operator)
         if variant:
             simplified_variants.append(variant)
-        
+
         return simplified_variants
-    
+
     def _remove_step(self, operator: Operator, index: int) -> Optional[Operator]:
         """Create variant with one step removed."""
         new_composition = operator.composition[:index] + operator.composition[index+1:]
@@ -728,18 +728,18 @@ class OperatorSimplifier:
             simplification_type='step_removal',
             removed_steps=[index],
         )
-    
+
     def _collapse_subcomposition(self, operator: Operator, start: int) -> Optional[Operator]:
         """Try to replace a multi-step pattern with equivalent single primitive."""
         # Look for known patterns that can be collapsed
         # e.g., [get_pixel, get_pixel, equals] -> pixel_equals
         subpattern = operator.composition[start:start+3]
-        
+
         equivalent = find_equivalent_primitive(subpattern)
         if equivalent:
             new_composition = (
-                operator.composition[:start] + 
-                [equivalent] + 
+                operator.composition[:start] +
+                [equivalent] +
                 operator.composition[start+3:]
             )
             return Operator(
@@ -749,12 +749,12 @@ class OperatorSimplifier:
                 simplification_type='collapse',
             )
         return None
-    
+
     def _simplify_parameters(self, operator: Operator) -> Optional[Operator]:
         """Round parameters to simpler values."""
         new_composition = []
         simplified = False
-        
+
         for step in operator.composition:
             name, params = step
             new_params = {}
@@ -768,7 +768,7 @@ class OperatorSimplifier:
                 else:
                     new_params[k] = v
             new_composition.append((name, new_params))
-        
+
         if simplified:
             return Operator(
                 composition=new_composition,
@@ -786,11 +786,11 @@ All versions compete in a tournament:
 ```python
 class PrimitiveArena:
     """All versions of a primitive compete for selection."""
-    
+
     def __init__(self, primitive_name: str):
         self.name = primitive_name
         self.versions = {}  # version_id -> VersionStats
-    
+
     def add_version(self, version_id: str, operator: Operator, origin: str):
         """Add a new competing version."""
         self.versions[version_id] = {
@@ -802,26 +802,26 @@ class PrimitiveArena:
             'complexity': len(operator.composition) if hasattr(operator, 'composition') else 1,
             'parent_version': operator.simplification_of if hasattr(operator, 'simplification_of') else None,
         }
-    
+
     def select_version(self, context: dict) -> str:
         """Select best version using Thompson sampling with complexity penalty."""
-        
+
         scores = {}
         for vid, stats in self.versions.items():
             # Base score from performance
             base_score = self._thompson_sample(stats['successes'], stats['uses'])
-            
+
             # Complexity penalty (prefer simpler operators)
             complexity_penalty = 0.01 * stats['complexity']
-            
+
             # Context bonus (some versions might excel in specific games)
             context_bonus = self._context_affinity(vid, context)
-            
+
             scores[vid] = base_score - complexity_penalty + context_bonus
-        
+
         # Select highest scoring version
         return max(scores, key=scores.get)
-    
+
     def get_competition_summary(self) -> dict:
         """Summary of how all versions are performing."""
         return {
@@ -857,9 +857,9 @@ When a simplified version matches the original's performance:
 ```python
 def analyze_simplification_success(original: Operator, simplified: Operator) -> dict:
     """Extract insight when simplification preserves performance."""
-    
+
     removed_steps = set(range(len(original.composition))) - set(range(len(simplified.composition)))
-    
+
     return {
         'original_id': original.id,
         'simplified_id': simplified.id,
@@ -902,11 +902,11 @@ When discovered version outperforms human:
 ```python
 def analyze_superior_discovery(name: str, discovered: Operator, human: callable):
     """When discovered outperforms human, extract the insight."""
-    
+
     # Find where they differ
     test_cases = generate_edge_cases()
     differences = []
-    
+
     for test in test_cases:
         d_result = discovered(test)
         h_result = human(test)
@@ -916,7 +916,7 @@ def analyze_superior_discovery(name: str, discovered: Operator, human: callable)
                 'discovered_output': d_result,
                 'human_output': h_result,
             })
-    
+
     # Report for human learning
     return {
         'primitive': name,
@@ -939,18 +939,18 @@ CREATE TABLE IF NOT EXISTS primitive_unlock_status (
     primitive_name TEXT NOT NULL,
     category TEXT NOT NULL,  -- 'seed', 'locked', 'unlocked', 'novel'
     source_implementation TEXT,  -- Reference to human implementation if exists
-    
+
     -- Unlock tracking
     unlock_status TEXT DEFAULT 'locked',  -- 'seed', 'locked', 'unlocked', 'novel'
     unlocked_by_operator TEXT,  -- Operator that earned the unlock
     unlocked_at_generation INTEGER,
     unlock_validation JSON,  -- RLVR stats that justified unlock
-    
+
     -- For novel primitives
     discovered_composition JSON,
     is_novel BOOLEAN DEFAULT FALSE,
     human_name TEXT,  -- Assigned later by oracle/human
-    
+
     -- Usage tracking
     times_used INTEGER DEFAULT 0,
     last_used_generation INTEGER
@@ -962,17 +962,17 @@ CREATE TABLE IF NOT EXISTS unlock_attempts (
     operator_id TEXT NOT NULL,
     target_primitive TEXT,  -- NULL if novel
     generation INTEGER,
-    
+
     -- Validation metrics at time of attempt
     tests_passed INTEGER,
     success_rate REAL,
     games_helped INTEGER,
     level_improvement REAL,
-    
+
     -- Outcome
     outcome TEXT,  -- 'unlocked', 'novel', 'rejected'
     rejection_reason TEXT,  -- If rejected, why?
-    
+
     attempt_timestamp TEXT
 );
 
@@ -981,26 +981,26 @@ CREATE TABLE IF NOT EXISTS primitive_theories (
     theory_id TEXT PRIMARY KEY,
     composition JSON NOT NULL,  -- The composed operators
     composition_hash TEXT NOT NULL,  -- For deduplication
-    
+
     -- Theory status lifecycle
     status TEXT DEFAULT 'cobbled',  -- cobbled, tested, validated, solid, canonical
     confidence REAL DEFAULT 0.0,
-    
+
     -- Testing history
     total_tests INTEGER DEFAULT 0,
     successful_tests INTEGER DEFAULT 0,
     games_tested TEXT,  -- JSON array of game_ids
     games_helped TEXT,  -- JSON array of game_ids where it actually helped
     avg_level_improvement REAL DEFAULT 0.0,
-    
+
     -- Cross-game transfer (critical for unlock)
     cross_game_transfer_score REAL DEFAULT 0.0,
-    
+
     -- Lifecycle tracking
     created_generation INTEGER,
     last_tested_generation INTEGER,
     solidified_at_generation INTEGER,
-    
+
     -- If matched to locked primitive
     matched_primitive TEXT,  -- NULL until matched
     unlock_triggered BOOLEAN DEFAULT FALSE
@@ -1010,20 +1010,20 @@ CREATE TABLE IF NOT EXISTS primitive_theories (
 CREATE TABLE IF NOT EXISTS primitive_competition (
     primitive_name TEXT NOT NULL,
     version TEXT NOT NULL,  -- 'discovered' or 'human'
-    
+
     -- Performance tracking
     total_uses INTEGER DEFAULT 0,
     successful_uses INTEGER DEFAULT 0,
     performance_score REAL DEFAULT 0.5,
-    
+
     -- Context-specific performance
     games_used TEXT,  -- JSON array
     best_game TEXT,  -- Game where this version excels
     worst_game TEXT,  -- Game where this version struggles
-    
+
     -- Comparison stats
     head_to_head_wins INTEGER DEFAULT 0,  -- When both tested on same input
-    
+
     PRIMARY KEY (primitive_name, version)
 );
 
@@ -1031,21 +1031,21 @@ CREATE TABLE IF NOT EXISTS primitive_competition (
 CREATE TABLE IF NOT EXISTS discovery_insights (
     insight_id TEXT PRIMARY KEY,
     primitive_name TEXT NOT NULL,
-    
+
     -- Performance comparison
     discovered_performance REAL,
     human_performance REAL,
     performance_delta REAL,  -- discovered - human
-    
+
     -- Edge case analysis
     edge_cases_found INTEGER,
     edge_case_examples JSON,  -- Sample inputs where they differ
-    
+
     -- Human learning
     hypothesis TEXT,
     reviewed_by_human BOOLEAN DEFAULT FALSE,
     human_knowledge_updated BOOLEAN DEFAULT FALSE,
-    
+
     discovered_at TEXT
 );
 
@@ -1055,11 +1055,11 @@ CREATE TABLE IF NOT EXISTS remix_history (
     parent_a TEXT,  -- First parent primitive/operator
     parent_b TEXT,  -- Second parent (NULL for mutations)
     remix_operation TEXT,  -- 'compose', 'mutate', 'crossover', etc.
-    
+
     -- Result
     child_theory_id TEXT,
     child_viable BOOLEAN,  -- Did it survive initial testing?
-    
+
     -- Genealogy tracking
     generation INTEGER,
     created_at TEXT
@@ -1070,24 +1070,24 @@ CREATE TABLE IF NOT EXISTS simplification_attempts (
     simplification_id TEXT PRIMARY KEY,
     original_operator_id TEXT NOT NULL,
     simplified_operator_id TEXT NOT NULL,
-    
+
     -- Simplification details
     simplification_type TEXT,  -- 'step_removal', 'collapse', 'parameter_simplification'
     steps_removed TEXT,  -- JSON array of removed step indices
     original_complexity INTEGER,
     simplified_complexity INTEGER,
     complexity_reduction REAL,  -- Percentage reduction
-    
+
     -- Performance comparison
     original_performance REAL,
     simplified_performance REAL,
     performance_delta REAL,  -- simplified - original
     performance_preserved BOOLEAN,  -- Did simplification maintain performance?
-    
+
     -- Outcome
     outcome TEXT,  -- 'success' (same perf, less complex), 'degraded', 'improved' (rare but possible)
     is_new_champion BOOLEAN DEFAULT FALSE,  -- Did simplified version become the best?
-    
+
     -- Tracking
     generation INTEGER,
     created_at TEXT
@@ -1097,19 +1097,19 @@ CREATE TABLE IF NOT EXISTS simplification_attempts (
 CREATE TABLE IF NOT EXISTS primitive_arena (
     arena_id TEXT PRIMARY KEY,
     primitive_name TEXT NOT NULL,
-    
+
     -- All competing versions
     versions JSON,  -- Array of version_ids with their stats
-    
+
     -- Current champion
     champion_version TEXT,
     champion_origin TEXT,  -- 'discovered', 'human', 'simplified', 'remix'
     champion_since_generation INTEGER,
-    
+
     -- Arena stats
     total_selections INTEGER DEFAULT 0,
     last_competition_generation INTEGER,
-    
+
     -- Insights
     best_by_context JSON  -- {game_id: best_version} mapping
 );
@@ -1132,7 +1132,7 @@ SEED_PRIMITIVES = {
     'get_frame_size': lambda frame: (len(frame), len(frame[0])),
     'get_frame': lambda context: context['frame'],
     'get_previous_frame': lambda context: context.get('previous_frame'),
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # BASIC MATH (universal, not domain-specific)
     # ═══════════════════════════════════════════════════════════════════
@@ -1148,13 +1148,13 @@ SEED_PRIMITIVES = {
     'less_than': lambda a, b: a < b,
     'greater_or_equal': lambda a, b: a >= b,
     'less_or_equal': lambda a, b: a <= b,
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # CONTROL FLOW (essential for clean composition, not domain knowledge)
     # ═══════════════════════════════════════════════════════════════════
     'if_else': lambda cond, a, b: a if cond else b,  # Branching primitive
     'select': lambda cond, a, b: a if cond else b,   # Alias for if_else
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # BASIC DATA STRUCTURES (for building intermediate artifacts)
     # ═══════════════════════════════════════════════════════════════════
@@ -1168,7 +1168,7 @@ SEED_PRIMITIVES = {
     'contains': lambda lst, item: item in lst,
     'index_of': lambda lst, item: lst.index(item) if item in lst else -1,
     'unique': lambda lst: list(set(lst)),
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # BASIC ITERATION (can't discover loops without loops)
     # ═══════════════════════════════════════════════════════════════════
@@ -1180,7 +1180,7 @@ SEED_PRIMITIVES = {
     'count_if': lambda frame, predicate: sum(1 for row in frame for pixel in row if predicate(pixel)),
     'any': lambda lst, pred: any(pred(x) for x in lst),
     'all': lambda lst, pred: all(pred(x) for x in lst),
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # BASIC AGGREGATION
     # ═══════════════════════════════════════════════════════════════════
@@ -1189,14 +1189,14 @@ SEED_PRIMITIVES = {
     'min': lambda values: min(values) if values else None,
     'average': lambda values: sum(values) / len(values) if values else 0,
     'median': lambda values: sorted(values)[len(values)//2] if values else None,
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # TIME + EPISODE IDENTITY (for temporal learning without hidden privileges)
     # ═══════════════════════════════════════════════════════════════════
     'get_step_index': lambda context: context.get('step_index', 0),
     'get_episode_id': lambda context: context.get('episode_id', ''),
     'get_action_count': lambda context: context.get('action_count', 0),
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # ACTION/CHANNEL INTROSPECTION (sensor input, not strategy)
     # ═══════════════════════════════════════════════════════════════════
@@ -1205,7 +1205,7 @@ SEED_PRIMITIVES = {
     'get_action_history': lambda context, k: context.get('action_history', [])[-k:],
     'get_score': lambda context: context.get('score', 0),
     'get_level': lambda context: context.get('level', 0),
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # RNG AS EXPLICIT PRIMITIVE (for reproducibility and audit)
     # ═══════════════════════════════════════════════════════════════════
@@ -1213,7 +1213,7 @@ SEED_PRIMITIVES = {
     'rand_int': lambda low, high: random.randint(low, high),
     'rand_choice': lambda lst: random.choice(lst) if lst else None,
     'seed_rng': lambda seed: random.seed(seed),  # For reproducibility
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # DETERMINISTIC HASHING (for caching, novelty tracking, deduplication)
     # ═══════════════════════════════════════════════════════════════════
@@ -1393,21 +1393,21 @@ class ConceptDiscoveryEngine:
     Discovers high-level concepts that organize operators.
     Concepts are abstractions over successful operator patterns.
     """
-    
+
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self.concept_candidates = {}  # Patterns being tracked
         self.confirmed_concepts = {}  # Verified concepts
-    
+
     def track_successful_operator_pattern(
-        self, 
-        operator_id: str, 
-        game_id: str, 
+        self,
+        operator_id: str,
+        game_id: str,
         sub_patterns: List[str]
     ):
         """
         Track which sub-patterns appear in successful operators.
-        When same sub-pattern succeeds across multiple games, 
+        When same sub-pattern succeeds across multiple games,
         it's a concept candidate.
         """
         for pattern in sub_patterns:
@@ -1420,7 +1420,7 @@ class ConceptDiscoveryEngine:
             self.concept_candidates[pattern]['games'].add(game_id)
             self.concept_candidates[pattern]['operators'].add(operator_id)
             self.concept_candidates[pattern]['success_count'] += 1
-    
+
     def check_concept_emergence(self, min_games: int = 3) -> List[dict]:
         """
         Check if any pattern has emerged as a concept.
@@ -1437,16 +1437,16 @@ class ConceptDiscoveryEngine:
                 }
                 emerging_concepts.append(concept)
         return emerging_concepts
-    
+
     def extract_concept_from_counterfactuals(
-        self, 
+        self,
         failed_attempts: List[dict],
         successful_attempt: dict
     ) -> Optional[dict]:
         """
         When attempts 1-99 fail and attempt 100 succeeds,
         extract what made the difference as a concept candidate.
-        
+
         Example pattern (containment problems):
         - Failed: Create path from source to target
         - Success: Seal edges THEN create path
@@ -1457,9 +1457,9 @@ class ConceptDiscoveryEngine:
         failure_patterns = set()
         for attempt in failed_attempts[-10:]:  # Last 10 failures
             failure_patterns.update(attempt.get('sub_patterns', []))
-        
+
         novel_patterns = success_patterns - failure_patterns
-        
+
         if novel_patterns:
             return {
                 'candidate_patterns': list(novel_patterns),
@@ -1557,7 +1557,7 @@ The critical insight: concepts must be **discovered through failure analysis**, 
 class CounterfactualToConceptPipeline:
     """
     Transform counterfactual analysis into concept discovery.
-    
+
     Flow:
     1. Agent fails repeatedly on game X
     2. Counterfactual analyzer: "What if I did Y instead?"
@@ -1566,11 +1566,11 @@ class CounterfactualToConceptPipeline:
     5. Extract pattern → Concept candidate
     6. Test on other games → Confirm concept
     """
-    
+
     def __init__(self, counterfactual_analyzer, concept_engine):
         self.cf_analyzer = counterfactual_analyzer
         self.concept_engine = concept_engine
-    
+
     def process_breakthrough(
         self,
         game_id: str,
@@ -1583,13 +1583,13 @@ class CounterfactualToConceptPipeline:
         """
         # Step 1: Get counterfactual analysis
         cf_analysis = self.cf_analyzer.analyze_breakthrough(
-            failed_attempts, 
+            failed_attempts,
             successful_attempt
         )
-        
+
         # Step 2: Extract differentiating patterns
         diff_patterns = cf_analysis.get('differentiating_factors', [])
-        
+
         # Step 3: Abstract to concept candidate
         if diff_patterns:
             concept_candidate = {
@@ -1599,14 +1599,14 @@ class CounterfactualToConceptPipeline:
                 'status': 'candidate',
                 'confirmation_needed': 2  # Need 2 more games to confirm
             }
-            
+
             # Step 4: Register for cross-game testing
             self.concept_engine.register_candidate(concept_candidate)
-            
+
             return concept_candidate
-        
+
         return None
-    
+
     def _generate_hypothesis(self, patterns: List[str]) -> str:
         """Generate human-readable hypothesis about what concept this might be."""
         # This would ideally be more sophisticated
@@ -1796,7 +1796,7 @@ Meta-representation is the ability to treat **rules as manipulable data objects*
 
 ```
 Level 0: "I see a red square"
-Level 1: "Red squares appear in pattern X"  
+Level 1: "Red squares appear in pattern X"
 Level 2: "Operator Y moves red squares by rule Z"
 Level 3: "Rule Z itself is DATA I can manipulate"  ← THE KEY
 Level 4: "I can discover new rules by examining patterns IN THE RULES THEMSELVES"
@@ -1809,7 +1809,7 @@ CODS Tiers 1-4 operate at Levels 0-3. Tier 5 adds Level 4.
 Without meta-representation:
 ```
 Game 1: Container overflow → manually add containment primitives
-Game 2: Reference semantics → manually add template primitives  
+Game 2: Reference semantics → manually add template primitives
 Game 3: Hidden timing rule → manually add temporal primitives
 ...
 Game 100: ??? → manually add ??? primitives
@@ -1833,68 +1833,68 @@ class SelfExtendingCODS:
     CODS that can discover new primitives autonomously.
     The key insight: discovery strategies are themselves discoverable.
     """
-    
+
     def __init__(self, base_cods):
         self.cods = base_cods
         self.discovery_strategy_library = DiscoveryStrategyLibrary()
-    
+
     def encounter_unknown_game(self, game):
         """
         The core self-extension loop for handling novel games.
         """
-        
+
         # 1. Try existing operators
         attempts = []
         for operator in self.cods.operator_library:
             result = self.test_operator(operator, game)
             attempts.append((operator, result))
-        
+
         # If success, we're done
         if any(r.success for _, r in attempts):
             return max(attempts, key=lambda x: x[1].score)
-        
+
         # 2. Failure analysis: What's missing?
         failure_patterns = self.analyze_failures(attempts)
-        
+
         # 3. Identify knowledge gap
         knowledge_gap = self.identify_missing_concept(
             failure_patterns,
             game_observations=self.observe(game),
             known_concepts=self.cods.concept_library
         )
-        
+
         # 4. Generate primitive hypotheses using discovery strategies
         hypotheses = self.generate_primitive_hypotheses(
             gap=knowledge_gap,
             existing_primitives=self.cods.primitive_library,
             meta_patterns=self.discovery_strategy_library
         )
-        
+
         # 5. Test hypotheses with RLVR
         for hypothesis in hypotheses:
             new_primitive = self.formalize_hypothesis(hypothesis)
             test_result = self.validate_primitive_rlvr(new_primitive, game)
-            
+
             if test_result.significant_improvement:
                 # Add primitive to library
                 self.cods.primitive_library.add(new_primitive)
-                
+
                 # 6. META-STEP: Extract WHY this worked as discovery pattern
                 meta_pattern = self.extract_discovery_pattern(
                     problem=game,
                     solution=new_primitive,
                     failure_mode=knowledge_gap
                 )
-                
+
                 # Add discovery strategy for future use
                 self.discovery_strategy_library.add(meta_pattern)
-                
+
                 # Retry with new primitive
                 return self.retry_with_new_knowledge(game, new_primitive)
-        
+
         # If all hypotheses failed, escalate to Oracle
         return self.request_oracle_guidance(game, attempts, hypotheses, knowledge_gap)
-    
+
     def extract_discovery_pattern(self, problem, solution, failure_mode):
         """
         Meta-learning: Figure out what made this primitive discovery successful.
@@ -1918,7 +1918,7 @@ class DiscoveryStrategyLibrary:
     Library of meta-patterns for discovering new primitives.
     These are DISCOVERED, not hardcoded.
     """
-    
+
     def __init__(self):
         # Seed with minimal basic strategies
         self.strategies = {
@@ -1938,7 +1938,7 @@ class DiscoveryStrategyLibrary:
                 'method': lambda p: invert(p)
             },
         }
-    
+
     def discover_new_strategy(self, successful_discoveries: List[dict]):
         """
         Analyze successful primitive discoveries to find meta-patterns.
@@ -1946,24 +1946,24 @@ class DiscoveryStrategyLibrary:
         """
         # Find common structure across discoveries
         pattern = self.find_common_structure(successful_discoveries)
-        
+
         if pattern.is_novel():
             new_strategy = self.abstract_to_strategy(pattern)
             self.strategies[new_strategy.name] = new_strategy
-            
+
             # Viral package: Share discovery strategy with other agents
             self.broadcast_discovery_strategy(new_strategy)
-            
+
             return new_strategy
         return None
-    
+
     def apply_strategy(self, strategy_name: str, context: dict) -> List[Hypothesis]:
         """
         Use a discovery strategy to generate primitive hypotheses.
         """
         strategy = self.strategies[strategy_name]
         return strategy['method'](context)
-    
+
     def get_applicable_strategies(self, failure_mode: dict) -> List[str]:
         """
         Given a failure mode, return strategies that might help.
@@ -2023,7 +2023,7 @@ discovery_library.strategies['conditional_law'] = new_strategy
 # System immediately applies 'conditional_law' strategy
 hypothesis = conditional_law_factory(
     law="pushable",
-    property="color", 
+    property="color",
     condition=lambda c: c == BLUE
 )
 # → SUCCESS on first try!
@@ -2150,8 +2150,8 @@ CREATE TABLE IF NOT EXISTS discovery_strategies (
     times_applied INTEGER DEFAULT 0,
     times_successful INTEGER DEFAULT 0,
     success_rate REAL GENERATED ALWAYS AS (
-        CASE WHEN times_applied > 0 
-        THEN CAST(times_successful AS REAL) / times_applied 
+        CASE WHEN times_applied > 0
+        THEN CAST(times_successful AS REAL) / times_applied
         ELSE 0 END
     ) STORED,
     is_seed BOOLEAN DEFAULT FALSE,            -- Seed strategies vs discovered
@@ -2299,7 +2299,7 @@ CREATE TABLE IF NOT EXISTS discovered_operators (
     composition JSON NOT NULL,       -- Array of {primitive_id, args}
     discovery_generation INTEGER,
     discovered_by_agent TEXT,        -- Agent that first used this successfully
-    
+
     -- Performance metrics (RLVR results)
     games_tested JSON,               -- Array of game_ids
     total_tests INTEGER DEFAULT 0,
@@ -2307,14 +2307,14 @@ CREATE TABLE IF NOT EXISTS discovered_operators (
     level_improvement REAL DEFAULT 0.0,
     action_efficiency REAL DEFAULT 1.0,
     transfer_score REAL DEFAULT 0.0, -- How well it transfers to other games
-    
+
     -- Lifecycle
     status TEXT DEFAULT 'TESTING',   -- TESTING, VALIDATED, PROMOTED, DECAYED, RETIRED
     is_active BOOLEAN DEFAULT TRUE,
     activation_count INTEGER DEFAULT 0,
     last_used_generation INTEGER,
     decay_score REAL DEFAULT 0.0,
-    
+
     -- Oracle interpretation (filled asynchronously)
     interpretation_status TEXT DEFAULT 'PENDING',  -- PENDING, QUERIED, ANSWERED, VALIDATED
     oracle_query_id TEXT,
@@ -2322,7 +2322,7 @@ CREATE TABLE IF NOT EXISTS discovered_operators (
     known_analog BOOLEAN,
     optimized_composition JSON,
     novelty_flag BOOLEAN DEFAULT FALSE,
-    
+
     FOREIGN KEY (oracle_query_id) REFERENCES oracle_queries(query_id)
 );
 
@@ -2333,17 +2333,17 @@ CREATE TABLE IF NOT EXISTS oracle_queries (
     target_operator_id TEXT,
     query_data JSON NOT NULL,
     priority TEXT DEFAULT 'normal',  -- 'low', 'normal', 'high', 'critical'
-    
+
     -- Query lifecycle
     created_generation INTEGER,
     created_timestamp TEXT,
     status TEXT DEFAULT 'PENDING',   -- PENDING, ANSWERED, TIMEOUT, CANCELLED
-    
+
     -- Response (filled by oracle - human/LLM/automated)
     response_data JSON,
     response_timestamp TEXT,
     responder_id TEXT DEFAULT 'oracle',  -- System doesn't interpret this
-    
+
     FOREIGN KEY (target_operator_id) REFERENCES discovered_operators(operator_id)
 );
 
@@ -2354,7 +2354,7 @@ CREATE TABLE IF NOT EXISTS admin_directives (
     target TEXT,                     -- operator_id, primitive_id, game_type, or 'global'
     directive_data JSON,
     priority INTEGER DEFAULT 5,      -- 1-10, higher = more urgent
-    
+
     -- Lifecycle
     issued_timestamp TEXT,
     expires_timestamp TEXT,          -- NULL = never expires
@@ -2370,24 +2370,24 @@ CREATE TABLE IF NOT EXISTS operator_test_results (
     game_id TEXT NOT NULL,
     agent_id TEXT NOT NULL,
     generation INTEGER,
-    
+
     -- Test conditions
     level_before INTEGER,
     score_before REAL,
-    
+
     -- Results
     level_after INTEGER,
     score_after REAL,
     actions_used INTEGER,
     operator_fired BOOLEAN,          -- Did the operator's condition trigger?
     operator_influenced_action BOOLEAN,  -- Did firing change the action taken?
-    
+
     -- Outcome
     success BOOLEAN,                 -- Did level improve?
     improvement_delta REAL,
-    
+
     test_timestamp TEXT,
-    
+
     FOREIGN KEY (operator_id) REFERENCES discovered_operators(operator_id)
 );
 
@@ -2407,7 +2407,7 @@ CREATE INDEX IF NOT EXISTS idx_test_results_operator ON operator_test_results(op
 
 **Purpose**: Minimal seed primitives for composition + discovery
 
-**Design Philosophy**: 
+**Design Philosophy**:
 - **Seed primitives**: Only what CANNOT be discovered (raw data access, basic math)
 - **Discovered primitives**: Everything else emerges through composition
 - **Reference library**: Existing engines used for Oracle pattern-matching, NOT for seeding
@@ -2468,26 +2468,26 @@ The system never calls these directly. The Oracle uses them to **interpret** wha
 ```python
 class SeedPrimitives:
     """Minimal primitives the system starts with."""
-    
+
     def execute(self, primitive_name: str, args: dict, context: dict) -> Any:
         """Execute a seed primitive."""
-        
+
     def list_primitives(self) -> List[str]:
         """List all available seed primitives (~20)."""
-        
+
     def get_spec(self, primitive_name: str) -> dict:
         """Get input/output specification for a primitive."""
 
 
 class DiscoveredPrimitiveRegistry:
     """Registry of primitives the system has discovered through composition."""
-    
+
     def register(self, operator: Operator, name: Optional[str] = None) -> str:
         """Register a discovered operator as a reusable primitive."""
-        
+
     def get(self, primitive_id: str) -> Operator:
         """Get a discovered primitive by ID."""
-        
+
     def promote_to_primitive(self, operator_id: str) -> str:
         """Promote a successful operator to primitive status (composable by other operators)."""
 ```
@@ -2503,14 +2503,14 @@ class Operator:
     """A composition of primitives that produces a decision signal."""
     operator_id: str
     composition: List[dict]  # [{primitive_id, args}, ...]
-    
+
     def execute(self, context: dict) -> OperatorResult
     def mutate(self) -> 'Operator'
     def crossover(self, other: 'Operator') -> 'Operator'
 
 class OperatorComposer:
     """Manages operator lifecycle: creation, testing, promotion, decay."""
-    
+
     def generate_random_operator(self, max_depth: int = 5) -> Operator
     def test_operator(self, operator: Operator, game_context: dict) -> TestResult
     def evolve_operators(self, generation: int, population_size: int = 20)
@@ -2520,7 +2520,7 @@ class OperatorComposer:
 
 class OperatorIntegration:
     """Integrates operators into gameplay decision-making."""
-    
+
     def evaluate_operators(self, frame: np.ndarray, context: dict) -> List[OperatorSignal]
     def apply_operator_biases(self, action_weights: dict, signals: List[OperatorSignal]) -> dict
 ```
@@ -2542,7 +2542,7 @@ class OperatorIntegration:
 ```python
 class OracleInterface:
     """System-facing interface to the Oracle. System doesn't know what's behind it."""
-    
+
     def query_interpretation(self, operator: Operator, metrics: dict) -> str  # Returns query_id
     def query_optimization(self, operator_id: str) -> str
     def query_novelty_validation(self, operator_id: str) -> str
@@ -2551,14 +2551,14 @@ class OracleInterface:
 
 class DirectiveProcessor:
     """Processes admin directives as environmental signals."""
-    
+
     def get_pending_directives(self) -> List[Directive]
     def execute_directive(self, directive: Directive) -> ExecutionResult
     def check_expired_directives(self)
 
 class OracleQueryGenerator:
     """Auto-generates queries when operators cross thresholds."""
-    
+
     def check_query_conditions(self, operator: Operator) -> bool
     def generate_query(self, operator: Operator, query_type: str) -> OracleQuery
 ```

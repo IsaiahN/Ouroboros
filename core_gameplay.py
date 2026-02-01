@@ -6,7 +6,7 @@ This is the main entry point for playing ARC-AGI-3 games.
 
 Architecture:
 - arc_api_adapter.py: Wraps the arc_agi SDK
-- game_loop.py: Game loop state machine  
+- game_loop.py: Game loop state machine
 - decision_rung_system.py: Modular 42-rung decision system
 - context_builder.py: Build context for decisions
 - outcome_processor.py: Process action results
@@ -14,18 +14,18 @@ Architecture:
 
 Usage:
     from core_gameplay import GameplayEngine
-    
+
     engine = GameplayEngine()
     result = engine.play_single_game("ls20")
-    
+
     # With agent config
     from context_builder import AgentConfig
     agent = AgentConfig(agent_id="pioneer-1", role="pioneer")
     result = engine.play_single_game("ls20", agent_config=agent)
-    
+
     # List available games
     games = engine.list_games()
-    
+
     # Get scorecard
     scorecard = engine.get_scorecard()
 
@@ -36,27 +36,22 @@ Key Classes:
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import asyncio
-from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from database_interface import DatabaseInterface
 
 # Core modules
-from arc_api_adapter import (
-    ArcadeWrapper,
-    GameConfig,
-    GameInfo,
-    GameAction,
-    GameState,
-)
+from arc_api_adapter import ArcadeWrapper, GameAction, GameConfig, GameInfo, GameState
+from context_builder import AgentConfig, ContextBuilder
 from game_loop import GameLoop, LoopConfig
-from context_builder import ContextBuilder, AgentConfig
+from learning_systems import GameResult, LearningSystems
 from outcome_processor import OutcomeProcessor
-from learning_systems import LearningSystems, GameResult
 
 # Re-export key types
 __all__ = [
@@ -76,19 +71,19 @@ class EngineConfig:
     """Configuration for the gameplay engine."""
     # API settings
     api_key: Optional[str] = None
-    operation_mode: str = "NORMAL"  # NORMAL, OFFLINE, ONLINE
-    
+    operation_mode: Optional[str] = None  # NORMAL, OFFLINE, ONLINE (default: from env or NORMAL)
+
     # Database
     db_path: str = "core_data.db"
-    
+
     # Decision system
     decision_ordering: str = "efficiency"  # Which rung ordering to use
     decision_strategy: str = "ladder"  # ladder or tournament
-    
+
     # Game defaults
     default_max_actions: int = 2000
     default_render_mode: Optional[str] = None  # terminal, terminal-fast, human
-    
+
     # Verbose mode
     verbose: bool = False
 
@@ -96,18 +91,18 @@ class EngineConfig:
 class GameplayEngine:
     """
     Main entry point for ARC-AGI-3 gameplay.
-    
+
     This is a thin orchestrator that wires together:
     - API adapter (arc_agi SDK wrapper)
     - Game loop (state machine)
     - Decision system (42 modular rungs)
     - Learning systems (CODS, replay, self-model)
-    
+
     Usage:
         engine = GameplayEngine()
         result = engine.play_single_game("ls20")
     """
-    
+
     def __init__(
         self,
         config: Optional[EngineConfig] = None,
@@ -115,40 +110,40 @@ class GameplayEngine:
     ):
         """
         Initialize the gameplay engine.
-        
+
         Args:
             config: Engine configuration
             db: Optional database interface (will create if not provided)
         """
         self._config = config or EngineConfig()
-        
+
         # Database
         self._db: Optional["DatabaseInterface"] = db
         if self._db is None:
             self._db = self._create_database()
-        
+
         # API adapter
         self._api = ArcadeWrapper(
             api_key=self._config.api_key,
             operation_mode=self._config.operation_mode,
         )
-        
+
         # Decision system (lazy loaded)
         self._decision_system = None
-        
+
         # Context builder
         self._context_builder = ContextBuilder(self._db)
-        
+
         # Outcome processor
         self._outcome_processor = OutcomeProcessor(self._db)
-        
+
         # Learning systems (lazy loaded)
         self._learning_systems = None
-        
+
         # Session tracking
         self._games_played = 0
         self._total_wins = 0
-    
+
     def _create_database(self):
         """Create database interface."""
         try:
@@ -160,25 +155,25 @@ class GameplayEngine:
         except Exception as e:
             print(f"[WARN] Database creation failed: {e}")
             return None
-    
+
     @property
     def decision_system(self):
         """Get decision system (lazy loaded)."""
         if self._decision_system is None:
             self._decision_system = self._create_decision_system()
         return self._decision_system
-    
+
     def _create_decision_system(self):
         """Create the decision rung system."""
         try:
-            from decision_rung_system import DecisionRungSystem, ORDERING_PRESETS
-            
+            from decision_rung_system import ORDERING_PRESETS, DecisionRungSystem
+
             system = DecisionRungSystem(strategy=self._config.decision_strategy)
-            
+
             # Load ordering preset if specified
             if self._config.decision_ordering in ORDERING_PRESETS:
                 system.load_ordering(self._config.decision_ordering)
-            
+
             return system
         except ImportError:
             # Fallback: simple random decision
@@ -186,18 +181,18 @@ class GameplayEngine:
         except Exception as e:
             print(f"[WARN] Decision system creation failed: {e}")
             return SimpleDecisionFallback()
-    
+
     @property
     def learning_systems(self) -> LearningSystems:
         """Get learning systems (lazy loaded)."""
         if self._learning_systems is None:
             self._learning_systems = LearningSystems(db=self._db)
         return self._learning_systems
-    
+
     # =========================================================================
     # Main API
     # =========================================================================
-    
+
     def play_single_game(
         self,
         game_id: str,
@@ -207,16 +202,16 @@ class GameplayEngine:
     ) -> GameResult:
         """
         Play a single game.
-        
+
         Args:
             game_id: Game identifier (e.g., "ls20", "vc33")
             agent_config: Optional agent configuration
             max_actions: Maximum actions allowed (default from config)
             render_mode: Render mode ("terminal", "human", None)
-        
+
         Returns:
             GameResult with final score, levels completed, and action sequence
-        
+
         Example:
             result = engine.play_single_game("ls20")
             print(f"Score: {result.final_score}, Levels: {result.levels_completed}")
@@ -228,7 +223,7 @@ class GameplayEngine:
             max_actions=max_actions,
             render_mode=render_mode,
         ))
-    
+
     async def play_single_game_async(
         self,
         game_id: str,
@@ -238,31 +233,31 @@ class GameplayEngine:
     ) -> GameResult:
         """
         Play a single game asynchronously.
-        
+
         Same as play_single_game but async.
         """
         agent_config = agent_config or AgentConfig(agent_id=f"agent-{self._games_played}")
         max_actions = max_actions or self._config.default_max_actions
         render_mode = render_mode or self._config.default_render_mode
-        
+
         # Create game config
         game_config = GameConfig(
             game_id=game_id,
             render_mode=render_mode,
         )
-        
+
         # Create environment
         env = self._api.create_environment(game_config)
         if env is None:
             return self._create_failed_result(game_id, agent_config, "Failed to create environment")
-        
+
         # Create loop config
         loop_config = LoopConfig(
             max_actions=max_actions,
             render_mode=render_mode,
             verbose=self._config.verbose,
         )
-        
+
         # Create game loop
         loop = GameLoop(
             env=env,
@@ -272,17 +267,17 @@ class GameplayEngine:
             learning_systems=self.learning_systems,
             config=loop_config,
         )
-        
+
         # Run the game
         result = await loop.run(agent_config=agent_config, max_actions=max_actions)
-        
+
         # Update session stats
         self._games_played += 1
         if result.is_win:
             self._total_wins += 1
-        
+
         return result
-    
+
     def play_multiple_games(
         self,
         game_ids: List[str],
@@ -291,17 +286,17 @@ class GameplayEngine:
     ) -> List[GameResult]:
         """
         Play multiple games sequentially.
-        
+
         Args:
             game_ids: List of game identifiers
             agent_config: Optional agent configuration (shared across games)
             max_actions_per_game: Max actions per game
-        
+
         Returns:
             List of GameResult objects
         """
         results: List[GameResult] = []
-        
+
         for game_id in game_ids:
             result = self.play_single_game(
                 game_id=game_id,
@@ -309,9 +304,9 @@ class GameplayEngine:
                 max_actions=max_actions_per_game,
             )
             results.append(result)
-        
+
         return results
-    
+
     def _create_failed_result(
         self,
         game_id: str,
@@ -330,57 +325,57 @@ class GameplayEngine:
             action_sequence=[],
             agent_id=agent_config.agent_id,
         )
-    
+
     # =========================================================================
     # Game Discovery
     # =========================================================================
-    
+
     def list_games(self) -> List[GameInfo]:
         """
         List all available games.
-        
+
         Returns:
             List of GameInfo objects with game_id, title, and tags
         """
         return self._api.list_games()
-    
+
     def list_game_ids(self) -> List[str]:
         """
         List just the game IDs.
-        
+
         Returns:
             List of game ID strings
         """
         return self._api.list_game_ids()
-    
+
     # =========================================================================
     # Scorecard Management
     # =========================================================================
-    
+
     def get_scorecard(self, scorecard_id: Optional[str] = None):
         """
         Get scorecard results.
-        
+
         Args:
             scorecard_id: Specific scorecard ID, or None for default
-        
+
         Returns:
             Scorecard object with results
         """
         return self._api.get_scorecard(scorecard_id)
-    
+
     def close_scorecard(self, scorecard_id: Optional[str] = None):
         """
         Close and finalize a scorecard.
-        
+
         Args:
             scorecard_id: Specific scorecard ID, or None for default
-        
+
         Returns:
             Final scorecard with results
         """
         return self._api.close_scorecard(scorecard_id)
-    
+
     def create_scorecard(
         self,
         source_url: Optional[str] = None,
@@ -388,45 +383,45 @@ class GameplayEngine:
     ) -> Optional[str]:
         """
         Create a new scorecard.
-        
+
         Args:
             source_url: Optional URL for tracking
             tags: Optional tags for filtering
-        
+
         Returns:
             Scorecard ID string
         """
         return self._api.create_scorecard(source_url=source_url, tags=tags)
-    
+
     # =========================================================================
     # Session Stats
     # =========================================================================
-    
+
     @property
     def games_played(self) -> int:
         """Get total games played this session."""
         return self._games_played
-    
+
     @property
     def total_wins(self) -> int:
         """Get total wins this session."""
         return self._total_wins
-    
+
     @property
     def win_rate(self) -> float:
         """Get session win rate."""
         if self._games_played == 0:
             return 0.0
         return self._total_wins / self._games_played
-    
+
     # =========================================================================
     # Configuration
     # =========================================================================
-    
+
     def set_decision_ordering(self, ordering: str) -> None:
         """
         Set the decision rung ordering.
-        
+
         Args:
             ordering: Ordering preset name (e.g., "efficiency", "exploration")
         """
@@ -435,7 +430,7 @@ class GameplayEngine:
                 self._decision_system.load_ordering(ordering)  # type: ignore
             except Exception as e:
                 print(f"[WARN] Failed to set ordering: {e}")
-    
+
     def set_verbose(self, verbose: bool) -> None:
         """Set verbose mode."""
         self._config.verbose = verbose
@@ -444,17 +439,17 @@ class GameplayEngine:
 class SimpleDecisionFallback:
     """
     Simple fallback decision system when DecisionRungSystem is not available.
-    
+
     Just returns a random action from available actions.
     """
-    
+
     def decide(self, frame: Any, context: Dict[str, Any]) -> tuple[str, str]:
         """Make a random decision."""
         import random
-        
+
         available = context.get('available_actions', ['ACTION1'])
         action = random.choice(available)
-        
+
         return action, "random_fallback"
 
 
@@ -465,11 +460,11 @@ class SimpleDecisionFallback:
 def quick_play(game_id: str, max_actions: int = 500) -> GameResult:
     """
     Quick play a single game with default settings.
-    
+
     Args:
         game_id: Game identifier
         max_actions: Maximum actions
-    
+
     Returns:
         GameResult
     """
@@ -490,39 +485,39 @@ def list_all_games() -> List[str]:
 if __name__ == "__main__":
     print("Core Gameplay v2.0 - Quick Test")
     print("=" * 50)
-    
+
     # Test in offline mode
     config = EngineConfig(
         operation_mode="OFFLINE",
         verbose=True,
     )
-    
+
     engine = GameplayEngine(config=config)
-    
+
     print(f"\nOperation Mode: {config.operation_mode}")
-    
+
     # List games
     games = engine.list_games()
     print(f"\nAvailable Games: {len(games)}")
     for g in games[:5]:
         print(f"  - {g.game_id}: {g.title}")
-    
+
     # Try to play if games available
     if games:
         print(f"\n--- Playing: {games[0].game_id} ---")
-        
+
         agent = AgentConfig(
             agent_id="test-agent",
             role="pioneer",
             action_budget=100,  # Short budget for test
         )
-        
+
         result = engine.play_single_game(
             games[0].game_id,
             agent_config=agent,
             max_actions=50,  # Very short for test
         )
-        
+
         print(f"\nResult:")
         print(f"  Game: {result.game_id}")
         print(f"  Score: {result.final_score:.2f}")
@@ -531,10 +526,10 @@ if __name__ == "__main__":
         print(f"  Win: {result.is_win}")
         print(f"  Duration: {result.duration_seconds:.2f}s")
         print(f"  Sequence (first 10): {result.action_sequence[:10]}")
-    
+
     print(f"\n--- Session Stats ---")
     print(f"  Games played: {engine.games_played}")
     print(f"  Total wins: {engine.total_wins}")
     print(f"  Win rate: {engine.win_rate:.1%}")
-    
+
     print("\n[OK] All tests passed!")

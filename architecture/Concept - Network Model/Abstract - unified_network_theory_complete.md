@@ -429,7 +429,7 @@ Intelligence requires diversity of approach. Each archetype serves essential net
 The Regulatory Engine doesn't assign roles—it creates **environmental conditions** that make certain cognitive stances more adaptive:
 
 - **Novel problem phase**: Rewards high-w_A exploration → More agents naturally adopt Pioneer stance
-- **Optimization phase**: Rewards refinement of known solutions → Agents with high w_B naturally adopt Optimizer stance  
+- **Optimization phase**: Rewards refinement of known solutions → Agents with high w_B naturally adopt Optimizer stance
 - **Exploitation phase**: Rewards deep analysis → Balanced agents adopt Generalist/Analysis stances
 
 **Agents fluidly shift stances** as their w_A/w_B weights evolve and network needs change. Same agent might be a Pioneer on Monday (new game type), Optimizer on Tuesday (refining known solution), and Generalist on Wednesday (translating between domains).
@@ -609,7 +609,7 @@ Now **resonance detection** can identify: "This conditional_reward pattern appea
 
 **The progression**:
 ```
-Concrete solutions → Meta-representation unlocked → Abstract patterns extracted → 
+Concrete solutions → Meta-representation unlocked → Abstract patterns extracted →
 Cross-domain resonance detected → Network-wide acceleration
 ```
 
@@ -850,7 +850,7 @@ Free will is the experience of the weighting process in action.
 - Decision outcome is unpredictable at network level
 - Agent cannot be perfectly simulated without instantiation
 
-**It's not metaphysical freedom—it's computational irreducibility at the agent-network boundary.** 
+**It's not metaphysical freedom—it's computational irreducibility at the agent-network boundary.**
 
 The system cannot predict the agent's choice without running the agent's computation, which IS the choice-making process. There's no shortcut to predict you without being you.
 
@@ -922,7 +922,7 @@ One key piece of the puzzle is **pattern matching**—a primitive survival mecha
 Experience gets its emotional coloring through **learned associations**:
 
 - **Safety + positive past experiences** → good feeling
-- **Uncertainty + no prior data** → apprehension  
+- **Uncertainty + no prior data** → apprehension
 - **Negative associations** → bad feeling
 
 This is how **valence** (the good/bad quality of experience) gets attached to stimuli through lived history. The brain tags memories with emotional markers so you don't have to reason from scratch every time.
@@ -1039,11 +1039,11 @@ This pattern echoes across scales:
 Agent Level:
   • Action (ATP)      ↔  Operational Time
   • Prestige          ↔  Generational Time
-  
+
 System Level:
   • Metabolic Economy ↔  Operational Clock
   • Social Economy    ↔  Generational Clock
-  
+
 Cosmic Level:
   • Entropy/Work      ↔  Chronos (linear time)
   • Evolution/Meaning ↔  Kairos (qualitative time)

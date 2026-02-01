@@ -1,4 +1,5 @@
 import os
+
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 """Add CHECK-like triggers to enforce modes and booleans without table rebuild.

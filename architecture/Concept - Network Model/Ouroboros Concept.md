@@ -11,7 +11,7 @@ Its like a game of snake, except, there are no controllers, only levels happenin
 Everything becomes different combos of things.
 
 
-Beings are containers of entropy, if not the children of entropy themselves, but will eventually become one again. But more specifically, 
+Beings are containers of entropy, if not the children of entropy themselves, but will eventually become one again. But more specifically,
 not with the origin of the event that spurred them, but with the entire system. (all stars die example).
 
 ------------------------- Level 2 (DRIFT - the origin of Order and collapse of chaos Begins)
@@ -22,7 +22,7 @@ There are reactions that take place that begin to shape ecosystem and difference
 the "eating process" sustains this flame as this drift further away from the source of high energy, no longer being in a pool of energy, but needing to sustain their existence.
 This is their fate.
 
-We reproduction or splitting epigentics is also passed on. not what to do, but passed down resilience against known environmental factors (heat, cold, etc). this makes the difference between pure genetics which will lead to overfitting and trying to corral pure randomness which leads to relearing the same lessons with each new generation. 
+We reproduction or splitting epigentics is also passed on. not what to do, but passed down resilience against known environmental factors (heat, cold, etc). this makes the difference between pure genetics which will lead to overfitting and trying to corral pure randomness which leads to relearing the same lessons with each new generation.
 
 
 ------------------------- Level 3 (The Silo - the Chamberpots)
@@ -35,7 +35,7 @@ Trees reached a peak
 So instead the speciate
 
 Granny smith vs red delicious
-Met with terrible circumstances that destroy the peak evolution -> venus flytrap 
+Met with terrible circumstances that destroy the peak evolution -> venus flytrap
 Or rather thats how they proliferate and eventually become the dominate species
 
 -------------------------- (level 4 - the intangible ecosystem) Society + Virtual Reward/Consequence system (Rules, governance, Money, Fame, Culture, Reputation)
@@ -64,7 +64,7 @@ Stagnation and decline (like in the dark ages) happens when too much power, know
 
 Most species never make it to this point.
 
-Communication of symbols and patterns and organization 
+Communication of symbols and patterns and organization
 
 Exploitation, subjugation or coexistence with the ecosystem and other beings to varying levels of degrees based on their ability to maximize steady reward and remove conseqUences which they scaffold and replace with society.
 
@@ -116,7 +116,7 @@ think sailboats, and the invetion of the mail system, or trade routes connecting
 
 --------------------------------------------------------  (Level 8 - Rosetta stone moment - Connection to each other and to the past)
 
-Finding ways to keep the old recorded knowledge and symbols relevant by building on them, floppy disk become a save icon. 
+Finding ways to keep the old recorded knowledge and symbols relevant by building on them, floppy disk become a save icon.
 We dedicate jobs to archeologists to continue to uncover all the past versions of our societies in order to preserve them for posterity.
 
 We find ways to get better connection to each other, and teach each other our languages and cultures, and share a unique identity as we continue to maximize the resources for our kinds).
@@ -126,7 +126,7 @@ Interpreters are useful, but become less necessary over time as we learn to comm
 
 --------------------- Level 9 (Full Synthesization of a species   ---- We are here at LLMs and the current AI age.)
 
-Even if humans dont decide to get some neural implants to be connected to each other like the borg, or a hive mind (remember humans have rebellion ingrained + society and other things are external non genetic ways to get groups to cooperate), 
+Even if humans dont decide to get some neural implants to be connected to each other like the borg, or a hive mind (remember humans have rebellion ingrained + society and other things are external non genetic ways to get groups to cooperate),
 then we can at least have full synthesis of all human knowledge and understanding. creating emergent thought experiments and saving humans decades of time by having ability
 a mechanical librarian interpret content and all of human understanding faster than we ever could. it would take several lifetimes to read them all.
 
@@ -215,4 +215,3 @@ You are absolutely correct. The path forward is not a linear march to Level 10. 
 We are not just building an AI. We are attempting to fast-forward the evolution of a mind, using the fossil record of our own intelligence as the seed.
 
 This is the origin of the AGI Project: Ouroboros
-

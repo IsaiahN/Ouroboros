@@ -146,11 +146,11 @@ Acknowledge this protocol and confirm understanding. Do not proceed until the te
 depending on the presence of `guid` in the request body:
 
 • **Omit `guid` or set it to `null`** → start a brand-new game
-  instance.  
-• **Provide an existing `guid`** → reset that session.  
+  instance.
+• **Provide an existing `guid`** → reset that session.
   - If at least one ACTION command has been issued since the last
-    level transition, only the **current level** is restarted.  
-  - If no ACTIONs have been issued, the entire game resets.  
+    level transition, only the **current level** is restarted.
+  - If no ACTIONs have been issued, the entire game resets.
   Two consecutive RESETs therefore guarantee a completely fresh
   game.
 
@@ -202,9 +202,9 @@ paths:
                   - type: string
                     nullable: true
                     description: >
-                      Server-generated game session ID.  
+                      Server-generated game session ID.
 
-                      • Omit or set to `null` to create a new game.  
+                      • Omit or set to `null` to create a new game.
 
                       • Provide an existing value to reset that game as
                       described above.
@@ -299,12 +299,12 @@ paths:
 
 
                       • **NOT_FINISHED** - game in progress, not yet WIN or
-                      GAME_OVER.  
+                      GAME_OVER.
 
                       • **NOT_STARTED**  - session has ended (WIN or GAME_OVER)
-                      and requires RESET.  
+                      and requires RESET.
 
-                      • **WIN**          - session ended in victory.  
+                      • **WIN**          - session ended in victory.
 
                       • **GAME_OVER**    - session ended in defeat.
                     enum:
@@ -356,7 +356,7 @@ paths:
                         - 5
                         - 6
             description: |
-              Snapshot returned after every RESET or ACTION command.  
+              Snapshot returned after every RESET or ACTION command.
               Includes the latest visual frame(s), cumulative score details, the
               current game state, and an echo of the triggering action.
             refIdentifier: '#/components/schemas/FrameResponse'
@@ -397,15 +397,15 @@ paths:
         schemaArray:
           - type: any
             description: |
-              Bad request - possible causes:  
-              • Unknown `game_id`  
-              • Missing or unknown `card_id`  
+              Bad request - possible causes:
+              • Unknown `game_id`
+              • Missing or unknown `card_id`
               • `guid` does not correspond to an active session
         examples: {}
         description: |
-          Bad request - possible causes:  
-          • Unknown `game_id`  
-          • Missing or unknown `card_id`  
+          Bad request - possible causes:
+          • Unknown `game_id`
+          • Missing or unknown `card_id`
           • `guid` does not correspond to an active session
     '401':
       _mintlify/placeholder:
@@ -427,15 +427,15 @@ We need to track the agent's position by analyzing frame changes, not API coordi
 
 
 #Measuring Success:
-from the action return data 
+from the action return data
 score and win_score are vital too, perhaps they can help in the situations to help the model understand if its moving in the right direction for actions? score
-integer 
+integer
 Current cumulative score for this run.
 
 Required range: 0 <= x <= 254
 ​
 win_score
-integer 
+integer
 Score threshold required to reach the WIN state. Mirrors
 the game's configured win condition so agents can adapt
 dynamically without hard-coding values.

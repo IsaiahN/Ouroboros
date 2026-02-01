@@ -30,6 +30,7 @@ Version: 1.0
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: No pycache
 
 import logging
@@ -37,33 +38,46 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from database_interface import DatabaseInterface
 
-# Extracted types (Jan 2026 refactor) - import will shadow local definitions
-from engines.consciousness.i_thread_types import (
-    DeathType, DeathPersona, DEATH_PERSONAS, DEATH_PHILOSOPHIES,
-    ROLE_TENSION_PROFILES, THINKING_BUDGET_CONFIG,
-    ROLE_DEFAULT_WEIGHTS, DEFAULT_LEARNING_RATE,
-    CONFLICT_THRESHOLD, HIGH_CONFLICT_THRESHOLD,
-    NoveltyConfig, StreamProposal, ConflictResult, SynthesisResult,
-    EpisodicMemory, AgentNarrative, MortalityState,
-    GutInstinctResult, DeliberationResult, ReasoningLog,
-    IThreadState, MultiConflictResult,
-)
-
 # Extracted DeliberationEngine (Jan 31 2026 refactor)
 from engines.consciousness.deliberation_engine import (
-    DeliberationEngine,
     DELIBERATION_CONFIG,
+    DeliberationEngine,
+)
+
+# Extracted types (Jan 2026 refactor) - import will shadow local definitions
+from engines.consciousness.i_thread_types import (
+    CONFLICT_THRESHOLD,
+    DEATH_PERSONAS,
+    DEATH_PHILOSOPHIES,
+    DEFAULT_LEARNING_RATE,
+    HIGH_CONFLICT_THRESHOLD,
+    ROLE_DEFAULT_WEIGHTS,
+    ROLE_TENSION_PROFILES,
+    THINKING_BUDGET_CONFIG,
+    AgentNarrative,
+    ConflictResult,
+    DeathPersona,
+    DeathType,
+    DeliberationResult,
+    EpisodicMemory,
+    GutInstinctResult,
+    IThreadState,
+    MortalityState,
+    MultiConflictResult,
+    NoveltyConfig,
+    ReasoningLog,
+    StreamProposal,
+    SynthesisResult,
 )
 
 # TYPE_CHECKING import to avoid circular dependency
 if TYPE_CHECKING:
-    from engines.reasoning.symbolic_reasoning_engine import WorldModel
-    from engines.social.resonance_detector import ResonanceDetector
     from engines.planning.sequence_abstraction import SequenceAbstraction
+    from engines.social.resonance_detector import ResonanceDetector
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +92,8 @@ logger = logging.getLogger(__name__)
 def _get_resonance_detector():
     """Lazy import to avoid circular dependency."""
     try:
-        from engines.social.resonance_detector import ResonanceDetector
         from database_interface import DatabaseInterface
+        from engines.social.resonance_detector import ResonanceDetector
         return ResonanceDetector(DatabaseInterface())
     except ImportError:
         return None
@@ -104,7 +118,7 @@ def _get_sequence_abstraction():
 #
 # From engines.consciousness.i_thread_types:
 #   - GutInstinctResult dataclass
-#   - DeliberationResult dataclass  
+#   - DeliberationResult dataclass
 #   - ReasoningLog dataclass
 #   - IThreadState dataclass
 #   - MultiConflictResult dataclass
@@ -129,29 +143,29 @@ def _get_sequence_abstraction():
 class IThread:
     """
     The I-Thread: Persistent identity weaver for Two Streams consciousness.
-    
+
     Maintains the w_A/w_B weights that determine how much an agent trusts
     its private experience (Stream A) vs collective network wisdom (Stream B).
-    
+
     Usage:
         i_thread = IThread(db)
         state = i_thread.get_state(agent_id)
-        
+
         # When streams conflict:
         conflict = i_thread.detect_conflict(stream_a_proposal, stream_b_proposal)
-        
+
         # Synthesize action:
         synthesis = i_thread.synthesize(state, stream_a_proposal, stream_b_proposal)
-        
+
         # After outcome, update weights:
         i_thread.learn_from_outcome(agent_id, chosen_source='stream_a', outcome='positive')
     """
-    
+
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self._ensure_tables_exist()
         self._state_cache: Dict[str, IThreadState] = {}
-    
+
     def _ensure_tables_exist(self):
         """Create I-Thread tracking tables if they don't exist."""
         try:
@@ -159,35 +173,35 @@ class IThread:
                 CREATE TABLE IF NOT EXISTS i_thread_history (
                     history_id TEXT PRIMARY KEY,
                     agent_id TEXT NOT NULL,
-                    
+
                     -- Weight state
                     w_a_before REAL,
                     w_b_before REAL,
                     w_a_after REAL,
                     w_b_after REAL,
-                    
+
                     -- Learning event
                     event_type TEXT,  -- 'conflict_resolution', 'outcome_learning', 'role_reset'
                     chosen_source TEXT,  -- 'stream_a', 'stream_b', 'synthesis'
                     outcome TEXT,  -- 'positive', 'negative', 'neutral'
                     conflict_score REAL,
                     surprise_score REAL,
-                    
+
                     -- Context
                     game_id TEXT,
                     level_number INTEGER,
                     action_taken TEXT,
-                    
+
                     -- Tracking
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
             self.db.execute_query("""
                 CREATE INDEX IF NOT EXISTS idx_i_thread_agent
                 ON i_thread_history(agent_id, created_at DESC)
             """)
-            
+
             # ================================================================
             # EPISODIC MEMORY TABLE: Compressed autobiographical memories
             # ================================================================
@@ -201,44 +215,44 @@ class IThread:
                     game_type TEXT NOT NULL,
                     game_id TEXT,
                     level_number INTEGER DEFAULT 1,
-                    
+
                     -- Episode classification
                     episode_type TEXT NOT NULL,  -- 'breakthrough', 'frustration', 'surprise', 'validation', 'failure', 'mastery'
                     summary TEXT NOT NULL,  -- Natural language description
-                    
+
                     -- Emotional/significance markers
                     emotional_valence REAL DEFAULT 0.0,  -- -1.0 to +1.0
                     significance REAL DEFAULT 0.5,  -- 0.0 to 1.0
-                    
+
                     -- Learning content
                     belief_formed TEXT,  -- "Corners matter in maze games"
                     rule_discovered TEXT,  -- "click_corner -> reveal_path"
-                    
+
                     -- Stream context at time of episode
                     stream_source TEXT DEFAULT 'stream_a',
                     w_a_at_time REAL DEFAULT 0.5,
                     w_b_at_time REAL DEFAULT 0.5,
-                    
+
                     -- Retrieval tracking
                     times_recalled INTEGER DEFAULT 0,
                     last_recalled DATETIME,
-                    
+
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
                 )
             """)
-            
+
             self.db.execute_query("""
                 CREATE INDEX IF NOT EXISTS idx_episodic_agent_type
                 ON i_thread_episodic_memories(agent_id, episode_type, significance DESC)
             """)
-            
+
             self.db.execute_query("""
                 CREATE INDEX IF NOT EXISTS idx_episodic_game_type
                 ON i_thread_episodic_memories(game_type, episode_type)
             """)
-            
+
             # ================================================================
             # MORTALITY COLUMNS: Add to agents table if not exist
             # ================================================================
@@ -250,72 +264,72 @@ class IThread:
                 """)
             except Exception:
                 pass  # Column likely exists
-            
+
             try:
                 self.db.execute_query("""
                     ALTER TABLE agents ADD COLUMN legacy_score REAL DEFAULT 0.0
                 """)
             except Exception:
                 pass  # Column likely exists
-            
+
             try:
                 self.db.execute_query("""
                     ALTER TABLE agents ADD COLUMN last_reflection TEXT DEFAULT NULL
                 """)
             except Exception:
                 pass  # Column likely exists
-            
+
             try:
                 self.db.execute_query("""
                     ALTER TABLE agents ADD COLUMN reflection_count INTEGER DEFAULT 0
                 """)
             except Exception:
                 pass  # Column likely exists
-            
+
             logger.debug("[I-THREAD] Tables initialized (including episodic memory and mortality columns)")
-            
+
         except Exception as e:
             logger.debug(f"I-Thread table creation (may already exist): {e}")
-    
+
     # =========================================================================
     # STATE MANAGEMENT
     # =========================================================================
-    
+
     def get_state(self, agent_id: str) -> IThreadState:
         """
         Get current I-Thread state for an agent.
-        
+
         Loads from database and caches for session performance.
-        
+
         Args:
             agent_id: Agent identifier
-            
+
         Returns:
             IThreadState with current w_A/w_B weights
         """
         if agent_id in self._state_cache:
             return self._state_cache[agent_id]
-        
+
         # Load from database
         try:
             result = self.db.execute_query(
                 "SELECT self_network_bias FROM agents WHERE agent_id = ?",
                 (agent_id,)
             )
-            
+
             if result:
                 w_b = result[0].get('self_network_bias', 0.5) or 0.5
                 w_a = 1.0 - w_b  # w_A + w_B = 1.0
             else:
                 w_a, w_b = 0.5, 0.5
-                
+
         except Exception as e:
             logger.warning(f"[I-THREAD] Failed to load state for {agent_id[:8]}: {e}")
             w_a, w_b = 0.5, 0.5
-        
+
         # Load historical stats
         stats = self._load_historical_stats(agent_id)
-        
+
         state = IThreadState(
             agent_id=agent_id,
             w_a=w_a,
@@ -325,22 +339,22 @@ class IThread:
             stream_b_wins=stats.get('stream_b_wins', 0),
             personality_label=self._compute_personality_label(w_a, w_b)
         )
-        
+
         self._state_cache[agent_id] = state
         return state
-    
+
     def _load_historical_stats(self, agent_id: str) -> Dict[str, int]:
         """Load cumulative stats from history table."""
         try:
             result = self.db.execute_query("""
-                SELECT 
+                SELECT
                     COUNT(*) as total_conflicts,
                     SUM(CASE WHEN chosen_source = 'stream_a' THEN 1 ELSE 0 END) as stream_a_wins,
                     SUM(CASE WHEN chosen_source = 'stream_b' THEN 1 ELSE 0 END) as stream_b_wins
                 FROM i_thread_history
                 WHERE agent_id = ? AND event_type = 'conflict_resolution'
             """, (agent_id,))
-            
+
             if result:
                 return {
                     'total_conflicts': result[0].get('total_conflicts', 0) or 0,
@@ -349,9 +363,9 @@ class IThread:
                 }
         except Exception:
             pass
-        
+
         return {'total_conflicts': 0, 'stream_a_wins': 0, 'stream_b_wins': 0}
-    
+
     def _compute_personality_label(self, w_a: float, w_b: float) -> str:
         """Compute personality label from weights."""
         if w_a > w_b + 0.2:
@@ -360,11 +374,11 @@ class IThread:
             return 'network-trusting'
         else:
             return 'balanced'
-    
+
     # =========================================================================
     # CONFLICT DETECTION
     # =========================================================================
-    
+
     def detect_conflict(
         self,
         stream_a_proposal: StreamProposal,
@@ -372,13 +386,13 @@ class IThread:
     ) -> ConflictResult:
         """
         Detect if Stream A and Stream B are in conflict.
-        
+
         Conflict = streams propose different actions with confidence.
-        
+
         Args:
             stream_a_proposal: What private experience suggests
             stream_b_proposal: What network wisdom suggests
-            
+
         Returns:
             ConflictResult with conflict score and consciousness intensity
         """
@@ -390,7 +404,7 @@ class IThread:
         else:
             # Same action = no conflict
             conflict_score = 0.0
-        
+
         # Determine consciousness intensity
         if conflict_score < CONFLICT_THRESHOLD:
             intensity = 'automatic'
@@ -398,7 +412,7 @@ class IThread:
             intensity = 'deliberative'
         else:
             intensity = 'vivid'
-        
+
         return ConflictResult(
             has_conflict=conflict_score >= CONFLICT_THRESHOLD,
             conflict_score=conflict_score,
@@ -406,11 +420,11 @@ class IThread:
             stream_b_proposal=stream_b_proposal,
             consciousness_intensity=intensity
         )
-    
+
     # =========================================================================
     # SYNTHESIS: WEIGHTED ACTION SELECTION
     # =========================================================================
-    
+
     def synthesize(
         self,
         state: IThreadState,
@@ -420,24 +434,24 @@ class IThread:
     ) -> SynthesisResult:
         """
         Synthesize an action from competing stream proposals.
-        
+
         Uses w_A/w_B weights to determine which stream to trust.
-        
+
         Args:
             state: Current I-Thread state with weights
             stream_a_proposal: Private experience proposal
             stream_b_proposal: Network wisdom proposal
             context: Optional context (game state, history)
-            
+
         Returns:
             SynthesisResult with chosen action and metadata
         """
         conflict = self.detect_conflict(stream_a_proposal, stream_b_proposal)
-        
+
         # Calculate weighted scores
         score_a = stream_a_proposal.confidence * state.w_a
         score_b = stream_b_proposal.confidence * state.w_b
-        
+
         # Choose based on weighted scores
         if score_a > score_b:
             chosen_action = stream_a_proposal.action
@@ -452,7 +466,7 @@ class IThread:
             chosen_action = stream_a_proposal.action
             chosen_source = 'synthesis'
             confidence = (stream_a_proposal.confidence + stream_b_proposal.confidence) / 2
-        
+
         # Calculate surprise: How unexpected is this choice?
         # High surprise when low-weight stream wins due to high confidence
         if chosen_source == 'stream_a' and state.w_a < state.w_b:
@@ -461,7 +475,7 @@ class IThread:
             surprise = state.w_a - state.w_b  # Underdog won
         else:
             surprise = 0.0  # Expected outcome
-        
+
         return SynthesisResult(
             chosen_action=chosen_action,
             confidence=confidence,
@@ -471,11 +485,11 @@ class IThread:
             w_b_used=state.w_b,
             deliberation_required=conflict.has_conflict
         )
-    
+
     # =========================================================================
     # LEARNING: UPDATE WEIGHTS FROM OUTCOMES
     # =========================================================================
-    
+
     def learn_from_outcome(
         self,
         agent_id: str,
@@ -489,10 +503,10 @@ class IThread:
     ) -> Tuple[float, float]:
         """
         Learn from action outcome by adjusting w_A/w_B weights.
-        
+
         If the chosen stream led to positive outcome, increase its weight.
         If negative, decrease its weight (increase the other).
-        
+
         Args:
             agent_id: Agent identifier
             chosen_source: Which stream was followed ('stream_a', 'stream_b')
@@ -502,18 +516,18 @@ class IThread:
             action_taken: Optional action taken
             conflict_score: How much conflict there was
             surprise_score: How surprising the synthesis was
-            
+
         Returns:
             Tuple of (new_w_a, new_w_b)
         """
         state = self.get_state(agent_id)
-        
+
         w_a_before = state.w_a
         w_b_before = state.w_b
-        
+
         # Calculate weight adjustment
         learning_rate = state.learning_rate
-        
+
         if outcome == 'positive':
             # Reward the chosen stream
             if chosen_source == 'stream_a':
@@ -532,27 +546,27 @@ class IThread:
                 adjustment = 0.0
         else:
             adjustment = 0.0  # Neutral - no update
-        
+
         # Apply adjustment with bounds
         new_w_a = max(0.1, min(0.9, state.w_a + adjustment))
         new_w_b = 1.0 - new_w_a  # Maintain sum = 1.0
-        
+
         # Update state
         state.w_a = new_w_a
         state.w_b = new_w_b
         state.last_update = datetime.now()
         state.personality_label = self._compute_personality_label(new_w_a, new_w_b)
-        
+
         if conflict_score > 0:
             state.total_conflicts += 1
             if chosen_source == 'stream_a':
                 state.stream_a_wins += 1
             elif chosen_source == 'stream_b':
                 state.stream_b_wins += 1
-        
+
         # Persist to database
         self._save_state(agent_id, new_w_b)  # DB stores w_b as self_network_bias
-        
+
         # Log history
         self._log_history(
             agent_id=agent_id,
@@ -569,9 +583,9 @@ class IThread:
             conflict_score=conflict_score,
             surprise_score=surprise_score
         )
-        
+
         return (new_w_a, new_w_b)
-    
+
     def _save_state(self, agent_id: str, w_b: float):
         """Save w_B to database (self_network_bias field)."""
         try:
@@ -581,7 +595,7 @@ class IThread:
             )
         except Exception as e:
             logger.warning(f"[I-THREAD] Failed to save state: {e}")
-    
+
     def _log_history(
         self,
         agent_id: str,
@@ -618,11 +632,11 @@ class IThread:
             ))
         except Exception as e:
             logger.debug(f"[I-THREAD] History log failed: {e}")
-    
+
     # =========================================================================
     # ROLE TRANSITIONS
     # =========================================================================
-    
+
     def reset_for_role_change(
         self,
         agent_id: str,
@@ -630,31 +644,31 @@ class IThread:
     ) -> Tuple[float, float]:
         """
         Reset w_A/w_B when agent changes roles.
-        
+
         Per theory: Role changes reset stream weighting to role defaults.
-        
+
         Args:
             agent_id: Agent identifier
             new_role: New role being assigned
-            
+
         Returns:
             Tuple of (new_w_a, new_w_b)
         """
         state = self.get_state(agent_id)
         w_a_before = state.w_a
         w_b_before = state.w_b
-        
+
         # Get role defaults
         new_w_a, new_w_b = ROLE_DEFAULT_WEIGHTS.get(new_role.lower(), (0.5, 0.5))
-        
+
         # Update state
         state.w_a = new_w_a
         state.w_b = new_w_b
         state.personality_label = self._compute_personality_label(new_w_a, new_w_b)
-        
+
         # Persist
         self._save_state(agent_id, new_w_b)
-        
+
         # Log history
         self._log_history(
             agent_id=agent_id,
@@ -665,27 +679,27 @@ class IThread:
             event_type='role_reset',
             outcome=f'role_change_to_{new_role}'
         )
-        
+
         logger.info(
             f"[I-THREAD] {agent_id[:8]} role -> {new_role}: "
             f"w_A: {w_a_before:.2f} -> {new_w_a:.2f}"
         )
-        
+
         return new_w_a, new_w_b
-    
+
     # =========================================================================
     # PERSONALITY ANALYSIS
     # =========================================================================
-    
+
     def get_personality_summary(self, agent_id: str) -> Dict[str, Any]:
         """
         Get personality summary for an agent.
-        
+
         Returns:
             Dict with personality metrics and history
         """
         state = self.get_state(agent_id)
-        
+
         return {
             'agent_id': agent_id,
             'w_a': state.w_a,
@@ -693,7 +707,7 @@ class IThread:
             'personality_label': state.personality_label,
             'total_conflicts_resolved': state.total_conflicts,
             'stream_a_win_rate': (
-                state.stream_a_wins / state.total_conflicts 
+                state.stream_a_wins / state.total_conflicts
                 if state.total_conflicts > 0 else 0.5
             ),
             'stream_b_win_rate': (
@@ -702,21 +716,21 @@ class IThread:
             ),
             'learning_rate': state.learning_rate
         }
-    
+
     def clear_cache(self, agent_id: Optional[str] = None):
         """Clear state cache for agent or all agents."""
         if agent_id:
             self._state_cache.pop(agent_id, None)
         else:
             self._state_cache.clear()
-    
+
     # =========================================================================
     # TEMPORARY SELF-TRUST BOOST (Escape/Frontier Exploration)
     # =========================================================================
     # When agents break out of stuck states or reach frontiers, temporarily
     # boost their self-trust (wA) to encourage exploration over network following.
     # =========================================================================
-    
+
     def boost_self_trust(
         self,
         agent_id: str,
@@ -726,41 +740,41 @@ class IThread:
     ) -> Tuple[float, float, float]:
         """
         Temporarily boost wA (self-trust) for exploration.
-        
+
         Called when:
         - Agent escapes stuck state independently
         - Agent reaches frontier level with no sequences
         - Agent needs to explore without network guidance
-        
+
         Args:
             agent_id: Agent identifier
             boost_amount: How much to add to wA (default 0.25)
             max_wA: Maximum wA after boost (default 1.0)
             reason: Why boosting (for logging)
-            
+
         Returns:
             Tuple of (original_wA, boosted_wA, boosted_wB)
         """
         state = self.get_state(agent_id)
         original_wA = state.w_a
-        
+
         # Calculate boosted wA (capped at max)
         boosted_wA = min(max_wA, state.w_a + boost_amount)
         boosted_wB = 1.0 - boosted_wA
-        
+
         if boosted_wA > state.w_a:
             # Store original for restoration
             state.original_w_a = original_wA
             state.novelty_boost_active = True
-            
+
             # Apply boost
             state.w_a = boosted_wA
             state.w_b = boosted_wB
             state.personality_label = self._compute_personality_label(boosted_wA, boosted_wB)
-            
+
             # Persist
             self._save_state(agent_id, boosted_wB)
-            
+
             # Log history
             self._log_history(
                 agent_id=agent_id,
@@ -771,14 +785,14 @@ class IThread:
                 event_type='self_trust_boost',
                 outcome=reason
             )
-            
+
             logger.info(
                 f"[I-THREAD] {agent_id[:8]} {reason} boost: "
                 f"w_A: {original_wA:.2f} -> {boosted_wA:.2f}"
             )
-        
+
         return original_wA, boosted_wA, boosted_wB
-    
+
     def restore_self_trust(
         self,
         agent_id: str,
@@ -786,21 +800,21 @@ class IThread:
     ) -> Tuple[float, float]:
         """
         Restore wA to original value after temporary boost.
-        
+
         Called when:
         - Agent exits self-directed mode
         - Agent finds network sequences for new level
         - Exploration phase ends
-        
+
         Args:
             agent_id: Agent identifier
             original_wA: Original wA to restore (or use stored value)
-            
+
         Returns:
             Tuple of (restored_wA, restored_wB)
         """
         state = self.get_state(agent_id)
-        
+
         # Determine what to restore to
         if original_wA is not None:
             restore_wA = original_wA
@@ -809,20 +823,20 @@ class IThread:
         else:
             # No original stored, nothing to restore
             return state.w_a, state.w_b
-        
+
         w_a_before = state.w_a
         restore_wB = 1.0 - restore_wA
-        
+
         # Restore state
         state.w_a = restore_wA
         state.w_b = restore_wB
         state.original_w_a = None
         state.novelty_boost_active = False
         state.personality_label = self._compute_personality_label(restore_wA, restore_wB)
-        
+
         # Persist
         self._save_state(agent_id, restore_wB)
-        
+
         # Log history
         self._log_history(
             agent_id=agent_id,
@@ -833,12 +847,12 @@ class IThread:
             event_type='self_trust_restore',
             outcome='exploration_complete'
         )
-        
+
         logger.debug(
             f"[I-THREAD] {agent_id[:8]} restored: "
             f"w_A: {w_a_before:.2f} -> {restore_wA:.2f}"
         )
-        
+
         return restore_wA, restore_wB
 
     # =========================================================================
@@ -847,7 +861,7 @@ class IThread:
     # When network wisdom doesn't apply (novel situation), boost self-trust.
     # This implements fluid adaptation from core_gameplay.
     # =========================================================================
-    
+
     def apply_novelty_boost(
         self,
         state: IThreadState,
@@ -855,42 +869,42 @@ class IThread:
     ) -> IThreadState:
         """
         Apply novelty boost to wA when in a novel situation.
-        
+
         When prediction accuracy is low (network wisdom doesn't apply),
         the agent should trust its own experience more.
-        
+
         Args:
             state: Current I-Thread state
             novelty_config: Optional configuration (uses defaults if None)
-            
+
         Returns:
             Updated IThreadState with boosted wA (or unchanged if no boost needed)
         """
         if novelty_config is None:
             novelty_config = NoveltyConfig()
-        
+
         if not state.novelty_boost_active:
             return state
-        
+
         # Store original values before boost
         original_w_a = state.w_a
-        
+
         # Apply boost with cap
         boosted_w_a = min(novelty_config.max_wA, state.w_a + novelty_config.boost_amount)
         boosted_w_b = 1.0 - boosted_w_a
-        
+
         # Update state
         state.w_a = boosted_w_a
         state.w_b = boosted_w_b
         state.novelty_boost_applied = True
         state.original_w_a = original_w_a
-        
+
         logger.debug(
             f"[I-THREAD] Novelty boost applied: wA {original_w_a:.2f} -> {boosted_w_a:.2f}"
         )
-        
+
         return state
-    
+
     def set_novelty_active(
         self,
         agent_id: str,
@@ -900,10 +914,10 @@ class IThread:
     ):
         """
         Set novelty detection state for an agent.
-        
+
         Called by core_gameplay when prediction accuracy drops below threshold,
         indicating that network wisdom doesn't apply to the current situation.
-        
+
         Args:
             agent_id: Agent identifier
             is_active: Whether novelty boost should be active
@@ -912,20 +926,20 @@ class IThread:
         """
         state = self.get_state(agent_id)
         state.novelty_boost_active = is_active
-        
+
         if is_active and prediction_accuracy is not None:
             logger.debug(
                 f"[I-THREAD] Novelty detected for {agent_id[:8]}: "
                 f"accuracy={prediction_accuracy:.2f} ({sample_count} samples)"
             )
-    
+
     # =========================================================================
     # STREAM PROPOSAL BUILDING
     # =========================================================================
     # Consolidates proposal building from multiple sources into IThread.
     # This was previously scattered in core_gameplay._select_action()
     # =========================================================================
-    
+
     def build_stream_proposals(
         self,
         last_discovery: Optional[Dict] = None,
@@ -936,30 +950,30 @@ class IThread:
     ) -> Tuple[List[StreamProposal], List[StreamProposal]]:
         """
         Build Stream A and Stream B proposals from all cognitive sources.
-        
+
         Stream A (Private Experience):
         - Recent discoveries from self-exploration
         - Contradicted actions (negative evidence from personal experience)
         - Explorer/pioneer persona proposals
-        
+
         Stream B (Network Wisdom):
         - Network control hypotheses (validated by CODS/Oracle)
         - Peer failure avoidance (learn from others' mistakes)
         - Optimizer/validator persona proposals
-        
+
         Args:
             last_discovery: Dict with 'action', 'reliability_score' from self-exploration
             contradicted_actions: Dict mapping action -> contradiction count
             network_hypotheses: List of network hypothesis dicts with 'action_response_map'
             peer_failures: List of peer failure dicts with 'action', 'confidence'
             persona_proposals: List of persona proposal dicts with 'action', 'confidence', 'persona_type'
-            
+
         Returns:
             Tuple of (stream_a_proposals, stream_b_proposals)
         """
         stream_a: List[StreamProposal] = []
         stream_b: List[StreamProposal] = []
-        
+
         # Stream A: Recent discovery from self-exploration
         if last_discovery and last_discovery.get('action'):
             stream_a.append(StreamProposal(
@@ -968,7 +982,7 @@ class IThread:
                 source='discovery',
                 reasoning=last_discovery.get('reasoning')
             ))
-        
+
         # Stream A: Contradicted actions (NEGATIVE proposals - avoid these)
         if contradicted_actions:
             for action, count in contradicted_actions.items():
@@ -979,7 +993,7 @@ class IThread:
                         source='contradicted',
                         reasoning=f'Contradicted {count} times'
                     ))
-        
+
         # Stream B: Network hypotheses
         if network_hypotheses:
             for hyp in network_hypotheses:
@@ -993,7 +1007,7 @@ class IThread:
                             source='network_hypothesis',
                             reasoning=hyp.get('description', 'Network recommendation')
                         ))
-        
+
         # Stream B: Peer failures (NEGATIVE proposals for network)
         if peer_failures:
             for failure in peer_failures:
@@ -1003,7 +1017,7 @@ class IThread:
                     source='peer_failure',
                     reasoning=f'Peer failed with this action'
                 ))
-        
+
         # Persona proposals go to appropriate streams
         if persona_proposals:
             for prop in persona_proposals:
@@ -1014,7 +1028,7 @@ class IThread:
                     source=f'persona_{persona_type}',
                     reasoning=prop.get('reasoning')
                 )
-                
+
                 # Route based on persona type
                 if persona_type in ('explorer', 'pioneer', 'self'):
                     stream_a.append(proposal)
@@ -1024,13 +1038,13 @@ class IThread:
                     # Unknown persona - add to both
                     stream_a.append(proposal)
                     stream_b.append(proposal)
-        
+
         return stream_a, stream_b
-    
+
     # =========================================================================
     # MULTI-CONFLICT DETECTION (Multiple actions per stream)
     # =========================================================================
-    
+
     def detect_multi_conflict(
         self,
         stream_a_proposals: List[StreamProposal],
@@ -1038,40 +1052,40 @@ class IThread:
     ) -> MultiConflictResult:
         """
         Detect conflict between multiple Stream A and Stream B proposals.
-        
+
         Unlike detect_conflict() which compares single proposals,
         this handles the realistic case of multiple proposals per stream.
-        
+
         Conflict exists when:
         - Stream A proposes actions that Stream B doesn't (and vice versa)
         - Both streams have positive-confidence actions that differ
-        
+
         Args:
             stream_a_proposals: List of Stream A proposals
             stream_b_proposals: List of Stream B proposals
-            
+
         Returns:
             MultiConflictResult with conflict analysis
         """
         # Extract positive-confidence actions from each stream
         stream_a_actions = {
-            p.action for p in stream_a_proposals 
+            p.action for p in stream_a_proposals
             if p.confidence > 0 and p.action
         }
         stream_b_actions = {
-            p.action for p in stream_b_proposals 
+            p.action for p in stream_b_proposals
             if p.confidence > 0 and p.action
         }
-        
+
         # Calculate overlap and conflict
         overlap = stream_a_actions & stream_b_actions
         conflict_a = stream_a_actions - stream_b_actions  # Actions unique to A
         conflict_b = stream_b_actions - stream_a_actions  # Actions unique to B
         conflict_actions = conflict_a | conflict_b
-        
+
         # Conflict exists if both streams have actions and they differ
         has_conflict = bool(stream_a_actions) and bool(stream_b_actions) and stream_a_actions != stream_b_actions
-        
+
         # Determine consciousness intensity based on conflict severity
         if not has_conflict:
             intensity = 'automatic'
@@ -1079,10 +1093,10 @@ class IThread:
             intensity = 'deliberative'  # Some agreement exists
         else:
             intensity = 'vivid'  # Strong disagreement
-        
+
         # Synthesis should be enabled when conflict exists
         synthesis_enabled = has_conflict
-        
+
         return MultiConflictResult(
             has_conflict=has_conflict,
             stream_a_actions=stream_a_actions,
@@ -1092,11 +1106,11 @@ class IThread:
             consciousness_intensity=intensity,
             synthesis_enabled=synthesis_enabled
         )
-    
+
     # =========================================================================
     # QUERY HELPERS (Private Methods)
     # =========================================================================
-    
+
     def _query_episodic_memories(
         self,
         agent_id: str,
@@ -1104,7 +1118,7 @@ class IThread:
     ) -> List[Dict[str, Any]]:
         """
         Query episodic memories (thoughts from previous games).
-        
+
         This implements "reexamine their thoughts of previous games" requirement.
         Returns breakthroughs, frustrations, and lessons learned.
         """
@@ -1120,17 +1134,17 @@ class IThread:
             return [dict(r) for r in results] if results else []
         except Exception:
             return []
-    
+
     def _query_past_attempts(
-        self, 
-        agent_id: str, 
-        game_type: str, 
+        self,
+        agent_id: str,
+        game_type: str,
         level: int
     ) -> List[Dict[str, Any]]:
         """Query past action outcomes for this agent on this game/level."""
         try:
             results = self.db.execute_query("""
-                SELECT action_taken as action, 
+                SELECT action_taken as action,
                        CASE WHEN score_delta > 0 THEN 'positive'
                             WHEN score_delta < 0 THEN 'negative'
                             ELSE 'neutral' END as outcome,
@@ -1143,22 +1157,22 @@ class IThread:
             return [dict(r) for r in results] if results else []
         except Exception:
             return []
-    
+
     def _query_network_hypotheses(
-        self, 
-        game_type: str, 
+        self,
+        game_type: str,
         level: int
     ) -> List[Dict[str, Any]]:
         """Query network hypotheses for this game/level."""
         try:
             results = self.db.execute_query("""
-                SELECT hypothesis_id, 
+                SELECT hypothesis_id,
                        controlled_object as recommended_action,
                        reliability_score as reliability,
                        validation_attempts
                 FROM network_object_control_hypotheses
-                WHERE game_type = ? 
-                  AND level_number = ? 
+                WHERE game_type = ?
+                  AND level_number = ?
                   AND is_active = 1
                   AND (validation_attempts >= 3 OR validated_by_win = 1)
                 ORDER BY reliability_score DESC
@@ -1167,7 +1181,7 @@ class IThread:
             return [dict(r) for r in results] if results else []
         except Exception:
             return []
-    
+
     def _get_available_primitives(self, agent_id: str) -> List[str]:
         """Get list of primitives available to this agent."""
         # For now, return a basic list - could be enhanced to query CODS
@@ -1175,11 +1189,11 @@ class IThread:
             'detect_novelty', 'detect_motion', 'object_permanence',
             'pattern_matching', 'spatial_reasoning', 'temporal_tracking'
         ]
-    
+
     # =========================================================================
     # DELIBERATION DELEGATION (Uses DeliberationEngine)
     # =========================================================================
-    
+
     def compute_deliberation_budget(
         self,
         is_frontier: bool,
@@ -1202,7 +1216,7 @@ class IThread:
             actions_remaining_pct=actions_remaining_pct,
             following_sequence=following_sequence
         )
-    
+
     def capture_gut_instinct(
         self,
         available_actions: List[str],
@@ -1227,7 +1241,7 @@ class IThread:
             network_recommendation=network_recommendation,
             private_preference=private_preference
         )
-    
+
     def conduct_deliberation(
         self,
         gut_result: GutInstinctResult,
@@ -1252,7 +1266,7 @@ class IThread:
             w_a=w_a,
             w_b=w_b
         )
-    
+
     def decide_action(
         self,
         agent_id: str,
@@ -1268,10 +1282,10 @@ class IThread:
     ) -> ReasoningLog:
         """
         Main entry point: Decide which action to take.
-        
+
         Captures gut instinct, optionally performs deliberation,
         and returns complete reasoning log.
-        
+
         Args:
             agent_id: Agent making decision
             game_context: Dict with game_id, game_type, level, frame, etc.
@@ -1283,15 +1297,15 @@ class IThread:
             network_recommendation: Stream B suggestion
             private_preference: Stream A suggestion
             following_sequence: Are we executing a known sequence?
-            
+
         Returns:
             ReasoningLog with complete decision record
         """
         import time
-        
+
         decision_start = datetime.now()
         start_time = time.time()
-        
+
         # Extract context
         game_id = game_context.get('game_id', 'unknown')
         game_type = game_context.get('game_type', 'unknown')
@@ -1301,18 +1315,18 @@ class IThread:
         actions_budget = game_context.get('actions_budget', 400)
         is_frontier = game_context.get('is_frontier', True)
         network_traction = game_context.get('network_traction', 0.0)
-        
+
         # Get stream weights
         w_a = i_thread_state.w_a if i_thread_state else 0.5
         w_b = i_thread_state.w_b if i_thread_state else 0.5
-        
+
         # Get tension state
         tension_state = 'optimal'
         if mortality_state:
             pressure = mortality_state.compute_existential_pressure()
             tension_result = mortality_state.compute_tension_state(pressure)
             tension_state = tension_result.get('state', 'optimal')
-        
+
         # Compute agent performance (placeholder - would come from agent stats)
         agent_performance = 0.5  # Default to median
         try:
@@ -1325,7 +1339,7 @@ class IThread:
                 agent_performance = float(perf_result[0]['win_rate'])
         except Exception:
             pass
-        
+
         # Compute deliberation budget
         actions_remaining_pct = actions_remaining / actions_budget if actions_budget > 0 else 1.0
         budget_seconds, budget_reason = self.compute_deliberation_budget(
@@ -1336,7 +1350,7 @@ class IThread:
             actions_remaining_pct=actions_remaining_pct,
             following_sequence=following_sequence
         )
-        
+
         # Step 1: Always capture gut instinct
         gut_result = self.capture_gut_instinct(
             available_actions=available_actions,
@@ -1347,18 +1361,18 @@ class IThread:
             network_recommendation=network_recommendation,
             private_preference=private_preference
         )
-        
+
         # Step 2: Decide whether to deliberate
         deliberation_result = None
         skip_reason = None
-        
+
         should_skip = (
             following_sequence or
             tension_state == 'panic' or
             actions_remaining_pct < 0.1 or
             budget_seconds <= DELIBERATION_CONFIG['min_deliberation']
         )
-        
+
         if should_skip:
             if following_sequence:
                 skip_reason = "Following validated sequence"
@@ -1379,7 +1393,7 @@ class IThread:
                 w_a=w_a,
                 w_b=w_b
             )
-        
+
         # Determine final action
         if deliberation_result:
             final_action = deliberation_result.action
@@ -1389,13 +1403,13 @@ class IThread:
             final_action = gut_result.action
             final_confidence = gut_result.confidence
             decision_source = 'gut'
-        
+
         # Calculate total time
         total_time_ms = (time.time() - start_time) * 1000
-        
+
         # Create reasoning log
         log_id = f"rl_{agent_id}_{game_id}_{level}_{action_number}_{int(time.time()*1000)}"
-        
+
         reasoning_log = ReasoningLog(
             log_id=log_id,
             agent_id=agent_id,
@@ -1420,16 +1434,16 @@ class IThread:
             decision_completed_at=datetime.now(),
             total_decision_time_ms=total_time_ms
         )
-        
+
         # Store in database
         self._store_reasoning_log(reasoning_log)
-        
+
         return reasoning_log
-    
+
     def _store_reasoning_log(self, log: ReasoningLog) -> None:
         """Store reasoning log in database."""
         import json
-        
+
         try:
             self.db.execute_query("""
                 INSERT OR REPLACE INTO action_reasoning_logs (
@@ -1476,11 +1490,11 @@ class IThread:
             ))
         except Exception as e:
             logger.warning(f"Failed to store reasoning log: {e}")
-    
+
     def update_outcome(
-        self, 
-        log_id: str, 
-        outcome: str, 
+        self,
+        log_id: str,
+        outcome: str,
         score_change: float
     ) -> None:
         """Update reasoning log with action outcome."""
@@ -1492,7 +1506,7 @@ class IThread:
             """, (outcome, score_change, log_id))
         except Exception as e:
             logger.warning(f"Failed to update reasoning log outcome: {e}")
-    
+
     def get_recent_reasoning_logs(
         self,
         agent_id: str,
@@ -1515,7 +1529,7 @@ class IThread:
                     ORDER BY created_at DESC
                     LIMIT ?
                 """, (agent_id, limit))
-            
+
             return [dict(r) for r in results] if results else []
         except Exception:
             return []
@@ -1534,33 +1548,33 @@ def compute_surprise(
 ) -> float:
     """
     Compute surprise score for a synthesis decision.
-    
+
     Surprise is high when:
     - Low-weight stream wins due to high confidence
     - Streams strongly disagree but synthesis creates novel action
-    
+
     Args:
         stream_a_confidence: Stream A's confidence in its proposal
         stream_b_confidence: Stream B's confidence in its proposal
         chosen_source: Which stream was ultimately chosen
         w_a: Stream A weight
         w_b: Stream B weight
-        
+
     Returns:
         Surprise score 0.0 to 1.0
     """
     # Expected winner based on weights
     expected_winner = 'stream_a' if w_a > w_b else 'stream_b'
-    
+
     # Base surprise from weight underdog winning
     if chosen_source != expected_winner and chosen_source != 'synthesis':
         weight_surprise = abs(w_a - w_b)
     else:
         weight_surprise = 0.0
-    
+
     # Confidence surprise - high when both streams are confident but differ
     confidence_agreement = 1.0 - abs(stream_a_confidence - stream_b_confidence)
     avg_confidence = (stream_a_confidence + stream_b_confidence) / 2
     confidence_surprise = confidence_agreement * avg_confidence * 0.5
-    
+
     return min(1.0, weight_surprise + confidence_surprise)

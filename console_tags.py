@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
@@ -9,7 +10,7 @@ Per SYSTEM_COHERENCE_REPORT.md recommendations.
 
 Usage:
     from console_tags import TAGS, log
-    
+
     print(f"{TAGS['generation']} Gen 45 starting with 60 agents")
     # or
     log('generation', "Gen 45 starting with 60 agents")
@@ -28,13 +29,13 @@ TAGS = {
     'budget': '[BUDGET]',
     'result': '[RESULT]',
     'scheduled': '[SCHEDULED]',
-    
+
     # Sequence system
     '3_try': '[3-TRY]',
     'multi_stage': '[MULTI-STAGE]',
     'template': '[TEMPLATE]',
     'sequence': '[SEQUENCE]',
-    
+
     # Cognitive systems
     'cods': '[CODS]',
     'rule': '[RULE]',
@@ -42,57 +43,57 @@ TAGS = {
     'goal_inferred': '[GOAL INFERRED]',
     'hypothesis': '[HYPOTHESIS]',
     'world_model': '[WORLD-MODEL]',
-    
+
     # Navigation and control
     'escape': '[ESCAPE]',
     'sync': '[SYNC]',
     'self_directed': '[SELF-DIRECTED]',
     'stop': '[STOP]',
     'pause': '[PAUSE]',
-    
+
     # Analysis systems
     'frustration': '[FRUSTRATION]',
     'near_miss': '[NEAR-MISS]',
     'counterfactual': '[COUNTERFACTUAL]',
     'ensemble': '[ENSEMBLE]',
-    
+
     # Network systems
     'viral': '[VIRAL]',
     'prestige': '[PRESTIGE]',
     'network': '[NETWORK]',
     'homeostasis': '[HOMEOSTASIS]',
     'signals': '[SIGNALS]',
-    
+
     # Planning
     'subgoal': '[SUBGOAL]',
     'meta': '[META]',
-    
+
     # Decision memory and sensation
     'dm': '[DM]',
     'sensation': '[SENSATION]',
-    
+
     # Autopoiesis and metrics
     'autopoiesis': '[AUTOPOIESIS]',
     'emergence': '[EMERGENCE]',
     'identity': '[IDENTITY]',
-    
+
     # Disk and cleanup
     'disk_space': '[DISK SPACE]',
     'cleanup': '[CLEANUP]',
     'prune': '[PRUNE]',
-    
+
     # DNA and evolution
     'dna': '[DNA]',
     'mutation': '[MUTATION]',
     'crossover': '[CROSSOVER]',
-    
+
     # Optimization
     'optimization': '[OPTIMIZATION]',
     'optimizer': '[OPTIMIZER]',
     'pioneer': '[PIONEER]',
     'generalist': '[GENERALIST]',
     'exploiter': '[EXPLOITER]',
-    
+
     # Status messages
     'ok': '[OK]',
     'warn': '[WARN]',
@@ -100,7 +101,7 @@ TAGS = {
     'critical': '[CRITICAL]',
     'info': '[INFO]',
     'debug': '[DEBUG]',
-    
+
     # Regulation and history
     'regulation': '[REGULATION]',
     'history': '[HISTORY]',
@@ -113,12 +114,12 @@ TAGS = {
 def log(tag_name: str, message: str, end: str = '\n') -> None:
     """
     Print a tagged message to console.
-    
+
     Args:
         tag_name: Key from TAGS dict (e.g., 'generation', 'warn')
         message: The message to print
         end: Line ending (default newline)
-    
+
     Example:
         log('generation', "Gen 45 starting")
         # Prints: [GENERATION] Gen 45 starting
@@ -155,13 +156,13 @@ def format_agent_line(
 ) -> str:
     """
     Format an agent assignment line.
-    
+
     Args:
         role: Agent role (pioneer/optimizer/generalist/exploiter)
         agent_id: Full agent ID (will be truncated to 8 chars)
         games: List of game IDs assigned
         game_count: Number of games
-    
+
     Returns:
         Formatted string like "[SCHEDULED] PIONEER abc12345 -> sp80, ls20 (3 games)"
     """
@@ -177,13 +178,13 @@ def format_result_line(
 ) -> str:
     """
     Format a game result line.
-    
+
     Args:
         score: Final score
         actions: Total actions taken
         win: Whether game was won
         level: Optional level number reached (-1 if not specified)
-    
+
     Returns:
         Formatted result string
     """

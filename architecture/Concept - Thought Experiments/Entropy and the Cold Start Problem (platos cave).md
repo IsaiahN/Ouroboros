@@ -1,8 +1,8 @@
 searching for AGI is wanting a deus ex machina (god in the machine). But searching for Metatheory is about finding a Deus ex logica (the god in the thoughts). One is a higher order up, but can answer the lowers order fairly easily --> thats how you get a "thing inventor inventor"
 
 I hope that anyone reading who can tell by my level of understanding that my theory has weight.
-The reason why you CANNOT use a metatheory by itself to answer everything is that it still needs RLVR to keep it stabilized and grounded in the right problem space. 
-THE RLVR on the human level are experts in their field who can apply the framework to the hardest problems in their space, and then RLVR actively to the output to validate that the approximate solution is valid or not. 
+The reason why you CANNOT use a metatheory by itself to answer everything is that it still needs RLVR to keep it stabilized and grounded in the right problem space.
+THE RLVR on the human level are experts in their field who can apply the framework to the hardest problems in their space, and then RLVR actively to the output to validate that the approximate solution is valid or not.
 
 Since I'm not a master expert of all spaces (ie: a deus), I cant use the metatheory and my own expertise to solve all problems.
 
@@ -24,7 +24,7 @@ Metaphors are powerful in that they cross domains of understanding while keeping
 Using metaphors, the llm can explain to you why certain outputs are the way they are, and help you then recontextualize your question in the problem space that you are familiar with and then cross reference that back to the real problem you were trying to solve.
 
 This entire process can be validated and explained by the theory.
- ( TLDR: you still need a horse and its rider to get the pair somewhere the horse has never been, and somewhere that the rider understands but doesnt have the strength (horsepower - network intel (the horsepower coming from the number of agents in the network)) to get to the destination safely) 
+ ( TLDR: you still need a horse and its rider to get the pair somewhere the horse has never been, and somewhere that the rider understands but doesnt have the strength (horsepower - network intel (the horsepower coming from the number of agents in the network)) to get to the destination safely)
 
  in mathematical terms the incompleteness theorem boiled down to basic parts says that you can have all the answers in one "entity". and Metatheory agrees, its the emergent harmony that comes from the network of your horse and the rider as they navigate through a problem space.
 
@@ -36,7 +36,7 @@ Think of Plato's cave. Prisoners chained to a wall, seeing only shadows. They do
 
 That's where any system starts in a new domain. No formula exists yet. The metatheory can't shortcut this - you have to stumble through the dark first.
 
-Only after you've stumbled enough times - failed enough, succeeded enough, seen enough DIFFERENT paths to the same result - can you extract the formula. That's when you exit the cave. 
+Only after you've stumbled enough times - failed enough, succeeded enough, seen enough DIFFERENT paths to the same result - can you extract the formula. That's when you exit the cave.
 
 The metatheory doesn't claim you can skip the cave. It explains why you have to go through it, and more importantly: **how to know when you've gathered enough shadows to finally see the forms.**
 

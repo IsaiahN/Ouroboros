@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 """
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 def _notify_concept_from_lesson(game_type: str, concept: str, lesson_id: str) -> None:
     """
     Notify ConceptDiscoveryEngine when a lesson is extracted.
-    
+
     This closes the Theories -> Concepts gap:
     When the ScientificMethodEngine extracts a lesson from a win,
     the concept demonstrated becomes a candidate in the concept engine.
@@ -47,19 +48,19 @@ def _notify_concept_from_lesson(game_type: str, concept: str, lesson_id: str) ->
     try:
         from concept_discovery_engine import ConceptDiscoveryEngine
         from database_interface import DatabaseInterface
-        
+
         db = DatabaseInterface()
         concept_engine = ConceptDiscoveryEngine(db)
-        
+
         # Track this as a successful pattern
         pattern_description = f"lesson:{concept}:{lesson_id[:12]}"
-        
+
         concept_engine.track_successful_operator_pattern(
             operator_id=f"scientific_method_{lesson_id[:8]}",
             game_id=game_type,
             sub_patterns=[pattern_description, concept, f"theory_{concept}"]
         )
-        
+
         logger.debug(
             f"[THEORY->CONCEPT] Lesson concept '{concept}' fed to concept engine "
             f"(game={game_type})"
@@ -97,33 +98,33 @@ class Theory:
     theory_type: TheoryType
     game_type: str
     level_number: int
-    
+
     # The theory itself
     description: str                          # Human-readable description
     formal_statement: Dict[str, Any]          # Machine-readable structure
-    
+
     # Predictions - what SHOULD happen if theory is true
     predictions: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     # Evidence tracking
     supporting_observations: List[str] = field(default_factory=list)
     contradicting_observations: List[str] = field(default_factory=list)
-    
+
     # Confidence and status
     confidence: float = 0.5
     status: TheoryStatus = TheoryStatus.PROPOSED
     tests_conducted: int = 0
     tests_successful: int = 0
-    
+
     # Generalization tracking
     generalized_from: Optional[str] = None    # Parent theory if this is a generalization
     child_theories: List[str] = field(default_factory=list)
-    
+
     # Metadata
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     last_tested_at: Optional[str] = None
     discovered_by_agent: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage."""
         return {
@@ -148,21 +149,21 @@ class Theory:
         }
 
 
-@dataclass 
+@dataclass
 class Experiment:
     """A designed experiment to test a theory."""
     experiment_id: str
     theory_id: str
-    
+
     # What we're testing
     hypothesis: str                           # "If I move DOWN from here, I should die"
     prediction: Dict[str, Any]                # {action: 'ACTION2', expected_outcome: 'GAME_OVER'}
-    
+
     # Experiment design
     preconditions: Dict[str, Any]             # State that must be true before test
     test_action: str                          # Action to take
     expected_result: Dict[str, Any]           # What we expect to happen
-    
+
     # Results
     actual_result: Optional[Dict[str, Any]] = None
     prediction_matched: Optional[bool] = None
@@ -172,34 +173,34 @@ class Experiment:
 class ScientificMethodEngine:
     """
     The autonomous scientific reasoning system.
-    
+
     This engine runs continuously during gameplay, maintaining a queue
     of theories to test and allocating exploration budget to experiments.
     """
-    
+
     def __init__(self, db):
         """Initialize the scientific method engine."""
         self.db = db
         self._ensure_tables()
-        
+
         # Active theories being tracked (per game session)
         self._active_theories: Dict[str, Theory] = {}
-        
+
         # Pending experiments
         self._experiment_queue: List[Experiment] = []
-        
+
         # Current experiment being conducted
         self._current_experiment: Optional[Experiment] = None
-        
+
         # Observation buffer for pattern detection
         self._observation_buffer: List[Dict[str, Any]] = []
         # Full game memory - theories need full context (was 50 goldfish window)
         self._max_buffer_size = 20000
-        
+
         # Experimentation budget (fraction of actions for deliberate tests)
         self._experiment_budget_ratio = 0.20  # 20% of actions for experiments
         self._actions_since_experiment = 0
-    
+
     def _ensure_tables(self):
         """Create tables for theory storage."""
         try:
@@ -209,30 +210,30 @@ class ScientificMethodEngine:
                     theory_type TEXT NOT NULL,
                     game_type TEXT NOT NULL,
                     level_number INTEGER NOT NULL,
-                    
+
                     -- Theory content
                     description TEXT NOT NULL,
                     formal_statement TEXT NOT NULL,
                     predictions TEXT,
-                    
+
                     -- Evidence
                     supporting_observations TEXT,
                     contradicting_observations TEXT,
-                    
+
                     -- Confidence and status
                     confidence REAL DEFAULT 0.5,
                     status TEXT DEFAULT 'proposed',
                     tests_conducted INTEGER DEFAULT 0,
                     tests_successful INTEGER DEFAULT 0,
-                    
+
                     -- Generalization
                     generalized_from TEXT,
                     child_theories TEXT,
-                    
+
                     -- Network sharing
                     shared_to_network INTEGER DEFAULT 0,
                     network_validations INTEGER DEFAULT 0,
-                    
+
                     -- Metadata
                     created_at TEXT,
                     last_tested_at TEXT,
@@ -240,46 +241,46 @@ class ScientificMethodEngine:
                     is_active INTEGER DEFAULT 1
                 )
             """)
-            
+
             self.db.execute_query("""
                 CREATE INDEX IF NOT EXISTS idx_agent_theories_lookup
                 ON agent_theories (game_type, level_number, status, is_active)
             """)
-            
+
             self.db.execute_query("""
                 CREATE TABLE IF NOT EXISTS theory_experiments (
                     experiment_id TEXT PRIMARY KEY,
                     theory_id TEXT NOT NULL,
-                    
+
                     hypothesis TEXT,
                     prediction TEXT,
                     preconditions TEXT,
                     test_action TEXT,
                     expected_result TEXT,
-                    
+
                     actual_result TEXT,
                     prediction_matched INTEGER,
-                    
+
                     executed_at TEXT,
                     executed_by_agent TEXT,
-                    
+
                     FOREIGN KEY (theory_id) REFERENCES agent_theories(theory_id)
                 )
             """)
-            
+
         except Exception as e:
             logger.debug(f"Theory tables setup: {e}")
-    
+
     # =========================================================================
     # PHASE 1: OBSERVATION - Notice patterns and anomalies
     # =========================================================================
-    
+
     def record_observation(self, observation: Dict[str, Any]):
         """
         Record an observation for pattern detection.
-        
+
         Called after every action to build up evidence.
-        
+
         Args:
             observation: Dict with:
                 - action: What action was taken
@@ -292,18 +293,18 @@ class ScientificMethodEngine:
                 - timestamp: When this happened
         """
         self._observation_buffer.append(observation)
-        
+
         # Keep buffer bounded
         if len(self._observation_buffer) > self._max_buffer_size:
             self._observation_buffer.pop(0)
-        
+
         # Check for automatic theory triggers
         self._check_for_theory_triggers(observation)
-    
+
     def _check_for_theory_triggers(self, observation: Dict[str, Any]):
         """
         Check if this observation should trigger theory formation.
-        
+
         Triggers include:
         - GAME_OVER (why did I die?)
         - Score increase (what caused progress?)
@@ -312,19 +313,19 @@ class ScientificMethodEngine:
         """
         game_state = observation.get('game_state', '')
         score_change = observation.get('score_after', 0) - observation.get('score_before', 0)
-        
+
         # GAME_OVER trigger - form death theory
         if game_state == 'GAME_OVER':
             self._form_death_theory(observation)
-        
+
         # Score increase - form progress theory
         elif score_change > 0:
             self._form_progress_theory(observation)
-        
+
         # Level change - form goal theory
         elif observation.get('level_changed'):
             self._form_goal_theory(observation)
-    
+
     def _form_death_theory(self, observation: Dict[str, Any]):
         """Form a theory about why the agent died."""
         action = observation.get('action')
@@ -332,10 +333,10 @@ class ScientificMethodEngine:
         controlled = observation.get('controlled_objects', [])
         game_type = observation.get('game_type', 'unknown')
         level = observation.get('level_number', 1)
-        
+
         # Get adjacent objects to player
         adjacent_colors = self._get_adjacent_colors(frame, controlled)
-        
+
         if adjacent_colors:
             for color in adjacent_colors:
                 theory = Theory(
@@ -358,10 +359,10 @@ class ScientificMethodEngine:
                     confidence=0.6,
                     discovered_by_agent=observation.get('agent_id')
                 )
-                
+
                 self._add_theory(theory)
                 logger.info(f"[SCIENCE] Formed death theory: {theory.description}")
-        
+
         # Also form action-location theory
         if action and controlled:
             theory = Theory(
@@ -384,9 +385,9 @@ class ScientificMethodEngine:
                 confidence=0.5,
                 discovered_by_agent=observation.get('agent_id')
             )
-            
+
             self._add_theory(theory)
-    
+
     def _form_progress_theory(self, observation: Dict[str, Any]):
         """Form a theory about what caused progress."""
         action = observation.get('action')
@@ -394,10 +395,10 @@ class ScientificMethodEngine:
         frame_after = observation.get('frame_after', [])
         game_type = observation.get('game_type', 'unknown')
         level = observation.get('level_number', 1)
-        
+
         # Analyze what changed
         changes = self._analyze_frame_changes(frame_before, frame_after)
-        
+
         theory = Theory(
             theory_id=f"progress_{game_type}_{level}_{uuid.uuid4().hex[:8]}",
             theory_type=TheoryType.ACTION_EFFECT,
@@ -418,20 +419,20 @@ class ScientificMethodEngine:
             confidence=0.5,
             discovered_by_agent=observation.get('agent_id')
         )
-        
+
         self._add_theory(theory)
         logger.info(f"[SCIENCE] Formed progress theory: {theory.description}")
-    
+
     def _form_goal_theory(self, observation: Dict[str, Any]):
         """Form a theory about what the goal is."""
         frame_before = observation.get('frame_before', [])
         frame_after = observation.get('frame_after', [])
         game_type = observation.get('game_type', 'unknown')
         level = observation.get('level_number', 1)
-        
+
         # What disappeared when level completed?
         disappeared_colors = self._find_disappeared_colors(frame_before, frame_after)
-        
+
         if disappeared_colors:
             theory = Theory(
                 theory_id=f"goal_{game_type}_{level}_{uuid.uuid4().hex[:8]}",
@@ -452,66 +453,66 @@ class ScientificMethodEngine:
                 confidence=0.6,
                 discovered_by_agent=observation.get('agent_id')
             )
-            
+
             self._add_theory(theory)
             logger.info(f"[SCIENCE] Formed goal theory: {theory.description}")
-    
+
     # =========================================================================
     # PHASE 2: HYPOTHESIS GENERATION - Form testable theories
     # =========================================================================
-    
-    def generate_theory_from_observations(self, 
+
+    def generate_theory_from_observations(self,
                                            game_type: str,
                                            level_number: int,
                                            agent_id: str) -> Optional[Theory]:
         """
         Analyze observation buffer and generate a new theory.
-        
+
         This is called periodically to form theories from accumulated evidence.
         """
         if len(self._observation_buffer) < 5:
             return None  # Need minimum observations
-        
+
         # Look for patterns in observations
         patterns = self._find_observation_patterns()
-        
+
         if not patterns:
             return None
-        
+
         # Pick the strongest pattern
         best_pattern = max(patterns, key=lambda p: p.get('strength', 0))
-        
+
         # Convert pattern to theory
         theory = self._pattern_to_theory(best_pattern, game_type, level_number, agent_id)
-        
+
         if theory:
             self._add_theory(theory)
             logger.info(f"[SCIENCE] Generated theory from patterns: {theory.description}")
-        
+
         return theory
-    
+
     def _find_observation_patterns(self) -> List[Dict[str, Any]]:
         """Find patterns in the observation buffer."""
         patterns = []
-        
+
         # Pattern 1: Action-effect consistency
         action_effects = {}
         for obs in self._observation_buffer:
             action = obs.get('action')
             effect = self._classify_effect(obs)
-            
+
             if action:
                 if action not in action_effects:
                     action_effects[action] = []
                 action_effects[action].append(effect)
-        
+
         for action, effects in action_effects.items():
             if len(effects) >= 3:
                 # Count effect frequencies
                 effect_counts = {}
                 for e in effects:
                     effect_counts[e] = effect_counts.get(e, 0) + 1
-                
+
                 dominant_effect = max(effect_counts.items(), key=lambda x: x[1])
                 if dominant_effect[1] >= len(effects) * 0.6:  # 60% consistency
                     patterns.append({
@@ -521,20 +522,20 @@ class ScientificMethodEngine:
                         'consistency': dominant_effect[1] / len(effects),
                         'strength': dominant_effect[1]
                     })
-        
+
         # Pattern 2: Object-color movement correlation
         # TODO: Implement color-movement correlation detection
-        
+
         # Pattern 3: Spatial patterns (certain areas always cause X)
         # TODO: Implement spatial pattern detection
-        
+
         return patterns
-    
+
     def _classify_effect(self, observation: Dict[str, Any]) -> str:
         """Classify the effect of an observation."""
         score_change = observation.get('score_after', 0) - observation.get('score_before', 0)
         game_state = observation.get('game_state', '')
-        
+
         if game_state == 'GAME_OVER':
             return 'death'
         elif game_state == 'WIN':
@@ -545,13 +546,13 @@ class ScientificMethodEngine:
             return 'state_change'
         else:
             return 'no_effect'
-    
-    def _pattern_to_theory(self, pattern: Dict[str, Any], 
-                           game_type: str, level_number: int, 
+
+    def _pattern_to_theory(self, pattern: Dict[str, Any],
+                           game_type: str, level_number: int,
                            agent_id: str) -> Optional[Theory]:
         """Convert a detected pattern into a formal theory."""
         pattern_type = pattern.get('type')
-        
+
         if pattern_type == 'action_effect':
             return Theory(
                 theory_id=f"pattern_{game_type}_{level_number}_{uuid.uuid4().hex[:8]}",
@@ -572,21 +573,21 @@ class ScientificMethodEngine:
                 confidence=pattern['consistency'],
                 discovered_by_agent=agent_id
             )
-        
+
         return None
-    
+
     # =========================================================================
     # PHASE 3: EXPERIMENT DESIGN - Create testable predictions
     # =========================================================================
-    
+
     def design_experiment(self, theory: Theory) -> Optional[Experiment]:
         """
         Design an experiment to test a theory.
-        
+
         Returns an Experiment that can be executed during gameplay.
         """
         theory_type = theory.theory_type
-        
+
         if theory_type == TheoryType.OBJECT_DANGER:
             return self._design_danger_test(theory)
         elif theory_type == TheoryType.ACTION_EFFECT:
@@ -595,13 +596,13 @@ class ScientificMethodEngine:
             return self._design_goal_test(theory)
         elif theory_type == TheoryType.SPATIAL_RULE:
             return self._design_spatial_test(theory)
-        
+
         return None
-    
+
     def _design_danger_test(self, theory: Theory) -> Experiment:
         """Design a test for a danger theory (e.g., 'red kills me')."""
         target_color = theory.formal_statement.get('object_color')
-        
+
         return Experiment(
             experiment_id=f"exp_{uuid.uuid4().hex[:12]}",
             theory_id=theory.theory_id,
@@ -611,18 +612,18 @@ class ScientificMethodEngine:
             test_action='MOVE_TOWARD_TARGET',  # Placeholder - resolved at execution
             expected_result={'game_state': 'GAME_OVER'}
         )
-    
+
     def _design_effect_test(self, theory: Theory) -> Experiment:
         """Design a test for an action-effect theory."""
         action = theory.formal_statement.get('action') or 'ACTION1'
         # Try 'effect' first, then 'result', then 'consequence' for backwards compatibility
         expected_effect = (
-            theory.formal_statement.get('effect') or 
-            theory.formal_statement.get('result') or 
+            theory.formal_statement.get('effect') or
+            theory.formal_statement.get('result') or
             theory.formal_statement.get('consequence') or
             'unknown_effect'
         )
-        
+
         return Experiment(
             experiment_id=f"exp_{uuid.uuid4().hex[:12]}",
             theory_id=theory.theory_id,
@@ -632,11 +633,11 @@ class ScientificMethodEngine:
             test_action=action,
             expected_result={'effect': expected_effect}
         )
-    
+
     def _design_goal_test(self, theory: Theory) -> Experiment:
         """Design a test for a goal hypothesis."""
         target_colors = theory.formal_statement.get('target_colors', [])
-        
+
         return Experiment(
             experiment_id=f"exp_{uuid.uuid4().hex[:12]}",
             theory_id=theory.theory_id,
@@ -646,12 +647,12 @@ class ScientificMethodEngine:
             test_action='MOVE_TOWARD_TARGET',
             expected_result={'score_increase': True}
         )
-    
+
     def _design_spatial_test(self, theory: Theory) -> Experiment:
         """Design a test for a spatial rule."""
         action = theory.formal_statement.get('action') or 'ACTION1'
         expected = theory.formal_statement.get('consequence')
-        
+
         return Experiment(
             experiment_id=f"exp_{uuid.uuid4().hex[:12]}",
             theory_id=theory.theory_id,
@@ -661,33 +662,33 @@ class ScientificMethodEngine:
             test_action=action,
             expected_result={'outcome': expected}
         )
-    
+
     # =========================================================================
     # PHASE 4: EXPERIMENT EXECUTION - Run tests during gameplay
     # =========================================================================
-    
+
     def should_experiment_now(self, action_count: int) -> bool:
         """
         Determine if we should run an experiment on this action.
-        
+
         Balances goal-seeking with deliberate experimentation.
         """
         self._actions_since_experiment += 1
-        
+
         # Check budget
         experiment_interval = int(1 / self._experiment_budget_ratio)  # Every 5 actions at 20%
-        
+
         if self._actions_since_experiment >= experiment_interval:
             if self._experiment_queue or self._get_pending_theories():
                 return True
-        
+
         return False
-    
-    def get_experiment_action(self, 
+
+    def get_experiment_action(self,
                                current_state: Dict[str, Any]) -> Optional[Tuple[str, str]]:
         """
         Get an experimental action to test a theory.
-        
+
         Returns:
             Tuple of (action, reasoning) if experiment should be run, None otherwise
         """
@@ -698,16 +699,16 @@ class ScientificMethodEngine:
                 action = self._resolve_action(self._current_experiment, current_state)
                 reasoning = f"EXPERIMENT: Testing theory - {self._current_experiment.hypothesis}"
                 return (action, reasoning)
-        
+
         # Get next experiment from queue
         if self._experiment_queue:
             self._current_experiment = self._experiment_queue.pop(0)
             self._actions_since_experiment = 0
-            
+
             action = self._resolve_action(self._current_experiment, current_state)
             reasoning = f"EXPERIMENT: Testing theory - {self._current_experiment.hypothesis}"
             return (action, reasoning)
-        
+
         # Generate experiment from pending theories
         pending = self._get_pending_theories()
         if pending:
@@ -716,65 +717,65 @@ class ScientificMethodEngine:
             if experiment:
                 self._current_experiment = experiment
                 self._actions_since_experiment = 0
-                
+
                 action = self._resolve_action(experiment, current_state)
                 reasoning = f"EXPERIMENT: Testing theory - {experiment.hypothesis}"
                 return (action, reasoning)
-        
+
         return None
-    
-    def _resolve_action(self, experiment: Experiment, 
+
+    def _resolve_action(self, experiment: Experiment,
                         current_state: Dict[str, Any]) -> str:
         """Resolve a placeholder action to a concrete ACTION1-7."""
         test_action = experiment.test_action
-        
+
         if test_action.startswith('ACTION'):
             return test_action
-        
+
         if test_action == 'MOVE_TOWARD_TARGET':
             # Find direction toward target
             # TODO: Implement path-finding toward target
             return 'ACTION1'  # Default to UP for now
-        
+
         return 'ACTION1'  # Default fallback
-    
-    def _check_preconditions(self, experiment: Experiment, 
+
+    def _check_preconditions(self, experiment: Experiment,
                              current_state: Dict[str, Any]) -> bool:
         """Check if experiment preconditions are met."""
         # For now, always return True - refine later
         return True
-    
+
     # =========================================================================
     # PHASE 5: RESULT ANALYSIS - Compare prediction to reality
     # =========================================================================
-    
-    def record_experiment_result(self, 
+
+    def record_experiment_result(self,
                                   actual_outcome: Dict[str, Any],
                                   agent_id: str):
         """
         Record the result of an experiment and update the theory.
-        
+
         Called after an experimental action is executed.
         """
         if not self._current_experiment:
             return
-        
+
         experiment = self._current_experiment
         experiment.actual_result = actual_outcome
         experiment.executed_at = datetime.now().isoformat()
-        
+
         # Compare prediction to actual
         prediction_matched = self._compare_prediction_to_result(
             experiment.expected_result, actual_outcome
         )
         experiment.prediction_matched = prediction_matched
-        
+
         # Update the theory
         theory = self._active_theories.get(experiment.theory_id)
         if theory:
             theory.tests_conducted += 1
             theory.last_tested_at = datetime.now().isoformat()
-            
+
             if prediction_matched:
                 theory.tests_successful += 1
                 theory.supporting_observations.append(
@@ -790,24 +791,24 @@ class ScientificMethodEngine:
                 # Decrease confidence
                 theory.confidence = max(0.1, theory.confidence - 0.15)
                 logger.info(f"[SCIENCE] Theory WEAKENED: {theory.description} (conf: {theory.confidence:.2f})")
-            
+
             # Update status based on confidence
             if theory.confidence >= 0.7 and theory.tests_conducted >= 3:
                 theory.status = TheoryStatus.SUPPORTED
                 self._share_theory_to_network(theory, agent_id)
             elif theory.confidence <= 0.3 and theory.tests_conducted >= 3:
                 theory.status = TheoryStatus.REFUTED
-            
+
             # Save updated theory
             self._save_theory(theory)
-        
+
         # Store experiment
         self._save_experiment(experiment, agent_id)
-        
+
         # Clear current experiment
         self._current_experiment = None
-    
-    def _compare_prediction_to_result(self, 
+
+    def _compare_prediction_to_result(self,
                                        expected: Dict[str, Any],
                                        actual: Dict[str, Any]) -> bool:
         """Compare expected result to actual result."""
@@ -815,53 +816,53 @@ class ScientificMethodEngine:
         if 'game_state' in expected:
             if actual.get('game_state') != expected['game_state']:
                 return False
-        
+
         # Check effect match
         if 'effect' in expected:
             actual_effect = actual.get('effect', '')
             if actual_effect != expected['effect']:
                 return False
-        
+
         # Check score increase
         if expected.get('score_increase'):
             if not actual.get('score_increased'):
                 return False
-        
+
         return True
-    
+
     # =========================================================================
     # PHASE 6: BELIEF UPDATE - Strengthen or refute theories
     # =========================================================================
-    
+
     def update_beliefs(self, game_type: str, level_number: int):
         """
         Periodic update of all theories based on accumulated evidence.
-        
+
         Called at end of each level or game.
         """
         # Get all active theories for this game/level
         theories = self._get_theories_for_level(game_type, level_number)
-        
+
         for theory in theories:
             # Decay untested theories
             if theory.tests_conducted == 0:
                 theory.confidence = max(0.2, theory.confidence * 0.95)
-            
+
             # Mark stale theories
             if theory.last_tested_at:
                 # If not tested in a while, reduce confidence slightly
                 pass
-            
+
             self._save_theory(theory)
-    
+
     # =========================================================================
     # PHASE 7: GENERALIZATION - Abstract to broader principles
     # =========================================================================
-    
+
     def attempt_generalization(self, game_type: str, agent_id: str) -> Optional[Theory]:
         """
         Attempt to generalize confirmed theories across levels.
-        
+
         If "red kills me" is true on levels 1, 2, and 3, generalize to
         "red kills me on ALL levels of this game type".
         """
@@ -871,10 +872,10 @@ class ScientificMethodEngine:
             WHERE game_type = ? AND status = 'supported' AND is_active = 1
             ORDER BY theory_type, level_number
         """, (game_type,))
-        
+
         if not supported:
             return None
-        
+
         # Group by theory type and formal statement
         theory_groups = {}
         for t in supported:
@@ -882,19 +883,19 @@ class ScientificMethodEngine:
             if key not in theory_groups:
                 theory_groups[key] = []
             theory_groups[key].append(t)
-        
+
         # Look for theories that appear across multiple levels
         for (theory_type, statement), instances in theory_groups.items():
             if len(instances) >= 3:  # Same theory on 3+ levels
                 levels = [i['level_number'] for i in instances]
-                
+
                 # Check if we already have a generalization
                 existing = self.db.execute_query("""
                     SELECT * FROM agent_theories
                     WHERE game_type = ? AND theory_type = ? AND level_number = -1
                     AND formal_statement = ?
                 """, (game_type, theory_type, statement))
-                
+
                 if not existing:
                     # Create generalized theory
                     generalized = Theory(
@@ -914,27 +915,27 @@ class ScientificMethodEngine:
                         child_theories=[i['theory_id'] for i in instances],
                         discovered_by_agent=agent_id
                     )
-                    
+
                     self._add_theory(generalized)
                     logger.info(f"[SCIENCE] GENERALIZED theory: {generalized.description}")
                     return generalized
-        
+
         return None
-    
+
     # =========================================================================
     # HELPER METHODS
     # =========================================================================
-    
+
     def _add_theory(self, theory: Theory):
         """Add a theory to active tracking and storage."""
         self._active_theories[theory.theory_id] = theory
         self._save_theory(theory)
-        
+
         # Queue an experiment for this theory
         experiment = self.design_experiment(theory)
         if experiment:
             self._experiment_queue.append(experiment)
-    
+
     def _save_theory(self, theory: Theory):
         """Save theory to database."""
         try:
@@ -957,7 +958,7 @@ class ScientificMethodEngine:
             ))
         except Exception as e:
             logger.debug(f"Error saving theory: {e}")
-    
+
     def _save_experiment(self, experiment: Experiment, agent_id: str):
         """Save experiment to database."""
         try:
@@ -977,7 +978,7 @@ class ScientificMethodEngine:
             ))
         except Exception as e:
             logger.debug(f"Error saving experiment: {e}")
-    
+
     def _share_theory_to_network(self, theory: Theory, agent_id: str):
         """Share a confirmed theory to the network for other agents."""
         try:
@@ -986,11 +987,11 @@ class ScientificMethodEngine:
                 SET shared_to_network = 1
                 WHERE theory_id = ?
             """, (theory.theory_id,))
-            
+
             logger.info(f"[SCIENCE] Shared theory to network: {theory.description}")
         except Exception as e:
             logger.debug(f"Error sharing theory: {e}")
-    
+
     def _get_theories_for_level(self, game_type: str, level_number: int) -> List[Theory]:
         """Get all theories for a specific level."""
         results = self.db.execute_query("""
@@ -998,7 +999,7 @@ class ScientificMethodEngine:
             WHERE game_type = ? AND (level_number = ? OR level_number = -1)
             AND is_active = 1
         """, (game_type, level_number))
-        
+
         theories = []
         for r in results or []:
             theories.append(Theory(
@@ -1016,28 +1017,28 @@ class ScientificMethodEngine:
                 tests_conducted=r['tests_conducted'],
                 tests_successful=r['tests_successful']
             ))
-        
+
         return theories
-    
+
     def _get_pending_theories(self) -> List[Theory]:
         """Get theories that haven't been fully tested."""
-        return [t for t in self._active_theories.values() 
+        return [t for t in self._active_theories.values()
                 if t.status == TheoryStatus.PROPOSED and t.tests_conducted < 3]
-    
-    def _get_adjacent_colors(self, frame: List[List[int]], 
+
+    def _get_adjacent_colors(self, frame: List[List[int]],
                              controlled: List[Dict]) -> set:
         """Get colors adjacent to controlled objects."""
         if not frame or not controlled:
             return set()
-        
+
         adjacent = set()
         height = len(frame)
         width = len(frame[0]) if frame else 0
-        
+
         for obj in controlled:
             x, y = obj.get('x', 0), obj.get('y', 0)
             player_color = obj.get('color')
-            
+
             for dx in [-1, 0, 1]:
                 for dy in [-1, 0, 1]:
                     if dx == 0 and dy == 0:
@@ -1047,41 +1048,41 @@ class ScientificMethodEngine:
                         color = frame[ny][nx]
                         if color != 0 and color != player_color:
                             adjacent.add(color)
-        
+
         return adjacent
-    
-    def _analyze_frame_changes(self, before: List[List[int]], 
+
+    def _analyze_frame_changes(self, before: List[List[int]],
                                 after: List[List[int]]) -> List[str]:
         """Analyze what changed between frames."""
         changes = []
-        
+
         if not before or not after:
             return ["no_frame_data"]
-        
+
         # Simple change detection
         for y, (row_b, row_a) in enumerate(zip(before, after)):
             for x, (cell_b, cell_a) in enumerate(zip(row_b, row_a)):
                 if cell_b != cell_a:
                     changes.append(f"({x},{y}): {cell_b} -> {cell_a}")
-        
+
         return changes[:10]  # Limit to first 10
-    
-    def _find_disappeared_colors(self, before: List[List[int]], 
+
+    def _find_disappeared_colors(self, before: List[List[int]],
                                   after: List[List[int]]) -> set:
         """Find colors that existed before but not after."""
         before_colors = set()
         after_colors = set()
-        
+
         for row in before or []:
             for cell in row:
                 if cell != 0:
                     before_colors.add(cell)
-        
+
         for row in after or []:
             for cell in row:
                 if cell != 0:
                     after_colors.add(cell)
-        
+
         return before_colors - after_colors
 
     # =========================================================================
@@ -1095,7 +1096,7 @@ class ScientificMethodEngine:
     def get_working_theory(self, game_type: str, level_number: int) -> Optional[Dict[str, Any]]:
         """
         Get the current working theory for this game/level.
-        
+
         Returns a structured theory with stage information for scoring.
         The theory STAGES are critical:
         - 'speculating': Low-confidence guess, being wrong is okay
@@ -1105,7 +1106,7 @@ class ScientificMethodEngine:
         - 'contradicted': Evidence against, need revision
         - 'confident': Strong evidence, using it
         - 'transferred': Applied successfully to variation
-        
+
         Returns:
             Dict with 'theory', 'stage', 'confidence', 'evidence_for', 'evidence_against'
             or None if no theory exists
@@ -1114,14 +1115,14 @@ class ScientificMethodEngine:
         for theory_id, theory in self._active_theories.items():
             if theory.game_type == game_type and (theory.level_number == level_number or theory.level_number == -1):
                 return self._theory_to_working_theory(theory)
-        
+
         # Then check database for confirmed theories
         theories = self._get_theories_for_level(game_type, level_number)
         if theories:
             # Get highest confidence theory
             best = max(theories, key=lambda t: t.confidence)
             return self._theory_to_working_theory(best)
-        
+
         # No theory - return speculating stage (not NULL)
         return {
             'theory': None,
@@ -1132,7 +1133,7 @@ class ScientificMethodEngine:
             'description': 'Speculating - forming initial hypotheses',
             'hypothesis_type': None
         }
-    
+
     def _theory_to_working_theory(self, theory: Theory) -> Dict[str, Any]:
         """Convert internal Theory to working theory dict for scoring."""
         # Map status to stage
@@ -1143,7 +1144,7 @@ class ScientificMethodEngine:
             TheoryStatus.REFUTED: 'contradicted',
             TheoryStatus.GENERALIZED: 'transferred'
         }
-        
+
         # Refine stage based on evidence
         stage = stage_map.get(theory.status, 'exploring')
         if theory.confidence >= 0.5 and theory.tests_conducted >= 1 and stage == 'exploring':
@@ -1152,7 +1153,7 @@ class ScientificMethodEngine:
             stage = 'partial_confirmation'
         if len(theory.contradicting_observations) > len(theory.supporting_observations):
             stage = 'contradicted'
-        
+
         return {
             'theory': theory.to_dict(),
             'stage': stage,
@@ -1163,13 +1164,13 @@ class ScientificMethodEngine:
             'hypothesis_type': theory.theory_type.value,
             'theory_id': theory.theory_id
         }
-    
+
     def get_active_theory_hint(self) -> Optional[Dict[str, Any]]:
         """
         Get hints from current theory for action selection.
-        
+
         Called by core_gameplay._select_action() to influence rung scoring.
-        
+
         Returns:
             Dict with:
             - preferred_rung: Which ladder rung to prefer based on theory
@@ -1180,19 +1181,19 @@ class ScientificMethodEngine:
         """
         if not self._active_theories:
             return None
-        
+
         # Get the most relevant active theory
         best_theory = None
         best_confidence = 0.0
-        
+
         for theory in self._active_theories.values():
             if theory.confidence > best_confidence:
                 best_confidence = theory.confidence
                 best_theory = theory
-        
+
         if not best_theory:
             return None
-        
+
         # Build hint based on theory type and status
         hint = {
             'preferred_rung': None,
@@ -1202,7 +1203,7 @@ class ScientificMethodEngine:
             'reason': best_theory.description,
             'theory_stage': TheoryStatus(best_theory.status).value if best_theory.status else 'proposed'
         }
-        
+
         # Adjust based on theory status
         if best_theory.status == TheoryStatus.SUPPORTED:
             # Confident theory - prefer exploitation
@@ -1219,27 +1220,27 @@ class ScientificMethodEngine:
             hint['preferred_rung'] = 'heuristic'
             hint['weight'] = 0.15
             hint['rung_weights'] = {'heuristic': 0.2, 'micro_cf': 0.15, 'sequence': -0.1}
-        
+
         # Add prediction if available
         if best_theory.predictions:
             hint['prediction'] = best_theory.predictions[0]
-        
+
         return hint
-    
-    def score_action_with_theory(self, action: Optional[str], 
-                                  game_type: str = None, 
+
+    def score_action_with_theory(self, action: Optional[str],
+                                  game_type: str = None,
                                   level_number: int = None) -> float:
         """
         Score an action against the current working theory.
-        
+
         THE SINGLE MOST IMPORTANT CONSTRAINT from agent_consciousness_synthesis.md:
         Every proposal must be scored against the current working theory.
-        
+
         Args:
             action: The action being considered (e.g., "ACTION1", "ACTION6")
             game_type: Current game type
             level_number: Current level
-            
+
         Returns:
             Score modifier (-0.3 to +0.3):
             - Positive: Action supports/tests/exploits current theory
@@ -1254,22 +1255,22 @@ class ScientificMethodEngine:
             # Use most recent active theory
             best = max(self._active_theories.values(), key=lambda t: t.confidence)
             working_theory = self._theory_to_working_theory(best)
-        
+
         if not working_theory or not working_theory.get('theory'):
             # NO THEORY EXISTS: Exploration/discovery actions score higher
             # This implements "If no theory exists, only theory-forming actions score highly"
             if action in ('ACTION6', 'NOOP'):  # Click/wait for observation
                 return 0.1  # Slight boost for exploratory actions
             return 0.0  # Neutral for other actions
-        
+
         stage = working_theory.get('stage', 'exploring')
         confidence = working_theory.get('confidence', 0.5)
         theory_data = working_theory.get('theory', {})
-        
+
         # Get the formal statement to check if action is relevant
         formal_stmt = theory_data.get('formal_statement', {}) if theory_data else {}
         theory_action = formal_stmt.get('action', '')
-        
+
         # STAGE-BASED SCORING
         if stage == 'speculating' or stage == 'exploring':
             # NO CONFIRMED THEORY: Only theory-forming actions score highly
@@ -1279,14 +1280,14 @@ class ScientificMethodEngine:
                 return 0.1
             else:
                 return -0.05  # Slight penalty for non-exploratory
-        
+
         elif stage == 'hypothesis_formed':
             # THEORY UNDER TEST: Reward testing, penalize ignoring
             if action == theory_action:
                 return 0.2  # Testing the hypothesis
             else:
                 return -0.1  # Not testing when we should be
-        
+
         elif stage == 'partial_confirmation' or stage == 'confident':
             # THEORY CONFIRMED: Reward exploitation
             if action == theory_action:
@@ -1295,7 +1296,7 @@ class ScientificMethodEngine:
                 return -0.05  # Why explore when we know?
             else:
                 return 0.0  # Neutral
-        
+
         elif stage == 'contradicted':
             # THEORY BROKEN: Only theory-revision actions score highly
             if action == theory_action:
@@ -1304,19 +1305,19 @@ class ScientificMethodEngine:
                 return 0.15  # Need to observe/revise
             else:
                 return 0.1  # Try something different
-        
+
         return 0.0
-    
+
     def record_theory_outcome(self, action: str, outcome: Dict[str, Any],
                                game_type: str, level_number: int,
                                frame_before: List[List[int]] = None,
                                frame_after: List[List[int]] = None):
         """
         Record action outcome and update theory evidence.
-        
+
         Called after every action to accumulate evidence for theories.
         This drives the theory lifecycle: speculating -> hypothesis_formed -> confident
-        
+
         Args:
             action: What action was taken
             outcome: Dict with score_change, game_state, etc.
@@ -1338,17 +1339,17 @@ class ScientificMethodEngine:
             'frame_changed': frame_before != frame_after if frame_before and frame_after else False,
             'timestamp': datetime.now().isoformat()
         }
-        
+
         # Record for pattern detection
         self.record_observation(observation)
-        
+
         # Update active theories based on this outcome
         for theory_id, theory in list(self._active_theories.items()):
             if theory.game_type != game_type:
                 continue
             if theory.level_number != level_number and theory.level_number != -1:
                 continue
-            
+
             # Check if this action relates to the theory
             formal_stmt = theory.formal_statement
             if formal_stmt.get('action') == action:
@@ -1356,7 +1357,7 @@ class ScientificMethodEngine:
                 expected = formal_stmt.get('consequence') or formal_stmt.get('effect') or formal_stmt.get('result')
                 actual = outcome.get('game_state')
                 score_change = outcome.get('score_after', 0) - outcome.get('score_before', 0)
-                
+
                 # Determine if prediction matched
                 matched = False
                 if expected == 'GAME_OVER' and actual == 'GAME_OVER':
@@ -1367,11 +1368,11 @@ class ScientificMethodEngine:
                     matched = True
                 elif expected in ('state_change', 'no_effect') and outcome.get('frame_changed', False):
                     matched = True
-                
+
                 # Update theory
                 theory.tests_conducted += 1
                 theory.last_tested_at = datetime.now().isoformat()
-                
+
                 if matched:
                     theory.tests_successful += 1
                     theory.supporting_observations.append(
@@ -1385,7 +1386,7 @@ class ScientificMethodEngine:
                     )
                     theory.confidence = max(0.1, theory.confidence - 0.12)
                     logger.debug(f"[SCIENCE] Theory evidence AGAINST: {theory.description[:50]}... (conf: {theory.confidence:.2f})")
-                
+
                 # Update status based on evidence
                 if theory.confidence >= 0.7 and theory.tests_conducted >= 3:
                     theory.status = TheoryStatus.SUPPORTED
@@ -1393,7 +1394,7 @@ class ScientificMethodEngine:
                     theory.status = TheoryStatus.REFUTED
                 elif theory.tests_conducted >= 1:
                     theory.status = TheoryStatus.TESTING
-                
+
                 self._save_theory(theory)
 
 
@@ -1408,53 +1409,53 @@ class ScientificMethodEngine:
 class QuestioningEngineWithTeeth:
     """
     Questions that FORCE the agent to think, not just log.
-    
+
     Based on agent_consciousness_synthesis.md architecture:
     - Q1-Q9 are active questions with real consequences
     - BLOCKING questions prevent normal action selection
     - Questions can spawn investigating personas
     - Questions modify proposal scores directly
     """
-    
+
     # Core questions from Games-as-Teachers framework
     CORE_QUESTIONS = [
         # Observation
         ("Q1", "What is the teacher showing me?", "lesson_content"),
         ("Q2", "What changed between examples?", "pattern_detection"),
-        
+
         # Self-Model
         ("Q3", "What lessons have I learned before?", "prior_understanding"),
         ("Q4", "What am I being asked to manipulate?", "lesson_subject"),
-        
+
         # Goal/Value
         ("Q5", "What demonstrates understanding?", "success_criteria"),
-        
+
         # Network Wisdom
         ("Q6", "What have my peers understood?", "study_group_notes"),
-        
+
         # CODS Vocabulary
         ("Q7", "What conceptual tools do I have?", "vocabulary"),
-        
+
         # Metacognition
         ("Q8", "What do I think this lesson is about?", "interpretation"),
-        
+
         # Self-Test
         ("Q9", "Does my interpretation explain all examples?", "self_test"),
     ]
-    
+
     # Questions that BLOCK normal action selection
     BLOCKING_QUESTIONS = {'Q4', 'Q9', 'META'}
-    
+
     # Questions that spawn investigating personas
     PERSONA_SPAWNING_QUESTIONS = {'Q1', 'Q2', 'Q8'}
-    
+
     def __init__(self, db_connection=None):
         """Initialize with optional database connection."""
         self._db = db_connection
         self._active_questions: List[Dict[str, Any]] = []
         self._last_blocked_action: Optional[str] = None
         self._blocking_reason: Optional[str] = None
-    
+
     def generate_questions(
         self,
         self_identity: Optional[Dict[str, Any]] = None,
@@ -1464,13 +1465,13 @@ class QuestioningEngineWithTeeth:
     ) -> List[Dict[str, Any]]:
         """
         Generate active questions based on current state.
-        
+
         Args:
             self_identity: Self-model with controlled_objects etc
             working_theory: Current working theory from ScientificMethodEngine
             observer_flags: Observer flags including stuckness
             action_count: Number of actions taken in current game
-            
+
         Returns:
             List of active questions with blocking/scoring info
         """
@@ -1478,11 +1479,11 @@ class QuestioningEngineWithTeeth:
         self_identity = self_identity or {}
         working_theory = working_theory or {}
         observer_flags = observer_flags or {}
-        
+
         controlled_objects = self_identity.get('controlled_objects', [])
         theory_stage = working_theory.get('stage', 'speculating')
         stuckness = observer_flags.get('stuckness', 0)
-        
+
         # Q1: What is happening? (Always active early game)
         if action_count < 20:
             questions.append({
@@ -1493,7 +1494,7 @@ class QuestioningEngineWithTeeth:
                 'spawns_persona': True,
                 'score_modifier': 0.85  # Slightly reduce confidence in all proposals
             })
-        
+
         # Q4: What do I control? (BLOCKING if unknown after 20 actions)
         if not controlled_objects and action_count > 20:
             questions.append({
@@ -1505,7 +1506,7 @@ class QuestioningEngineWithTeeth:
                 'allowed_actions': ['exploration', 'discovery', 'ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'],
                 'score_modifier': 0.3  # Severely penalize non-discovery actions
             })
-        
+
         # Q9: Self-test - theory is contradicted (BLOCKING)
         if theory_stage == 'contradicted':
             contradiction_count = working_theory.get('contradictions', 1)
@@ -1519,7 +1520,7 @@ class QuestioningEngineWithTeeth:
                 'allowed_actions': ['revise_theory', 'test_alternative', 'ACTION5', 'ACTION6', 'ACTION7'],
                 'score_modifier': 0.2  # Only theory-revision actions score well
             })
-        
+
         # META: Why am I stuck? (BLOCKING if high stuckness)
         if stuckness > 0.7:
             questions.append({
@@ -1532,10 +1533,10 @@ class QuestioningEngineWithTeeth:
                 'allowed_actions': ['random', 'test_alternative', 'exploration', 'noop'],
                 'score_modifier': 0.15
             })
-        
+
         self._active_questions = questions
         return questions
-    
+
     def apply_question_constraints(
         self,
         proposals: List[Dict[str, Any]],
@@ -1543,53 +1544,53 @@ class QuestioningEngineWithTeeth:
     ) -> Tuple[List[Dict[str, Any]], bool]:
         """
         Apply question constraints to proposals.
-        
+
         Questions modify scoring and can BLOCK proposals entirely.
-        
+
         Args:
             proposals: List of action proposals with 'action', 'score', 'intent' keys
             questions: Active questions (uses cached if not provided)
-            
+
         Returns:
             Tuple of (modified_proposals, is_blocked)
         """
         questions = questions or self._active_questions
-        
+
         if not questions:
             return proposals, False
-        
+
         blocked = any(q.get('blocks_action') for q in questions)
         blocking_questions = [q for q in questions if q.get('blocks_action')]
-        
+
         modified_proposals = []
         for proposal in proposals:
             original_score = proposal.get('score', 0.5)
             action = proposal.get('action', '')
             intent = proposal.get('intent', '')
-            
+
             # Calculate score modifier from all active questions
             total_modifier = 1.0
             for q in questions:
                 total_modifier *= q.get('score_modifier', 1.0)
-            
+
             # If blocking questions exist, check if proposal is allowed
             if blocked:
                 allowed = False
                 for bq in blocking_questions:
                     allowed_actions = bq.get('allowed_actions', [])
-                    
+
                     # Check if action or intent is in allowed list
                     if action in allowed_actions or intent in allowed_actions:
                         allowed = True
                         total_modifier *= 1.5  # BOOST allowed actions when blocked
                         break
-                    
+
                     # Also check if it's a movement action (ACTION1-4)
                     if 'exploration' in allowed_actions and action in ('ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'):
                         allowed = True
                         total_modifier *= 1.3
                         break
-                
+
                 if not allowed:
                     # This proposal is BLOCKED by a critical question
                     proposal = proposal.copy()
@@ -1600,15 +1601,15 @@ class QuestioningEngineWithTeeth:
                     self._blocking_reason = f"Blocked by {proposal['blocked_by']}"
                     modified_proposals.append(proposal)
                     continue
-            
+
             # Apply modifier to score
             proposal = proposal.copy()
             proposal['score'] = max(0.0, min(1.0, original_score * total_modifier))
             proposal['question_modifier'] = total_modifier
             modified_proposals.append(proposal)
-        
+
         return modified_proposals, blocked
-    
+
     def get_blocking_info(self) -> Optional[Dict[str, Any]]:
         """Get information about why actions are being blocked."""
         blocking_qs = [q for q in self._active_questions if q.get('blocks_action')]
@@ -1618,13 +1619,13 @@ class QuestioningEngineWithTeeth:
             'is_blocked': True,
             'blocking_questions': blocking_qs,
             'allowed_actions': list(set(
-                action 
-                for q in blocking_qs 
+                action
+                for q in blocking_qs
                 for action in q.get('allowed_actions', [])
             )),
             'total_score_penalty': 0.0 if blocking_qs else 1.0
         }
-    
+
     def spawn_investigating_personas(
         self,
         questions: Optional[List[Dict[str, Any]]] = None,
@@ -1632,12 +1633,12 @@ class QuestioningEngineWithTeeth:
     ) -> List[Dict[str, Any]]:
         """
         Questions can spawn specialized investigating personas.
-        
+
         Returns list of persona specs to spawn.
         """
         questions = questions or self._active_questions
         spawned = []
-        
+
         for q in questions:
             if q.get('spawns_persona') and q['urgency'] in ['high', 'critical']:
                 persona_spec = {
@@ -1648,7 +1649,7 @@ class QuestioningEngineWithTeeth:
                     'focus': q['question'],
                     'persistence': 'experimental'
                 }
-                
+
                 if persona_manager is not None:
                     try:
                         spawn_fn = getattr(persona_manager, 'spawn_temporary_persona', None)
@@ -1656,19 +1657,19 @@ class QuestioningEngineWithTeeth:
                             spawn_fn(persona_spec)
                     except Exception:
                         pass
-                
+
                 spawned.append(persona_spec)
-        
+
         return spawned
-    
+
     def resolve_question(self, question_id: str, resolution: str = 'resolved') -> bool:
         """
         Mark a question as resolved, removing its blocking status.
-        
+
         Args:
             question_id: The question to resolve (Q1, Q4, Q9, META, etc)
             resolution: How it was resolved
-            
+
         Returns:
             True if question was found and resolved
         """
@@ -1690,19 +1691,19 @@ class QuestioningEngineWithTeeth:
 class GamesAsTeachersEngine:
     """
     Implements the Games-as-Teachers paradigm.
-    
+
     Core Reframing:
     - "What objects exist?" -> "What is the teacher showing me?"
     - "What can I do?" -> "What am I supposed to understand?"
     - "I died" -> "I misunderstood the lesson"
     - "I won" -> "I demonstrated understanding"
-    
+
     Key Features:
     1. Lesson extraction on WIN
     2. Interpretation coverage tracking
     3. Transfer testing to validate understanding
     """
-    
+
     def __init__(self, db: Optional[Any] = None):
         self.db = db
         self._current_lesson: Optional[Dict[str, Any]] = None
@@ -1726,7 +1727,7 @@ class GamesAsTeachersEngine:
         except Exception:
             pass
         return "lesson_interpretations"
-    
+
     def extract_lesson(
         self,
         game_type: str,
@@ -1737,23 +1738,23 @@ class GamesAsTeachersEngine:
     ) -> Dict[str, Any]:
         """
         Extract a lesson from a WIN.
-        
+
         Called when agent successfully completes a level.
         The lesson captures WHAT was learned, not just HOW to win.
-        
+
         Returns:
             Lesson dict with concept, interpretation, and evidence
         """
         lesson_id = f"lesson_{game_type}_{level_number}_{uuid.uuid4().hex[:8]}"
-        
+
         # Analyze the winning sequence for patterns
         action_counts = {}
         for action in winning_sequence:
             action_counts[action] = action_counts.get(action, 0) + 1
-        
+
         dominant_action = max(action_counts.items(), key=lambda x: x[1])[0] if action_counts else None
         sequence_length = len(winning_sequence)
-        
+
         # Infer the concept demonstrated
         concept = self._infer_concept(
             game_type=game_type,
@@ -1761,7 +1762,7 @@ class GamesAsTeachersEngine:
             winning_sequence=winning_sequence,
             working_theory=working_theory
         )
-        
+
         # Build the interpretation
         interpretation = {
             'sequence_length': sequence_length,
@@ -1770,7 +1771,7 @@ class GamesAsTeachersEngine:
             'theory_used': working_theory.get('hypothesis') if working_theory else None,
             'theory_stage': working_theory.get('stage') if working_theory else None
         }
-        
+
         lesson = {
             'lesson_id': lesson_id,
             'game_type': game_type,
@@ -1787,12 +1788,12 @@ class GamesAsTeachersEngine:
             'abstraction_score': 0.0,
             'created_at': datetime.now().isoformat()
         }
-        
+
         self._current_lesson = lesson
-        
+
         # Store in database if available
         self._store_lesson(lesson)
-        
+
         # =================================================================
         # COGNITIVE INTEGRATION: Theories -> Concept Discovery
         # =================================================================
@@ -1802,11 +1803,11 @@ class GamesAsTeachersEngine:
         # =================================================================
         if concept and concept != 'exploration_required':
             _notify_concept_from_lesson(game_type, concept, lesson_id)
-        
+
         logger.info(f"[TEACHER] Extracted lesson: {concept} from {game_type} L{level_number}")
-        
+
         return lesson
-    
+
     def _infer_concept(
         self,
         game_type: str,
@@ -1826,24 +1827,24 @@ class GamesAsTeachersEngine:
                 return 'directional_flow'
             if 'pattern' in str(theory_type).lower():
                 return 'pattern_completion'
-        
+
         # Infer from sequence characteristics
         if len(winning_sequence) < 10:
             return 'direct_path'
-        
+
         # Check for repetitive patterns
         if len(set(winning_sequence)) == 1:
             return 'single_action_repeat'
-        
+
         # Check for alternating patterns
         if len(winning_sequence) >= 4:
-            pairs = [(winning_sequence[i], winning_sequence[i+1]) 
+            pairs = [(winning_sequence[i], winning_sequence[i+1])
                      for i in range(0, len(winning_sequence)-1, 2)]
             if len(set(pairs)) == 1:
                 return 'alternating_pattern'
-        
+
         return 'exploration_required'
-    
+
     def _store_lesson(self, lesson: Dict[str, Any]) -> bool:
         """Store lesson in database."""
         if not self.db:
@@ -1900,7 +1901,7 @@ class GamesAsTeachersEngine:
         except Exception as e:
             logger.debug(f"[TEACHER] Failed to store lesson: {e}")
             return False
-    
+
     def test_transfer(
         self,
         lesson_id: str,
@@ -1911,16 +1912,16 @@ class GamesAsTeachersEngine:
     ) -> Dict[str, Any]:
         """
         Test if a lesson transfers to a new context.
-        
+
         This is the critical validation - can understanding be applied elsewhere?
-        
+
         Args:
             lesson_id: The lesson being tested
             target_game_type: Game type we're testing on
             target_level: Level we're testing on
             transfer_succeeded: Did applying the lesson work?
             actions_to_success: How many actions needed (lower = better generalization)
-            
+
         Returns:
             Transfer test result
         """
@@ -1932,9 +1933,9 @@ class GamesAsTeachersEngine:
             'actions_to_success': actions_to_success,
             'tested_at': datetime.now().isoformat()
         }
-        
+
         self._transfer_history.append(result)
-        
+
         # Update lesson statistics
         if self.db:
             table_name = self._get_lesson_table()
@@ -1942,19 +1943,19 @@ class GamesAsTeachersEngine:
                 if table_name == "lesson_interpretations_v2":
                     if transfer_succeeded:
                         self.db.execute_query(
-                            """UPDATE lesson_interpretations_v2 
+                            """UPDATE lesson_interpretations_v2
                                SET transfer_success_count = transfer_success_count + 1,
                                    validated_by_transfer = TRUE,
-                                   abstraction_score = CAST(transfer_success_count + 1 AS REAL) / 
+                                   abstraction_score = CAST(transfer_success_count + 1 AS REAL) /
                                        CAST(transfer_success_count + transfer_fail_count + 1 AS REAL)
                                WHERE lesson_id = ?""",
                             (lesson_id,)
                         )
                     else:
                         self.db.execute_query(
-                            """UPDATE lesson_interpretations_v2 
+                            """UPDATE lesson_interpretations_v2
                                SET transfer_fail_count = transfer_fail_count + 1,
-                                   abstraction_score = CAST(transfer_success_count AS REAL) / 
+                                   abstraction_score = CAST(transfer_success_count AS REAL) /
                                        CAST(transfer_success_count + transfer_fail_count + 1 AS REAL)
                                WHERE lesson_id = ?""",
                             (lesson_id,)
@@ -1965,19 +1966,19 @@ class GamesAsTeachersEngine:
 
                 # Also store in abstraction_quality if table exists
                 self._store_transfer_quality(result)
-                
+
             except Exception as e:
                 logger.debug(f"[TEACHER] Failed to update transfer stats: {e}")
-        
+
         logger.info(f"[TEACHER] Transfer test: {lesson_id} -> {target_game_type} L{target_level}: {'SUCCESS' if transfer_succeeded else 'FAIL'}")
-        
+
         return result
-    
+
     def _store_transfer_quality(self, result: Dict[str, Any]) -> bool:
         """Store transfer quality metrics."""
         if not self.db:
             return False
-        
+
         try:
             source_game = result.get('source_game_type')
             if not source_game:
@@ -1999,7 +2000,7 @@ class GamesAsTeachersEngine:
                     transfer_succeeded, actions_to_success, is_memorization,
                     is_abstraction, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-                (result['lesson_id'], 
+                (result['lesson_id'],
                  source_game or 'unknown',
                  result['target_game_type'],
                  result['target_level'],
@@ -2011,16 +2012,16 @@ class GamesAsTeachersEngine:
             return True
         except Exception:
             return False
-    
+
     def get_coverage_ratio(self, lesson_id: str) -> float:
         """
         Get how much of the game space this lesson explains.
-        
+
         Higher coverage = more general understanding.
         """
         if not self.db:
             return 0.0
-        
+
         try:
             rows = self.db.execute_query(
                 "SELECT coverage_ratio FROM lesson_interpretations WHERE lesson_id = ?",
@@ -2030,9 +2031,9 @@ class GamesAsTeachersEngine:
                 return float(rows[0].get('coverage_ratio', 0.0))
         except Exception:
             pass
-        
+
         return 0.0
-    
+
     def find_applicable_lessons(
         self,
         game_type: str,
@@ -2040,39 +2041,39 @@ class GamesAsTeachersEngine:
     ) -> List[Dict[str, Any]]:
         """
         Find lessons that might apply to current context.
-        
+
         Used to bootstrap understanding on new levels.
         """
         if not self.db:
             return []
-        
+
         try:
             # First check for exact game type matches with successful transfer
             rows = self.db.execute_query(
-                """SELECT * FROM lesson_interpretations 
+                """SELECT * FROM lesson_interpretations
                    WHERE game_type = ? AND validated_by_transfer = TRUE
                    ORDER BY abstraction_score DESC
                    LIMIT 5""",
                 (game_type,)
             )
-            
+
             if rows:
                 return list(rows)
-            
+
             # If no validated lessons, return highest coverage ones
             rows = self.db.execute_query(
-                """SELECT * FROM lesson_interpretations 
+                """SELECT * FROM lesson_interpretations
                    WHERE game_type = ?
                    ORDER BY coverage_ratio DESC
                    LIMIT 5""",
                 (game_type,)
             )
-            
+
             return list(rows) if rows else []
-            
+
         except Exception:
             return []
-    
+
     def update_interpretation(
         self,
         lesson_id: str,
@@ -2081,7 +2082,7 @@ class GamesAsTeachersEngine:
     ) -> bool:
         """
         Update interpretation coverage when we find new examples.
-        
+
         Args:
             lesson_id: Lesson to update
             explains_level: New level this lesson explains (add to list)
@@ -2089,58 +2090,58 @@ class GamesAsTeachersEngine:
         """
         if not self.db:
             return False
-        
+
         try:
             # Get current values
             rows = self.db.execute_query(
                 "SELECT explains_examples, fails_to_explain FROM lesson_interpretations WHERE lesson_id = ?",
                 (lesson_id,)
             )
-            
+
             if not rows:
                 return False
-            
+
             explains = json.loads(rows[0].get('explains_examples', '[]'))
             fails = json.loads(rows[0].get('fails_to_explain', '[]'))
-            
+
             if explains_level and explains_level not in explains:
                 explains.append(explains_level)
-            
+
             if fails_level and fails_level not in fails:
                 fails.append(fails_level)
-            
+
             # Calculate new coverage ratio
             total = len(explains) + len(fails)
             coverage = len(explains) / total if total > 0 else 0.0
-            
+
             # Update
             self.db.execute_query(
-                """UPDATE lesson_interpretations 
+                """UPDATE lesson_interpretations
                    SET explains_examples = ?, fails_to_explain = ?, coverage_ratio = ?
                    WHERE lesson_id = ?""",
                 (json.dumps(explains), json.dumps(fails), coverage, lesson_id)
             )
-            
+
             return True
-            
+
         except Exception:
             return False
-    
+
     def get_lesson_stats(self) -> Dict[str, Any]:
         """Get overall statistics about lessons learned."""
         if not self.db:
             return {'total_lessons': 0, 'validated_lessons': 0, 'avg_coverage': 0.0}
-        
+
         try:
             rows = self.db.execute_query(
-                """SELECT 
+                """SELECT
                        COUNT(*) as total,
                        SUM(CASE WHEN validated_by_transfer THEN 1 ELSE 0 END) as validated,
                        AVG(coverage_ratio) as avg_coverage,
                        AVG(abstraction_score) as avg_abstraction
                    FROM lesson_interpretations"""
             )
-            
+
             if rows:
                 return {
                     'total_lessons': rows[0].get('total', 0),
@@ -2150,5 +2151,5 @@ class GamesAsTeachersEngine:
                 }
         except Exception:
             pass
-        
+
         return {'total_lessons': 0, 'validated_lessons': 0, 'avg_coverage': 0.0}

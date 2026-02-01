@@ -8,6 +8,7 @@ without triggering the root __init__.py which uses relative imports.
 import os
 import sys
 from pathlib import Path
+
 import pytest
 
 # Disable pycache - per project rules
@@ -29,7 +30,7 @@ MAIN_DB_PATH = Path(project_root) / "core_data.db"
 def db_path() -> Path:
     """
     Fixture providing path to the main core_data.db database.
-    
+
     Use this in tests instead of Path(__file__).parent / "core_data.db"
     which incorrectly points to an empty tests/core_data.db file.
     """

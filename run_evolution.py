@@ -20,10 +20,10 @@ Usage:
     python run_evolution.py --quick      # Quick test (5 generations max)
 """
 
+import argparse
+import asyncio
 import os
 import sys
-import asyncio
-import argparse
 
 # Load environment variables from .env if available
 try:
@@ -44,9 +44,9 @@ def main():
         cleanup_temp_files()
     except Exception as e:
         print(f"[WARN] Cleanup failed (non-critical): {e}")
-    
+
     parser = argparse.ArgumentParser(description='Quick Start Evolution')
-    
+
     parser.add_argument('--fast', action='store_true',
                        help='Fast mode: 30 min intervals, 10 games/gen')
     parser.add_argument('--thorough', action='store_true',
@@ -69,9 +69,9 @@ def main():
                        help='Limit number of replay validations (most recent first)')
     parser.add_argument('--no-replay', action='store_true',
                        help='Skip sequence retrieval/replay but still capture new sequences on win')
-    
+
     args = parser.parse_args()
-    
+
     # Configure based on mode
     if args.test:
         print(">> TEST MODE - Minimal test (1 agent, 1 game)")
@@ -117,18 +117,18 @@ def main():
             'evolution_interval_minutes': 60,
             'max_generations': 50
         }
-    
+
     # Override max_generations if specified (useful when resuming)
     if args.max_generations:
         config['max_generations'] = args.max_generations
         print(f"[OVERRIDE] Max Generations set to {args.max_generations}")
-    
+
     # Check API key
     api_key = os.getenv('ARC_API_KEY')
     if not api_key or api_key == 'your_api_key_here':
         print("\n[ERROR] Need valid ARC_API_KEY in .env file")
         return
-    
+
     print(f"\n{'='*60}")
     print("Configuration:")
     print(f"  Initial Population: {config['initial_population_size']} agents (or existing if higher)")
@@ -149,15 +149,15 @@ def main():
     if config.get('ensure_game_type_coverage'):
         print(f"  Game Type Coverage: ENABLED (one game per type guaranteed)")
     print(f"{'='*60}\n")
-    
+
     # Add diversity mode to config if requested
     if args.diversity:
         config['agi_mode'] = True
-    
+
     # Add specialist mode to config if requested
     if args.specialist:
         config['specialist_mode'] = True
-    
+
     # Add target game filter if specified
     if args.game:
         config['target_game'] = args.game
@@ -169,11 +169,11 @@ def main():
             config['replay_validation_limit'] = args.replay_limit
     else:
         config['replay_validation_batch'] = False
-    
+
     # No replay mode (skip sequence retrieval, still capture)
     if args.no_replay:
         config['skip_sequence_retrieval'] = True
-    
+
     # Create and run
     runner = AutonomousEvolutionRunner(**config)
     asyncio.run(runner.run())

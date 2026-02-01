@@ -7,18 +7,18 @@ CREATE TABLE ablation_test_results (
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
                 sequence_id TEXT NOT NULL,
-                
+
                 -- Test configuration
                 skipped_action_indices TEXT NOT NULL,
                 skip_rate REAL NOT NULL,
                 mastery_tier_at_test TEXT,
-                
+
                 -- Results
                 test_passed BOOLEAN NOT NULL,
                 actions_taken INTEGER,
                 final_score REAL,
                 recovery_method TEXT,
-                
+
                 -- Context
                 agent_id TEXT,
                 generation INTEGER,
@@ -38,21 +38,21 @@ CREATE TABLE abstraction_metrics (
 CREATE TABLE abstraction_quality (
                 quality_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 lesson_id TEXT NOT NULL,
-                
+
                 -- Transfer attempts
                 source_game_type TEXT NOT NULL,
                 target_game_type TEXT NOT NULL,
                 target_level INTEGER,
-                
+
                 -- Outcome
                 transfer_succeeded BOOLEAN,
                 actions_to_success INTEGER,
                 adaptation_required TEXT,
-                
+
                 -- Quality metrics
                 is_memorization BOOLEAN DEFAULT FALSE,
                 is_abstraction BOOLEAN DEFAULT FALSE,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -74,16 +74,16 @@ CREATE TABLE action6_availability_events (
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
                 action_number INTEGER,
-                
+
                 -- Availability state
                 action6_available INTEGER NOT NULL,  -- 1 = available, 0 = not available
                 previous_action TEXT,                -- What action preceded this state
                 previous_action_coords TEXT,         -- Coordinates if applicable
-                
+
                 -- Context for pattern detection
                 grid_hash TEXT,                      -- Hash of grid state when availability changed
                 available_actions_list TEXT,         -- Full list of available actions (JSON)
-                
+
                 -- Tracking
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             );
@@ -93,23 +93,23 @@ CREATE TABLE action_bias_events (
         agent_id TEXT NOT NULL,
         game_id TEXT NOT NULL,
         generation INTEGER NOT NULL,
-        
+
         -- Action context
         action_taken INTEGER NOT NULL, -- 1-7
         navigation_state REAL NOT NULL,
         sensation_bias REAL NOT NULL, -- How much sensation influenced this action
-        
+
         -- Outcome tracking
         action_success BOOLEAN DEFAULT NULL,
         score_change INTEGER DEFAULT 0,
         emotional_reward REAL DEFAULT 0.0, -- Internal satisfaction from action
-        
+
         -- Learning impact
         bias_adjustment REAL DEFAULT 0.0, -- How much bias changed due to outcome
-        
+
         -- Timestamp
         bias_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        
+
         FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
     );
 
@@ -162,18 +162,18 @@ CREATE TABLE action_reasoning_logs (
                     game_type TEXT NOT NULL,
                     level INTEGER NOT NULL,
                     action_number INTEGER NOT NULL,
-                    
+
                     -- Context
                     is_frontier INTEGER DEFAULT 0,
                     network_traction REAL DEFAULT 0.0,
                     actions_remaining INTEGER,
                     actions_budget INTEGER,
                     tension_state TEXT,
-                    
+
                     -- Budget
                     deliberation_budget_seconds REAL,
                     budget_reason TEXT,
-                    
+
                     -- Gut instinct (JSON)
                     gut_action TEXT,
                     gut_confidence REAL,
@@ -182,7 +182,7 @@ CREATE TABLE action_reasoning_logs (
                     gut_stream_a_influence REAL,
                     gut_stream_b_influence REAL,
                     gut_pattern_matched TEXT,
-                    
+
                     -- Deliberation (JSON for complex fields)
                     deliberation_performed INTEGER DEFAULT 0,
                     deliberation_action TEXT,
@@ -192,24 +192,24 @@ CREATE TABLE action_reasoning_logs (
                     deliberation_changed_from_gut INTEGER DEFAULT 0,
                     deliberation_change_reason TEXT,
                     deliberation_skipped_reason TEXT,
-                    
+
                     -- Stream analysis
                     stream_conflict_detected INTEGER DEFAULT 0,
                     stream_conflict_resolution TEXT,
-                    
+
                     -- Missing primitive signal
                     missing_primitive_signal TEXT,
-                    
+
                     -- Final decision
                     final_action TEXT NOT NULL,
                     final_confidence REAL,
                     decision_source TEXT,
                     total_decision_time_ms REAL,
-                    
+
                     -- Outcome (updated after action)
                     outcome TEXT,
                     score_change REAL DEFAULT 0.0,
-                    
+
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -235,19 +235,19 @@ CREATE TABLE action_triggered_dangers (
                 trigger_id TEXT PRIMARY KEY,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 trigger_action INTEGER NOT NULL,
                 trigger_x INTEGER,
                 trigger_y INTEGER,
-                
+
                 spawned_color INTEGER,
                 spawned_positions TEXT,
-                
+
                 actions_until_death INTEGER DEFAULT 1,
-                
+
                 occurrence_count INTEGER DEFAULT 1,
                 danger_score REAL DEFAULT 0.7,
-                
+
                 discovered_at TEXT,
                 is_active INTEGER DEFAULT 1
             );
@@ -255,28 +255,28 @@ CREATE TABLE action_triggered_dangers (
 CREATE TABLE agent_agi_metrics (
     agent_id TEXT PRIMARY KEY,
     generation INTEGER NOT NULL,
-    
+
     -- Diversity metrics
     unique_games_played INTEGER DEFAULT 0,
     unique_games_scored INTEGER DEFAULT 0,      -- Games with ANY score > 0
     game_diversity_ratio REAL DEFAULT 0.0,      -- scored/played ratio
-    
+
     -- Generalization metrics
     novel_game_performance REAL DEFAULT 0.0,    -- Avg score on first-time games
     novel_games_attempted INTEGER DEFAULT 0,
     novel_games_scored INTEGER DEFAULT 0,
-    
+
     -- Few-shot learning metrics
     few_shot_improvement_avg REAL DEFAULT 0.0,  -- Avg improvement attempt 1Ã¢â€ â€™2
     few_shot_success_rate REAL DEFAULT 0.0,     -- % games improved on 2nd try
-    
+
     -- Anti-overfitting metrics
     max_repeats_on_single_game INTEGER DEFAULT 0,
     overfitting_penalty REAL DEFAULT 0.0,       -- Penalty if too focused on one game
-    
+
     -- AGI fitness score (50% novel + 30% few-shot + 20% diversity)
     agi_fitness_score REAL DEFAULT 0.0,
-    
+
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
@@ -364,7 +364,7 @@ CREATE TABLE agent_cognitive_stages (
                 agent_id TEXT PRIMARY KEY,
                 current_stage TEXT NOT NULL DEFAULT 'preoperational',
                 stage_entered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 -- Competency tracking
                 games_played INTEGER DEFAULT 0,
                 sequences_discovered INTEGER DEFAULT 0,
@@ -373,11 +373,11 @@ CREATE TABLE agent_cognitive_stages (
                 action_effect_pairs INTEGER DEFAULT 0,
                 cross_game_transfer BOOLEAN DEFAULT FALSE,
                 validation_success_rate REAL DEFAULT 0.0,
-                
+
                 -- Stage history
                 preoperational_exit DATETIME,
                 concrete_exit DATETIME,
-                
+
                 last_evaluated DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
             );
@@ -401,17 +401,17 @@ CREATE TABLE agent_failed_attempts (
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- What was tried
                 action_sequence TEXT,       -- JSON: list of actions attempted
                 attempt_description TEXT,   -- Natural language: "tried going left around obstacle"
                 frames_survived INTEGER,    -- How long it lasted
                 death_cause TEXT,           -- What killed the attempt (if known)
-                
+
                 -- Network learning value
                 confirmed_by_others INTEGER DEFAULT 0,  -- How many others hit same wall
                 helpful_count INTEGER DEFAULT 0,        -- How many queried this
-                
+
                 -- Timestamps
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_confirmed DATETIME
@@ -420,23 +420,23 @@ CREATE TABLE agent_failed_attempts (
 CREATE TABLE agent_frustration_states (
                     agent_id TEXT PRIMARY KEY,
                     generation INTEGER NOT NULL,
-                    
+
                     -- Frustration metrics
                     is_frustrated BOOLEAN DEFAULT FALSE,
                     frustration_level REAL DEFAULT 0.0,  -- 0.0 to 1.0
                     games_without_progress INTEGER DEFAULT 0,
                     consecutive_failures INTEGER DEFAULT 0,
                     action_diversity_score REAL DEFAULT 1.0,  -- 1.0=diverse, 0.0=repetitive
-                    
+
                     -- Frustration triggers
                     stuck_on_game_id TEXT,
                     last_score_improvement REAL DEFAULT 0.0,
                     games_since_improvement INTEGER DEFAULT 0,
-                    
+
                     -- Timestamps
                     became_frustrated_at TIMESTAMP,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
                 );
 
@@ -457,56 +457,56 @@ CREATE TABLE agent_game_diversity (
 CREATE TABLE agent_hypotheses (
                 hypothesis_id TEXT PRIMARY KEY,
                 agent_id TEXT NOT NULL,
-                
+
                 -- Hypothesis content
                 game_type TEXT NOT NULL,
                 level_number INTEGER,
                 hypothesis_text TEXT NOT NULL,
                 hypothesis_type TEXT NOT NULL,  -- 'object_behavior', 'action_effect', 'sequence_pattern', 'game_rule'
-                
+
                 -- Evidence and confidence
                 supporting_evidence TEXT,        -- JSON: list of observations supporting this
                 contradicting_evidence TEXT,     -- JSON: list of observations against this
                 confidence REAL DEFAULT 0.5,
-                
+
                 -- Testing
                 tests_conducted INTEGER DEFAULT 0,
                 tests_successful INTEGER DEFAULT 0,
                 last_tested DATETIME,
-                
+
                 -- Status
                 status TEXT DEFAULT 'proposed',  -- 'proposed', 'testing', 'confirmed', 'refuted', 'abandoned'
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP, primitives_used TEXT, trigger_condition TEXT, predicted_action TEXT, action_sequence TEXT,
-                
+
                 FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
             );
 
 CREATE TABLE agent_meta_learning (
     agent_id TEXT PRIMARY KEY,
     generation INTEGER NOT NULL,
-    
+
     -- Rule acquisition
     total_rules_learned INTEGER DEFAULT 0,
     rules_created_this_gen INTEGER DEFAULT 0,
     avg_rules_per_game REAL DEFAULT 0.0,
-    
+
     -- Transfer learning
     successful_transfers INTEGER DEFAULT 0,
     failed_transfers INTEGER DEFAULT 0,
     transfer_success_rate REAL DEFAULT 0.0,
-    
+
     -- Generalization capability
     avg_rule_generality REAL DEFAULT 0.0,  -- Avg games each rule works on
     novel_game_success_rate REAL DEFAULT 0.0,
     learning_rate REAL DEFAULT 0.0,        -- How fast agent learns new rules
-    
+
     -- Meta-fitness (30% of total fitness in diversity mode)
     meta_fitness_score REAL DEFAULT 0.0,
-    
+
     -- Visual reasoning capability
     visual_primitives_learned INTEGER DEFAULT 0,
     visual_understanding_score REAL DEFAULT 0.0,
-    
+
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
@@ -527,49 +527,49 @@ CREATE TABLE agent_operating_modes (
                 game_id TEXT,
                 generation INTEGER NOT NULL,
                 assigned_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
+
                 -- Mode assignment
                 operating_mode TEXT NOT NULL,  -- 'pioneer', 'optimizer', 'generalist'
                 mode_reason TEXT NOT NULL,      -- Why this mode was assigned
-                
+
                 -- Mode parameters applied
                 mutation_multiplier REAL NOT NULL,
                 action_diversity REAL NOT NULL,
                 novelty_seeking REAL NOT NULL,
-                
+
                 -- Performance tracking
                 actions_taken INTEGER DEFAULT 0,
                 score_achieved REAL DEFAULT 0.0,
                 win_achieved BOOLEAN DEFAULT FALSE,
                 mode_effectiveness REAL DEFAULT 0.5, initial_w_B_for_role REAL DEFAULT 0.5, current_w_B REAL DEFAULT 0.5, progress_score REAL DEFAULT 0.0, created_at TIMESTAMP,  -- How well this mode worked for this agent
-                
+
                 FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
             );
 
 CREATE TABLE agent_pariah_awareness (
     agent_id TEXT NOT NULL,
     pariah_id TEXT NOT NULL,
-    
+
     -- Awareness details
     awareness_generation INTEGER NOT NULL,
     awareness_source TEXT NOT NULL,  -- 'self_discovery', 'horizontal_transfer', 'inheritance'
     learned_from_agent TEXT,  -- If learned from another agent
-    
+
     -- Awareness strength
     awareness_level REAL DEFAULT 0.5,  -- 0-1, how well does agent recognize this?
     avoidance_priority REAL DEFAULT 0.5,  -- 0-1, how strongly to avoid?
-    
+
     -- Agent response to pariah
     avoidance_success_count INTEGER DEFAULT 0,  -- Times agent avoided this
     trigger_count INTEGER DEFAULT 0,  -- Times agent fell into trap despite awareness
     total_encounters INTEGER DEFAULT 0,
     avg_score_saved REAL DEFAULT 0.0,  -- Score saved by avoiding
-    
+
     -- Awareness lifecycle
     is_active BOOLEAN DEFAULT TRUE,
     last_encountered_generation INTEGER,
     false_positive_count INTEGER DEFAULT 0,  -- Times avoided when shouldn't have
-    
+
     PRIMARY KEY (agent_id, pariah_id),
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
     FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
@@ -580,34 +580,34 @@ CREATE TABLE agent_performance_history (
     history_id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id TEXT NOT NULL,
     recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- Performance metrics
     games_played INTEGER DEFAULT 0,
     total_score REAL DEFAULT 0.0,
     avg_score REAL DEFAULT 0.0,
     best_score REAL DEFAULT 0.0,
     worst_score REAL DEFAULT 0.0,
-    
+
     -- Level completion metrics
     total_levels_completed INTEGER DEFAULT 0,
     avg_levels_per_game REAL DEFAULT 0.0,
-    
+
     -- Efficiency metrics
     total_actions INTEGER DEFAULT 0,
     avg_actions_per_game REAL DEFAULT 0.0,
     avg_efficiency REAL DEFAULT 0.0,  -- score / actions
-    
+
     -- Win rate
     wins INTEGER DEFAULT 0,
     win_rate REAL DEFAULT 0.0,
-    
+
     -- Sequence contribution
     sequences_discovered INTEGER DEFAULT 0,
     sequences_validated INTEGER DEFAULT 0,
-    
+
     -- Prestige snapshot
     prestige_score REAL DEFAULT 0.0,
-    
+
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
@@ -691,20 +691,20 @@ CREATE TABLE agent_success_insights (
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER,
-                
+
                 -- The insight
                 insight_type TEXT NOT NULL,     -- 'avoid_pattern', 'approach_pattern', 'timing', 'sequence'
                 insight_text TEXT NOT NULL,     -- Natural language: "go around obstacles on the right"
                 confidence REAL DEFAULT 0.5,
-                
+
                 -- Supporting evidence
                 times_worked INTEGER DEFAULT 1,
                 times_failed INTEGER DEFAULT 0,
-                
+
                 -- Network validation
                 peer_confirmations INTEGER DEFAULT 0,
                 peer_rejections INTEGER DEFAULT 0,
-                
+
                 -- Timestamps
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_validated DATETIME
@@ -715,30 +715,30 @@ CREATE TABLE agent_theories (
                 theory_type TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Theory content
                 description TEXT NOT NULL,
                 formal_statement TEXT NOT NULL,
                 predictions TEXT,
-                
+
                 -- Evidence
                 supporting_observations TEXT,
                 contradicting_observations TEXT,
-                
+
                 -- Confidence and status
                 confidence REAL DEFAULT 0.5,
                 status TEXT DEFAULT 'proposed',
                 tests_conducted INTEGER DEFAULT 0,
                 tests_successful INTEGER DEFAULT 0,
-                
+
                 -- Generalization
                 generalized_from TEXT,
                 child_theories TEXT,
-                
+
                 -- Network sharing
                 shared_to_network INTEGER DEFAULT 0,
                 network_validations INTEGER DEFAULT 0,
-                
+
                 -- Metadata
                 created_at TEXT,
                 last_tested_at TEXT,
@@ -751,27 +751,27 @@ CREATE TABLE agent_validation_performance (agent_id TEXT PRIMARY KEY, sequences_
 CREATE TABLE agent_viral_infections (
     agent_id TEXT NOT NULL,
     package_id TEXT NOT NULL,
-    
+
     -- Infection details
     infection_generation INTEGER NOT NULL,
     infection_source TEXT NOT NULL,  -- 'discovery', 'horizontal_transfer', 'inheritance', 'mutation'
     infected_by_agent TEXT,  -- If horizontal transfer, who spread it?
-    
+
     -- Infection strength (how much does host express this?)
     infection_strength REAL DEFAULT 0.5,  -- 0-1, affects action selection weight
     expression_level REAL DEFAULT 0.5,  -- 0-1, how actively is host using this?
-    
+
     -- Host response to infection
     success_count INTEGER DEFAULT 0,  -- Times this package helped host
     failure_count INTEGER DEFAULT 0,  -- Times this package failed host
     total_uses INTEGER DEFAULT 0,
     avg_score_boost REAL DEFAULT 0.0,  -- Average score change when using
-    
+
     -- Infection lifecycle
     is_active BOOLEAN DEFAULT TRUE,
     last_used_generation INTEGER,
     immunity_developed BOOLEAN DEFAULT FALSE,  -- Host rejected this package?
-    
+
     PRIMARY KEY (agent_id, package_id),
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
     FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id),
@@ -912,24 +912,24 @@ CREATE TABLE autonomous_objects (
                 record_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Object identification
                 object_color INTEGER NOT NULL,
-                
+
                 -- Movement characteristics
                 movement_pattern TEXT,           -- 'random', 'chasing', 'fleeing', 'patrol', 'unknown'
                 moves_per_turn REAL DEFAULT 0,   -- Average moves per player action
                 moves_without_input INTEGER DEFAULT 0,  -- How often it moves when we don't act
-                
+
                 -- Controllability
                 is_ever_controllable INTEGER DEFAULT 0,  -- Can it be controlled sometimes?
                 controllable_conditions TEXT,            -- What makes it controllable (JSON)
-                
+
                 -- Validation
                 observation_count INTEGER DEFAULT 1,
                 confidence REAL DEFAULT 0.5,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, object_color)
             );
 
@@ -1028,45 +1028,45 @@ CREATE TABLE code_proposals (
 
 CREATE TABLE cods_bayesian_hypotheses (
                     hypothesis_id TEXT PRIMARY KEY,
-                    
+
                     -- Identity
                     hypothesis_type TEXT NOT NULL,
                     game_type TEXT NOT NULL,
                     level_number INTEGER,
                     description TEXT NOT NULL,
-                    
+
                     -- What this hypothesis suggests
                     target_primitive TEXT,
                     suggested_composition TEXT,
-                    
+
                     -- Bayesian tracking
                     prior_probability REAL DEFAULT 0.5,
                     evidence_for INTEGER DEFAULT 0,
                     evidence_against INTEGER DEFAULT 0,
                     posterior_probability REAL DEFAULT 0.5,
-                    
+
                     -- Confidence interval (Wilson score)
                     confidence_low REAL DEFAULT 0.0,
                     confidence_high REAL DEFAULT 1.0,
-                    
+
                     -- Thresholds
                     confirmation_threshold REAL DEFAULT 0.85,
                     refutation_threshold REAL DEFAULT 0.15,
-                    
+
                     -- Status
                     status TEXT DEFAULT 'active',
                     source_type TEXT,
                     source_games TEXT,
-                    
+
                     -- Synthesis tracking
                     synthesized_operator_id TEXT,
                     synthesis_generation INTEGER,
-                    
+
                     -- Validation tracking
                     pre_synthesis_success_rate REAL,
                     post_synthesis_success_rate REAL,
                     validation_games INTEGER DEFAULT 0,
-                    
+
                     -- Timestamps
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1143,30 +1143,30 @@ CREATE TABLE collective_action_proposals (
                     session_id TEXT NOT NULL,
                     turn_number INTEGER NOT NULL,
                     proposing_agent_id TEXT NOT NULL,
-                    
+
                     -- Proposal details
                     proposed_action INTEGER NOT NULL,  -- ACTION1-7
                     action_coordinates TEXT,  -- JSON: coordinates if ACTION6
                     reasoning TEXT NOT NULL,  -- Why this action?
                     confidence REAL DEFAULT 0.5,  -- Agent's confidence in proposal
-                    
+
                     -- Voting results
                     votes_for INTEGER DEFAULT 0,
                     votes_against INTEGER DEFAULT 0,
                     votes_abstain INTEGER DEFAULT 0,
                     proposal_accepted BOOLEAN DEFAULT FALSE,
-                    
+
                     -- Execution results
                     was_executed BOOLEAN DEFAULT FALSE,
                     score_before REAL,
                     score_after REAL,
                     actual_effectiveness REAL,
-                    
+
                     -- Timestamps
                     proposed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     voted_at TIMESTAMP,
                     executed_at TIMESTAMP,
-                    
+
                     FOREIGN KEY (session_id) REFERENCES collective_reasoning_sessions(session_id),
                     FOREIGN KEY (proposing_agent_id) REFERENCES agents(agent_id)
                 );
@@ -1175,25 +1175,25 @@ CREATE TABLE collective_insights (
                     insight_id TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL,
                     generation INTEGER NOT NULL,
-                    
+
                     -- Insight details
                     insight_type TEXT NOT NULL,  -- 'pattern_recognition', 'strategy_hypothesis', 'failure_prediction'
                     insight_description TEXT NOT NULL,
                     contributing_agents TEXT,  -- JSON: agents who contributed
                     confidence_score REAL DEFAULT 0.5,
-                    
+
                     -- Validation
                     was_correct BOOLEAN,
                     evidence TEXT,  -- JSON: supporting evidence
-                    
+
                     -- Impact
                     actions_influenced INTEGER DEFAULT 0,
                     score_impact REAL DEFAULT 0.0,
-                    
+
                     -- Timestamps
                     emerged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     validated_at TIMESTAMP,
-                    
+
                     FOREIGN KEY (session_id) REFERENCES collective_reasoning_sessions(session_id)
                 );
 
@@ -1201,32 +1201,32 @@ CREATE TABLE collective_reasoning_sessions (
                     session_id TEXT PRIMARY KEY,
                     game_id TEXT NOT NULL,
                     generation INTEGER NOT NULL,
-                    
+
                     -- Participating agents
                     agent_ids TEXT NOT NULL,  -- JSON: list of agent IDs
                     agent_count INTEGER NOT NULL,
                     lead_agent_id TEXT,  -- Coordinator agent
-                    
+
                     -- Session configuration
                     reasoning_mode TEXT NOT NULL,  -- 'voting', 'consensus', 'specialization'
                     consensus_threshold REAL DEFAULT 0.6,
-                    
+
                     -- Session state
                     session_status TEXT DEFAULT 'active',  -- 'active', 'completed', 'failed'
                     current_turn INTEGER DEFAULT 0,
                     total_turns INTEGER DEFAULT 0,
-                    
+
                     -- Performance
                     initial_score REAL DEFAULT 0.0,
                     final_score REAL DEFAULT 0.0,
                     score_improvement REAL DEFAULT 0.0,
                     actions_taken INTEGER DEFAULT 0,
-                    
+
                     -- Collective dynamics
                     consensus_reached_count INTEGER DEFAULT 0,
                     disagreement_count INTEGER DEFAULT 0,
                     avg_confidence REAL DEFAULT 0.0,
-                    
+
                     -- Timestamps
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP
@@ -1236,16 +1236,16 @@ CREATE TABLE collective_votes (
                     vote_id TEXT PRIMARY KEY,
                     proposal_id TEXT NOT NULL,
                     voting_agent_id TEXT NOT NULL,
-                    
+
                     -- Vote details
                     vote_choice TEXT NOT NULL,  -- 'for', 'against', 'abstain'
                     vote_weight REAL DEFAULT 1.0,  -- Based on agent expertise
                     vote_reasoning TEXT,
                     confidence_in_vote REAL DEFAULT 0.5,
-                    
+
                     -- Timestamps
                     voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY (proposal_id) REFERENCES collective_action_proposals(proposal_id),
                     FOREIGN KEY (voting_agent_id) REFERENCES agents(agent_id)
                 );
@@ -1254,21 +1254,21 @@ CREATE TABLE collision_effects (
                 effect_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Interaction pattern
                 controlled_object_color INTEGER NOT NULL,
                 target_object_color INTEGER NOT NULL,
                 collision_type TEXT,  -- 'overlap', 'push', 'adjacent'
-                
+
                 -- Observed effect
                 effect_type TEXT NOT NULL,  -- 'target_disappears', 'target_moves', 'color_change', 'spawn_object', 'score_increase'
                 effect_details TEXT,        -- JSON with additional info
-                
+
                 -- Validation tracking
                 occurrence_count INTEGER DEFAULT 1,
                 confidence REAL DEFAULT 0.5,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, controlled_object_color, target_object_color, effect_type)
             );
 
@@ -1278,26 +1278,26 @@ CREATE TABLE collision_events (
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
                 action_number INTEGER,
-                
+
                 -- Controlled object that moved
                 controlled_object_color INTEGER NOT NULL,
                 controlled_from_x INTEGER,
                 controlled_from_y INTEGER,
                 controlled_to_x INTEGER,
                 controlled_to_y INTEGER,
-                
+
                 -- Object that was collided with
                 target_object_color INTEGER,
                 target_object_x INTEGER,
                 target_object_y INTEGER,
-                
+
                 -- Collision type
                 collision_type TEXT,  -- 'overlap', 'adjacent', 'push', 'same_cell'
-                
+
                 -- What happened after collision
                 effect_observed TEXT,  -- 'target_disappeared', 'target_moved', 'nothing', etc.
                 grid_changes_json TEXT,  -- Detailed changes
-                
+
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -1323,10 +1323,10 @@ CREATE TABLE composed_operators (
                 composition_type TEXT NOT NULL,
                 input_types TEXT,  -- JSON
                 output_type TEXT,
-                
+
                 -- Lifecycle
                 status TEXT DEFAULT 'cobbled',
-                
+
                 -- Validation stats
                 times_tested INTEGER DEFAULT 0,
                 successes INTEGER DEFAULT 0,
@@ -1334,24 +1334,24 @@ CREATE TABLE composed_operators (
                 success_rate REAL DEFAULT 0.0,
                 cross_game_rate REAL DEFAULT 0.0,
                 games_tested_on TEXT,  -- JSON list
-                
+
                 -- Genealogy
                 parent_operators TEXT,  -- JSON list of parent IDs
                 created_by_agent TEXT,
                 created_at_generation INTEGER DEFAULT 0,
-                
+
                 -- Competition
                 competes_with TEXT,  -- Primitive name if competing
                 wins_vs_primitive INTEGER DEFAULT 0,
                 losses_vs_primitive INTEGER DEFAULT 0,
-                
+
                 -- Optimization
                 complexity_score REAL DEFAULT 1.0,
                 was_simplified_to TEXT,  -- ID of simplified version
-                
+
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_tested_at TIMESTAMP, frontier_successes INTEGER DEFAULT 0, frontier_tests INTEGER DEFAULT 0, replay_contribution_cap REAL DEFAULT 10.0, replay_contribution_total REAL DEFAULT 0.0, weighted_competition_score REAL DEFAULT 0.0,
-                
+
                 FOREIGN KEY (created_by_agent) REFERENCES agents(agent_id)
             );
 
@@ -1405,19 +1405,19 @@ CREATE TABLE consciousness_logs (
         agent_id TEXT NOT NULL,
         game_id TEXT NOT NULL,
         action_number INTEGER NOT NULL,
-        
+
         -- What was logged
         log_type TEXT NOT NULL,            -- 'stream_confusion', 'observer_spawn', 'theory_transition', 'cross_transfer', 'surprise'
         log_text TEXT NOT NULL,            -- Human-readable consciousness report
-        
+
         -- Stream weights at time of log
         w_a REAL,                          -- Private memory weight
         w_b REAL,                          -- Collective wisdom weight
-        
+
         -- Context
         current_theory_stage TEXT,
         surprise_score REAL,
-        
+
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -1426,28 +1426,28 @@ CREATE TABLE control_transfer_events (
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
                 action_number INTEGER NOT NULL,
-                
+
                 -- What was controlled before
                 previous_object_color INTEGER,
                 previous_object_signature TEXT,
                 previous_object_center_x REAL,
                 previous_object_center_y REAL,
-                
+
                 -- What is controlled now
                 new_object_color INTEGER NOT NULL,
                 new_object_signature TEXT,
                 new_object_center_x REAL,
                 new_object_center_y REAL,
-                
+
                 -- What caused the transfer?
                 transfer_trigger_action TEXT,             -- ACTION6 click, automatic, etc.
                 transfer_trigger_coords TEXT,             -- Click coords if ACTION6
                 transfer_trigger_reason TEXT,             -- 'selection', 'automatic', 'collision', 'unknown'
-                
+
                 -- Confidence that this is a real control transfer (not just indirect causation)
                 transfer_confidence REAL DEFAULT 0.5,
                 verified_by_movement INTEGER DEFAULT 0,   -- 1 = confirmed new object responds to ACTION1-4
-                
+
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -1455,22 +1455,22 @@ CREATE TABLE control_transfer_patterns (
                 pattern_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Transfer pattern
                 transfer_trigger_action TEXT NOT NULL,    -- Usually ACTION6
                 target_object_color INTEGER,              -- Color of object that becomes controlled
                 target_object_signature TEXT,             -- Shape of object (for non-color identification)
                 transfer_conditions TEXT,                 -- JSON: what conditions enable this transfer
-                
+
                 -- Validation
                 occurrence_count INTEGER DEFAULT 1,
                 success_count INTEGER DEFAULT 1,          -- Times transfer was verified
                 confidence REAL DEFAULT 0.5,
-                
+
                 -- Timestamps
                 discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, transfer_trigger_action, target_object_color)
             );
 
@@ -1480,40 +1480,40 @@ CREATE TABLE counterfactual_scenarios (
                     game_id TEXT NOT NULL,
                     session_id TEXT NOT NULL,
                     generation INTEGER DEFAULT 0,
-                    
+
                     -- Original game (what actually happened)
                     actual_actions TEXT NOT NULL,  -- JSON: actual action sequence
                     actual_score REAL NOT NULL,
                     actual_outcome TEXT NOT NULL,  -- 'failed', 'partial'
-                    
+
                     -- Decision point (where things could have changed)
                     decision_point_index INTEGER NOT NULL,  -- Action index where divergence starts
                     decision_point_score REAL NOT NULL,
                     decision_point_context TEXT,  -- JSON: game state at decision point
-                    
+
                     -- Counterfactual (what if?)
                     counterfactual_type TEXT NOT NULL,  -- 'action_substitution', 'timing_variation', 'strategy_shift'
                     alternative_actions TEXT NOT NULL,  -- JSON: alternative action sequence
                     divergence_reason TEXT NOT NULL,  -- Why this alternative?
-                    
+
                     -- Predicted outcome
                     predicted_score REAL,
                     predicted_outcome TEXT,  -- 'likely_win', 'likely_improve', 'likely_same', 'likely_worse'
                     confidence_in_prediction REAL DEFAULT 0.5,
-                    
+
                     -- Validation (if tested)
                     was_tested BOOLEAN DEFAULT FALSE,
                     actual_test_score REAL,
                     prediction_accuracy REAL,
-                    
+
                     -- Learning value
                     learning_value REAL DEFAULT 0.5,  -- How valuable is this counterfactual?
                     priority REAL DEFAULT 0.5,  -- Should this be tested?
-                    
+
                     -- Timestamps
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     tested_at TIMESTAMP,
-                    
+
                     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
                 );
 
@@ -1521,15 +1521,15 @@ CREATE TABLE current_selection_tracking (
                 session_id TEXT NOT NULL,
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Currently selected object
                 selected_object_color INTEGER,
                 selected_object_coords TEXT,        -- "(x,y)" when selected
                 selection_action_index INTEGER,     -- Which action selected it
-                
+
                 -- Tracking
                 selection_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 PRIMARY KEY (session_id, game_id, level_number)
             );
 
@@ -1539,23 +1539,23 @@ CREATE TABLE curriculum_progress (
     stage_name TEXT NOT NULL,
     entered_stage TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     exited_stage TIMESTAMP,
-    
+
     -- Stage requirements
     required_win_rate REAL NOT NULL,
     achieved_win_rate REAL DEFAULT 0.0,
     required_transfer_rate REAL,
     achieved_transfer_rate REAL DEFAULT 0.0,
-    
+
     -- Stage performance
     games_played_in_stage INTEGER DEFAULT 0,
     games_won_in_stage INTEGER DEFAULT 0,
     rules_learned_in_stage INTEGER DEFAULT 0,
     successful_transfers_in_stage INTEGER DEFAULT 0,
-    
+
     -- Advancement
     stage_completed BOOLEAN DEFAULT FALSE,
     completion_timestamp TIMESTAMP,
-    
+
     PRIMARY KEY (agent_id, stage_number),
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
@@ -1564,21 +1564,21 @@ CREATE TABLE dangerous_objects (
                 object_id TEXT PRIMARY KEY,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 object_color INTEGER NOT NULL,
                 object_size INTEGER DEFAULT 1,
                 contact_type TEXT DEFAULT 'collision',
-                
+
                 fatal_action INTEGER,
                 player_color INTEGER,
-                
+
                 kill_count INTEGER DEFAULT 1,
                 safe_contact_count INTEGER DEFAULT 0,
                 danger_score REAL DEFAULT 0.8,
-                
+
                 suspected_instances INTEGER DEFAULT 0,
                 confirmed_kills INTEGER DEFAULT 0,
-                
+
                 discovered_at TEXT,
                 last_kill_at TEXT,
                 is_active INTEGER DEFAULT 1
@@ -1596,27 +1596,27 @@ CREATE TABLE death_cause_hypotheses (
                     hypothesis_id TEXT PRIMARY KEY,
                     game_type TEXT NOT NULL,
                     level_number INTEGER NOT NULL,
-                    
+
                     -- What we think caused the death
                     cause_type TEXT NOT NULL,  -- 'collision', 'proximity', 'timeout', 'score', 'unknown'
                     object_color INTEGER,      -- Color of suspected death object
                     object_pattern TEXT,       -- Shape signature or pattern description
                     object_position TEXT,      -- JSON: approximate position or region
-                    
+
                     -- Evidence
                     times_observed INTEGER DEFAULT 1,
                     times_survived INTEGER DEFAULT 0,  -- Times agent was near but lived
                     confidence REAL DEFAULT 0.3,
-                    
+
                     -- Context
                     avg_death_distance REAL,   -- Average distance to object at death
                     last_death_position TEXT,  -- JSON: where agent was when it died
                     contributing_agents TEXT,  -- JSON: list of agents that contributed data
-                    
+
                     -- Timestamps
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     UNIQUE(game_type, level_number, cause_type, object_color, object_pattern)
                 );
 
@@ -1626,17 +1626,17 @@ CREATE TABLE death_events (
                     level_number INTEGER NOT NULL,
                     agent_id TEXT NOT NULL,
                     generation INTEGER DEFAULT 0,
-                    
+
                     -- Death context
                     agent_position TEXT,       -- JSON: [x, y]
                     nearby_objects TEXT,       -- JSON: list of objects within death radius
                     action_before_death TEXT,  -- What action triggered death
                     frames_on_level INTEGER,   -- How long agent survived on this level
-                    
+
                     -- Classification
                     inferred_cause TEXT,       -- 'collision', 'timeout', 'unknown'
                     death_object_color INTEGER,
-                    
+
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -1644,22 +1644,22 @@ CREATE TABLE death_zones (
                     zone_id TEXT PRIMARY KEY,
                     game_type TEXT NOT NULL,
                     level_number INTEGER NOT NULL,
-                    
+
                     -- Spatial bounding box (grid coordinates)
                     x_min INTEGER NOT NULL,
                     x_max INTEGER NOT NULL,
                     y_min INTEGER NOT NULL,
                     y_max INTEGER NOT NULL,
-                    
+
                     -- What was at this location during death?
                     death_colors TEXT,              -- JSON: colors of objects at death location
                     object_signature TEXT,          -- Hash of object pattern that died here
-                    
+
                     -- Reliability tracking
                     death_count INTEGER DEFAULT 1,
                     survival_count INTEGER DEFAULT 0,  -- Times objects passed through safely
                     danger_score REAL DEFAULT 0.7,     -- death_count / (death_count + survival_count)
-                    
+
                     -- Metadata
                     discovered_at TEXT,
                     last_death_at TEXT,
@@ -1700,37 +1700,37 @@ CREATE TABLE detected_resource_counters (
                 counter_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Location (should be in UI region)
                 region_x INTEGER NOT NULL,
                 region_y INTEGER NOT NULL,
                 pixel_x INTEGER,                          -- Exact location
                 pixel_y INTEGER,
-                
+
                 -- Counter characteristics
                 counter_type TEXT DEFAULT 'unknown',      -- 'lives', 'moves', 'score', 'energy', 'unknown'
                 initial_value INTEGER,                    -- Value at level start
                 current_value INTEGER,                    -- Last observed value
                 min_observed INTEGER,                     -- Lowest value seen
                 max_observed INTEGER,                     -- Highest value seen
-                
+
                 -- Change behavior
                 change_direction TEXT,                    -- 'decreasing', 'increasing', 'both'
                 change_trigger TEXT,                      -- 'per_action', 'per_collision', 'per_time', 'unknown'
                 change_amount INTEGER DEFAULT 1,          -- Typical change per event
-                
+
                 -- Depletion consequence
                 depletion_consequence TEXT,               -- 'game_over', 'level_fail', 'lose_ability', 'unknown'
                 depletion_observed INTEGER DEFAULT 0,     -- Have we seen it hit 0?
-                
+
                 -- Validation
                 observation_count INTEGER DEFAULT 1,
                 confidence REAL DEFAULT 0.5,
-                
+
                 -- Timestamps
                 first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, region_x, region_y)
             );
 
@@ -1753,22 +1753,22 @@ CREATE TABLE discovered_patterns (
     pattern_name TEXT NOT NULL,
     pattern_type TEXT NOT NULL,            -- 'action_sequence', 'coordinate_cluster', 'color_pattern'
     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- Pattern definition
     pattern_signature TEXT NOT NULL,       -- JSON: abstract pattern description
     concrete_examples TEXT NOT NULL,       -- JSON: array of sequence_ids that match
     occurrence_count INTEGER DEFAULT 1,
     success_count INTEGER DEFAULT 1,
-    
+
     -- Effectiveness metrics
     success_rate REAL NOT NULL,            -- % of times pattern leads to win
     avg_score_achieved REAL NOT NULL,
     avg_efficiency REAL NOT NULL,
     confidence_score REAL NOT NULL,        -- statistical confidence
-    
+
     -- Application context
     applicable_game_types TEXT,            -- JSON: which game types this works on
-    
+
     -- Learning status
     validation_status TEXT DEFAULT 'hypothesis',  -- 'hypothesis', 'validated', 'invalidated'
     validation_games INTEGER DEFAULT 0,
@@ -1779,14 +1779,14 @@ CREATE TABLE ecosystem_health_snapshots (
     snapshot_id TEXT PRIMARY KEY,
     snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     generation INTEGER NOT NULL,
-    
+
     -- Knowledge metrics (the "database as organism")
     total_sequences INTEGER DEFAULT 0,
     total_patterns INTEGER DEFAULT 0,
     total_learned_rules INTEGER DEFAULT 0,
     unique_games_solved INTEGER DEFAULT 0,
     knowledge_diversity_index REAL DEFAULT 0.0,  -- Shannon entropy of pattern distribution
-    
+
     -- Information flow metrics (the "metabolism")
     sequences_created_this_gen INTEGER DEFAULT 0,
     sequences_validated_this_gen INTEGER DEFAULT 0,
@@ -1795,25 +1795,25 @@ CREATE TABLE ecosystem_health_snapshots (
     rules_transferred_this_gen INTEGER DEFAULT 0,
     knowledge_creation_rate REAL DEFAULT 0.0,  -- New discoveries per agent-game
     validation_rate REAL DEFAULT 0.0,  -- Successful validations / total attempts
-    
+
     -- Resilience metrics (the "immune system")
     critical_sequences_count INTEGER DEFAULT 0,  -- Sequences with >80% reliability
     orphan_sequences_count INTEGER DEFAULT 0,  -- Sequences with 0 validations
     redundancy_index REAL DEFAULT 0.0,  -- Avg validations per sequence
     knowledge_backup_ratio REAL DEFAULT 0.0,  -- % of knowledge with multiple agent carriers
-    
+
     -- Population metrics (temporary expressions)
     active_agents INTEGER DEFAULT 0,
     agent_diversity_index REAL DEFAULT 0.0,
     avg_agent_lifespan_generations REAL DEFAULT 0.0,
     agent_turnover_rate REAL DEFAULT 0.0,
-    
+
     -- Metabolic health indicators
     network_growth_rate REAL DEFAULT 0.0,  -- Knowledge growth vs population growth
     innovation_vs_exploitation REAL DEFAULT 0.5,  -- New vs reused sequences ratio
     transfer_learning_rate REAL DEFAULT 0.0,  -- Successful rule transfers per agent
     system_entropy REAL DEFAULT 0.0,  -- Overall disorder measure
-    
+
     -- Overall health assessment
     health_status TEXT DEFAULT 'unknown',  -- 'critical', 'poor', 'fair', 'good', 'excellent'
     health_score REAL DEFAULT 0.0  -- 0.0 to 1.0
@@ -1823,27 +1823,27 @@ CREATE TABLE ecosystem_metabolism_snapshots (
             snapshot_id TEXT PRIMARY KEY,
             generation INTEGER NOT NULL,
             snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            
+
             -- Total metabolic capacity (network ATP pool)
             total_actions_available INTEGER NOT NULL,
             total_actions_budgeted INTEGER NOT NULL,
             total_actions_spent INTEGER NOT NULL,
             total_actions_wasted INTEGER NOT NULL,
-            
+
             -- Resource distribution metrics
             gini_coefficient REAL DEFAULT 0.0,
             top_10_percent_share REAL DEFAULT 0.0,
             bottom_50_percent_share REAL DEFAULT 0.0,
-            
+
             -- Metabolic rates (network dynamics)
             action_creation_rate REAL DEFAULT 0.0,
             action_destruction_rate REAL DEFAULT 0.0,
             metabolic_efficiency REAL DEFAULT 0.0,
-            
+
             -- Network health indicators
             resource_scarcity_index REAL DEFAULT 0.0,
             budget_inflation_rate REAL DEFAULT 0.0,
-            
+
             -- Population economics
             active_agent_count INTEGER NOT NULL,
             agents_above_baseline INTEGER DEFAULT 0,
@@ -1864,16 +1864,16 @@ CREATE TABLE eliminated_click_coordinates (
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The coordinate that failed
                 click_x INTEGER NOT NULL,
                 click_y INTEGER NOT NULL,
-                
+
                 -- Evidence
                 reason TEXT NOT NULL,
                 test_count INTEGER DEFAULT 1,
                 consistent_failure BOOLEAN DEFAULT TRUE,
-                
+
                 -- Provenance/decay
                 source_attempt_id TEXT,
                 source_mode TEXT,
@@ -1881,9 +1881,9 @@ CREATE TABLE eliminated_click_coordinates (
                 decay_score REAL DEFAULT 0.0,
                 reliability REAL DEFAULT 0.5,
                 consensus REAL DEFAULT 0.0,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, click_x, click_y)
             );
 
@@ -1892,19 +1892,19 @@ CREATE TABLE frame_embeddings (
                 trace_id INTEGER NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The learned representation (128 floats = 512 bytes)
                 embedding BLOB NOT NULL,
-                
+
                 -- Context for weighted similarity
                 action_taken INTEGER,
                 score_delta REAL DEFAULT 0.0,
                 frame_changed BOOLEAN DEFAULT FALSE,
-                
+
                 -- Metadata
                 model_version TEXT DEFAULT 'v1',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                
+
                 FOREIGN KEY (trace_id) REFERENCES action_traces(id),
                 UNIQUE(trace_id)
             );
@@ -1941,25 +1941,25 @@ CREATE TABLE frontier_exploration_confidence (
             -- Key: one row per frontier level
             game_type TEXT NOT NULL,
             level_number INTEGER NOT NULL,
-            
+
             -- Exploration metrics
             unique_frames_visited INTEGER DEFAULT 0,
             transitions_learned INTEGER DEFAULT 0,
             dead_ends_found INTEGER DEFAULT 0,
             safe_paths_found INTEGER DEFAULT 0,
-            
+
             -- Confidence calculation
             -- coverage = transitions_learned / (frames * 7 actions possible)
             coverage_estimate REAL DEFAULT 0.0,
             confidence_score REAL DEFAULT 0.0,  -- 0.0 = unknown, 1.0 = fully mapped
-            
+
             -- Strategy recommendation
             exploration_mode TEXT DEFAULT 'random',  -- 'random', 'systematic', 'exploit'
-            
+
             -- Metadata
             last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             total_attempts INTEGER DEFAULT 0,
-            
+
             PRIMARY KEY (game_type, level_number)
         );
 
@@ -1968,23 +1968,23 @@ CREATE TABLE frontier_landmarks (
             game_type TEXT NOT NULL,
             level_number INTEGER NOT NULL,
             landmark_hash TEXT NOT NULL,
-            
+
             -- Landmark characteristics
             landmark_type TEXT NOT NULL,  -- 'wall', 'goal', 'boundary', 'pattern'
             position_x INTEGER,
             position_y INTEGER,
             color_signature TEXT,         -- JSON: dominant colors
             shape_signature TEXT,         -- JSON: bounding box, area
-            
+
             -- Stability metrics
             times_observed INTEGER DEFAULT 1,
             frames_present_in INTEGER DEFAULT 1,
             stability_score REAL DEFAULT 1.0,  -- 1.0 = always present, 0.0 = never
-            
+
             -- Metadata
             first_observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            
+
             PRIMARY KEY (game_type, level_number, landmark_hash)
         );
 
@@ -1994,20 +1994,20 @@ CREATE TABLE frontier_level_topology (
             level_number INTEGER NOT NULL,
             from_frame_hash TEXT NOT NULL,
             action_taken INTEGER NOT NULL,
-            
+
             -- Result of this transition
             to_frame_hash TEXT NOT NULL,
-            
+
             -- Statistics
             times_observed INTEGER DEFAULT 1,
             times_resulted_in_death INTEGER DEFAULT 0,
             times_resulted_in_score INTEGER DEFAULT 0,
             avg_score_delta REAL DEFAULT 0.0,
-            
+
             -- Metadata
             first_observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            
+
             PRIMARY KEY (game_type, level_number, from_frame_hash, action_taken)
         );
 
@@ -2015,21 +2015,21 @@ CREATE TABLE frustration_quorum_events (
                     event_id TEXT PRIMARY KEY,
                     generation INTEGER NOT NULL,
                     event_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     -- Quorum metrics
                     total_agents INTEGER NOT NULL,
                     frustrated_agents INTEGER NOT NULL,
                     frustration_ratio REAL NOT NULL,
                     quorum_reached BOOLEAN NOT NULL,
-                    
+
                     -- Trigger details
                     desperation_signal_id TEXT,  -- Signal emitted if quorum reached
                     signal_strength REAL,
-                    
+
                     -- Network response
                     parameter_adjustments TEXT,  -- JSON: what changed
                     response_timestamp TIMESTAMP,
-                    
+
                     -- Outcome tracking
                     frustration_resolved BOOLEAN DEFAULT FALSE,
                     resolution_generation INTEGER,
@@ -2040,21 +2040,21 @@ CREATE TABLE frustration_resolutions (
                     resolution_id TEXT PRIMARY KEY,
                     quorum_event_id TEXT NOT NULL,
                     generation INTEGER NOT NULL,
-                    
+
                     -- Strategy applied
                     strategy_type TEXT NOT NULL,  -- 'increase_mutation', 'boost_exploration', 'reset_population', etc.
                     strategy_parameters TEXT NOT NULL,  -- JSON
-                    
+
                     -- Effectiveness
                     agents_affected INTEGER DEFAULT 0,
                     frustration_before REAL NOT NULL,
                     frustration_after REAL,
                     resolution_successful BOOLEAN,
-                    
+
                     -- Timestamps
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     measured_at TIMESTAMP,
-                    
+
                     FOREIGN KEY (quorum_event_id) REFERENCES frustration_quorum_events(event_id)
                 );
 
@@ -2062,20 +2062,20 @@ CREATE TABLE game_action_budgets (
                     budget_id TEXT PRIMARY KEY,
                     game_type TEXT NOT NULL,
                     level_number INTEGER NOT NULL,
-                    
+
                     -- Learned budget range (not fixed - some games give MORE time for good play)
                     min_actions INTEGER DEFAULT 0,
                     max_actions INTEGER DEFAULT 0,
                     avg_actions REAL DEFAULT 0.0,
-                    
+
                     -- Observation counts
                     observations INTEGER DEFAULT 0,
                     level_wins INTEGER DEFAULT 0,
                     game_overs INTEGER DEFAULT 0,
-                    
+
                     -- Confidence (degrades for later levels with less data)
                     confidence REAL DEFAULT 0.0,
-                    
+
                     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(game_type, level_number)
                 );
@@ -2099,53 +2099,53 @@ CREATE TABLE game_lessons_learned (
                     game_type TEXT NOT NULL,
                     game_id TEXT NOT NULL,
                     generation INTEGER DEFAULT 0,
-                    
+
                     -- The lesson
                     lesson_text TEXT NOT NULL,  -- Human-readable lesson
                     lesson_type TEXT NOT NULL,  -- 'avoid', 'try', 'pattern', 'strategy'
-                    
+
                     -- Context
                     final_score REAL NOT NULL,
                     was_win BOOLEAN DEFAULT FALSE,
                     action_count INTEGER DEFAULT 0,
                     key_action TEXT,  -- The action this lesson relates to (if any)
-                    
+
                     -- Validation
                     times_retrieved INTEGER DEFAULT 0,
                     times_helped INTEGER DEFAULT 0,  -- Did following this lesson help?
                     confidence REAL DEFAULT 0.5,
-                    
+
                     -- Timestamps
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_retrieved_at TIMESTAMP, occurrence_count INTEGER DEFAULT 1, severity INTEGER DEFAULT 1, caused_death BOOLEAN DEFAULT FALSE, caused_early_end BOOLEAN DEFAULT FALSE, lesson_hash TEXT, reported_to_cods BOOLEAN DEFAULT FALSE, cods_primitive_unlocked TEXT, last_occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
                 );
 
 CREATE TABLE game_pattern_links (
                 link_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                
+
                 -- Game-specific context
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Link to universal pattern
                 pattern_id INTEGER NOT NULL,
                 pattern_signature TEXT NOT NULL,
-                
+
                 -- Local validation (within this specific game)
                 local_observations INTEGER DEFAULT 0,
                 local_confirmations INTEGER DEFAULT 0,
                 local_confidence REAL DEFAULT 0.5,
-                
+
                 -- Did transfer work for this game?
                 was_transferred INTEGER DEFAULT 0,    -- 1 if pattern was used from another game
                 transfer_outcome TEXT,                -- 'success', 'failure', 'partial'
-                
+
                 -- Timestamps
                 first_linked DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, pattern_id),
                 FOREIGN KEY (pattern_id) REFERENCES universal_object_patterns(pattern_id)
             );
@@ -2185,10 +2185,10 @@ CREATE TABLE game_visual_analysis (
     agent_id TEXT NOT NULL,
     frame_number INTEGER NOT NULL,
     analysis_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- Frame data
     frame_data TEXT NOT NULL,              -- JSON: the actual frame
-    
+
     -- Visual features (from visual_reasoning_engine)
     symmetry_detected TEXT,                -- JSON: symmetry types and confidence
     patterns_found TEXT,                   -- JSON: repeating patterns
@@ -2196,13 +2196,13 @@ CREATE TABLE game_visual_analysis (
     shapes_detected TEXT,                  -- JSON: shape information
     spatial_relations TEXT,                -- JSON: relationships between objects
     complexity_metrics TEXT,               -- JSON: complexity scores
-    
+
     -- Transformation suggestions
     likely_transformations TEXT,           -- JSON: suggested actions based on visual analysis
-    
+
     -- Used for rule learning
     used_in_rule_id TEXT,
-    
+
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
     FOREIGN KEY (used_in_rule_id) REFERENCES learned_rules(rule_id)
 );
@@ -2212,24 +2212,24 @@ CREATE TABLE gametype_primitive_theory (
                     game_type TEXT NOT NULL,
                     primitive_or_operator TEXT NOT NULL,
                     is_operator BOOLEAN DEFAULT FALSE,
-                    
+
                     -- Effectiveness tracking
                     times_used INTEGER DEFAULT 0,
                     times_successful INTEGER DEFAULT 0,
                     success_rate REAL DEFAULT 0.0,
                     total_score_contribution REAL DEFAULT 0.0,
-                    
+
                     -- Context - which levels was this useful on?
                     levels_effective TEXT DEFAULT '[]',
-                    
+
                     -- Network consensus
                     agents_validated INTEGER DEFAULT 0,
                     network_confidence REAL DEFAULT 0.5,
-                    
+
                     -- Timestamps
                     first_observed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     UNIQUE(game_type, primitive_or_operator)
                 );
 
@@ -2270,7 +2270,7 @@ CREATE TABLE grid_region_classification (
                 classification_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Region bounds (divide grid into macro-regions)
                 region_x INTEGER NOT NULL,                -- 0-7 (divides into 8x8 regions)
                 region_y INTEGER NOT NULL,                -- 0-7
@@ -2278,25 +2278,25 @@ CREATE TABLE grid_region_classification (
                 region_max_pixel_x INTEGER,
                 region_min_pixel_y INTEGER,
                 region_max_pixel_y INTEGER,
-                
+
                 -- Classification
                 classification TEXT DEFAULT 'unknown',    -- 'playfield', 'ui', 'decoration', 'unknown'
                 classification_reason TEXT,               -- Why this classification
-                
+
                 -- Evidence tracking
                 total_observations INTEGER DEFAULT 0,     -- How many times observed
                 times_changed INTEGER DEFAULT 0,          -- How many times content changed
                 times_responded_to_action INTEGER DEFAULT 0,  -- Changes correlated with actions
                 times_symbolic_change INTEGER DEFAULT 0,  -- Small isolated changes (counters)
                 contains_self_object INTEGER DEFAULT 0,   -- Ever contained the controlled object
-                
+
                 -- Confidence
                 confidence REAL DEFAULT 0.5,
-                
+
                 -- Timestamps
                 first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, region_x, region_y)
             );
 
@@ -2322,26 +2322,26 @@ CREATE TABLE horizontal_transfer_events (
                 donor_agent_id TEXT NOT NULL,
                 recipient_agent_id TEXT NOT NULL,
                 generation INTEGER NOT NULL,
-                
+
                 -- Transfer classification
                 transfer_type TEXT NOT NULL,  -- 'layer_1_genome', 'layer_2_epigenetic', 'layer_3_somatic'
                 transfer_layer INTEGER NOT NULL,  -- 1, 2, or 3
-                
+
                 -- Emotional compatibility (Phase 4.5 enhancement)
                 emotional_compatibility REAL NOT NULL,
                 success_probability REAL NOT NULL,
                 transfer_successful BOOLEAN NOT NULL,
-                
+
                 -- Transfer content and results
                 knowledge_content TEXT,  -- JSON: what was transferred
                 emotional_context TEXT,  -- JSON: emotional state during transfer
                 knowledge_transferred BOOLEAN DEFAULT FALSE,
                 performance_impact REAL DEFAULT 0.0,  -- Recipient performance change
-                
+
                 -- Metadata
                 transfer_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 notes TEXT,
-                
+
                 FOREIGN KEY (donor_agent_id) REFERENCES agents(agent_id),
                 FOREIGN KEY (recipient_agent_id) REFERENCES agents(agent_id)
             );
@@ -2363,55 +2363,55 @@ CREATE TABLE i_thread_episodic_memories (
                     game_type TEXT NOT NULL,
                     game_id TEXT,
                     level_number INTEGER DEFAULT 1,
-                    
+
                     -- Episode classification
                     episode_type TEXT NOT NULL,  -- 'breakthrough', 'frustration', 'surprise', 'validation', 'failure', 'mastery'
                     summary TEXT NOT NULL,  -- Natural language description
-                    
+
                     -- Emotional/significance markers
                     emotional_valence REAL DEFAULT 0.0,  -- -1.0 to +1.0
                     significance REAL DEFAULT 0.5,  -- 0.0 to 1.0
-                    
+
                     -- Learning content
                     belief_formed TEXT,  -- "Corners matter in maze games"
                     rule_discovered TEXT,  -- "click_corner -> reveal_path"
-                    
+
                     -- Stream context at time of episode
                     stream_source TEXT DEFAULT 'stream_a',
                     w_a_at_time REAL DEFAULT 0.5,
                     w_b_at_time REAL DEFAULT 0.5,
-                    
+
                     -- Retrieval tracking
                     times_recalled INTEGER DEFAULT 0,
                     last_recalled DATETIME,
-                    
+
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
                 );
 
 CREATE TABLE i_thread_history (
                     history_id TEXT PRIMARY KEY,
                     agent_id TEXT NOT NULL,
-                    
+
                     -- Weight state
                     w_a_before REAL,
                     w_b_before REAL,
                     w_a_after REAL,
                     w_b_after REAL,
-                    
+
                     -- Learning event
                     event_type TEXT,  -- 'conflict_resolution', 'outcome_learning', 'role_reset'
                     chosen_source TEXT,  -- 'stream_a', 'stream_b', 'synthesis'
                     outcome TEXT,  -- 'positive', 'negative', 'neutral'
                     conflict_score REAL,
                     surprise_score REAL,
-                    
+
                     -- Context
                     game_id TEXT,
                     level_number INTEGER,
                     action_taken TEXT,
-                    
+
                     -- Tracking
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
@@ -2421,29 +2421,29 @@ CREATE TABLE indirect_causation_events (
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
                 action_number INTEGER NOT NULL,
-                
+
                 -- The controlled object (I still control this)
                 controlled_object_color INTEGER NOT NULL,
                 controlled_action TEXT NOT NULL,          -- What action I took (ACTION1-4)
                 controlled_movement_x REAL,               -- How controlled object moved
                 controlled_movement_y REAL,
-                
+
                 -- The affected object (I DON'T control this, but my action affected it)
                 affected_object_color INTEGER NOT NULL,
                 affected_effect_type TEXT,                -- 'moved', 'disappeared', 'appeared', 'color_changed', 'transformed'
                 affected_movement_x REAL,                 -- If moved, how much?
                 affected_movement_y REAL,
                 affected_details TEXT,                    -- JSON with before/after details
-                
+
                 -- Causation type
                 causation_type TEXT,                      -- 'collision', 'trigger', 'push', 'remote'
                 causation_distance REAL,                  -- Distance between controlled and affected
-                
+
                 -- Confidence this is indirect causation (not control transfer)
                 -- High if controlled object still responds to subsequent actions
                 confidence REAL DEFAULT 0.5,
                 verified_still_controlled INTEGER DEFAULT 0,  -- 1 = confirmed I still control original
-                
+
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -2452,18 +2452,18 @@ CREATE TABLE inferred_beliefs (
                     sequence_id TEXT NOT NULL,
                     game_id TEXT NOT NULL,
                     level_number INTEGER NOT NULL,
-                    
+
                     -- Core beliefs
                     self_model_required TEXT,
                     world_model_required TEXT,
                     working_theory_required TEXT,
-                    
+
                     -- Q1-Q5 inferences (JSON)
                     inferences TEXT,
-                    
+
                     -- Resonance detection
                     pattern_hash TEXT,
-                    
+
                     -- Metadata
                     action_count INTEGER,
                     efficiency REAL,
@@ -2471,7 +2471,7 @@ CREATE TABLE inferred_beliefs (
                     validation_count INTEGER DEFAULT 1,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
                 );
 
@@ -2479,34 +2479,34 @@ CREATE TABLE inferred_goal_states (
                 goal_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Goal type
-                goal_type TEXT NOT NULL,                  -- 'clear_color', 'reach_position', 'match_pattern', 
+                goal_type TEXT NOT NULL,                  -- 'clear_color', 'reach_position', 'match_pattern',
                                                           -- 'survive', 'collect_all', 'transform', 'unknown'
-                
+
                 -- Goal parameters (depends on goal_type)
                 goal_params TEXT,                         -- JSON: {color_to_clear, position_to_reach, pattern_hash, etc.}
-                
+
                 -- How was this goal inferred?
                 inference_method TEXT,                    -- 'level_end_analysis', 'score_correlation', 'network_wisdom'
                 inference_evidence TEXT,                  -- JSON: evidence supporting this inference
-                
+
                 -- Goal progress tracking (for agents to use)
                 progress_metric TEXT,                     -- How to measure progress toward this goal
                                                           -- e.g., "count of color X remaining" or "distance to position"
-                
+
                 -- Validation
                 times_validated INTEGER DEFAULT 1,        -- Times this goal was confirmed by level wins
                 confidence REAL DEFAULT 0.5,
-                
+
                 -- Is the goal visible or abstract?
                 is_visible INTEGER DEFAULT 0,             -- 1 = goal object exists on grid
                 goal_object_color INTEGER,                -- If visible, what color is the goal?
-                
+
                 -- Timestamps
                 discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, goal_type, goal_params)
             );
 
@@ -2514,41 +2514,41 @@ CREATE TABLE interaction_triggers (
                 trigger_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The triggering action
                 trigger_action TEXT NOT NULL,         -- ACTION1-7
                 trigger_position_x INTEGER,           -- Where action was taken (for ACTION6)
                 trigger_position_y INTEGER,
                 trigger_object_color INTEGER,         -- Object that was interacted with
                 trigger_interaction_type TEXT,        -- 'collision', 'selection', 'click', 'adjacent'
-                
+
                 -- The observed effect (can be anywhere on the grid)
                 effect_position_x INTEGER,            -- Where effect happened
                 effect_position_y INTEGER,
                 effect_object_color INTEGER,          -- Object that was affected
-                effect_type TEXT NOT NULL,            -- 'color_change', 'disappear', 'appear', 'move', 
+                effect_type TEXT NOT NULL,            -- 'color_change', 'disappear', 'appear', 'move',
                                                       -- 'size_change', 'shape_change', 'become_controllable',
                                                       -- 'become_selectable', 'score_increase'
                 effect_details TEXT,                  -- JSON with before/after values
-                
+
                 -- Distance between trigger and effect (remote effects are interesting)
                 effect_distance REAL,                 -- Manhattan distance from trigger to effect
-                
+
                 -- Consistency tracking (key to distinguishing causal from coincidental)
                 occurrence_count INTEGER DEFAULT 1,
                 consistent_count INTEGER DEFAULT 1,   -- Times effect matched exactly
                 inconsistent_count INTEGER DEFAULT 0, -- Times expected effect didn't happen
                 confidence REAL DEFAULT 0.5,
-                
+
                 -- Timestamps
                 first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 -- Deprecation tracking (for safe_cleanup.py)
                 is_active INTEGER DEFAULT 1,              -- 0 = deprecated (stale or low confidence)
                 last_observed_generation INTEGER DEFAULT 0, -- For staleness detection
-                
-                UNIQUE(game_type, level_number, trigger_action, trigger_object_color, 
+
+                UNIQUE(game_type, level_number, trigger_action, trigger_object_color,
                        effect_object_color, effect_type)
             );
 
@@ -2596,20 +2596,20 @@ CREATE TABLE knowledge_graph_edges (
     source_knowledge_type TEXT NOT NULL,  -- 'sequence', 'pattern', 'rule'
     target_knowledge_type TEXT NOT NULL,
     edge_type TEXT NOT NULL,  -- 'builds_on', 'contradicts', 'generalizes', 'specializes'
-    
+
     -- Edge strength
     confidence REAL DEFAULT 0.5,
     evidence_count INTEGER DEFAULT 1,
-    
+
     -- Discovery
     discovered_by_agent TEXT,
     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     discovered_generation INTEGER,
-    
+
     -- Validation
     validated BOOLEAN DEFAULT FALSE,
     validation_count INTEGER DEFAULT 0,
-    
+
     FOREIGN KEY (discovered_by_agent) REFERENCES agents(agent_id)
 );
 
@@ -2618,21 +2618,21 @@ CREATE TABLE knowledge_propagation_chains (
                 origin_agent_id TEXT NOT NULL,
                 knowledge_type TEXT NOT NULL,  -- 'sequence', 'sensation_mapping', 'pattern', etc.
                 knowledge_identifier TEXT NOT NULL,  -- sequence_id, pattern_id, etc.
-                
+
                 -- Chain tracking
                 chain_length INTEGER DEFAULT 1,
                 current_carriers INTEGER DEFAULT 1,
                 max_carriers_reached INTEGER DEFAULT 1,
-                
+
                 -- Performance tracking
                 avg_performance_improvement REAL DEFAULT 0.0,
                 total_games_won_with_knowledge INTEGER DEFAULT 0,
-                
+
                 -- Metadata
                 chain_start_generation INTEGER NOT NULL,
                 last_transfer_generation INTEGER,
                 is_active BOOLEAN DEFAULT TRUE,
-                
+
                 FOREIGN KEY (origin_agent_id) REFERENCES agents(agent_id)
             );
 
@@ -2640,29 +2640,29 @@ CREATE TABLE knowledge_redundancy (
     sequence_id TEXT PRIMARY KEY,
     discovery_timestamp TIMESTAMP,
     discovery_generation INTEGER,
-    
+
     -- Backup metrics (how many agents know this)
     agents_who_know INTEGER DEFAULT 1,  -- How many agents have used this successfully
     agent_carriers TEXT,  -- JSON: list of agent IDs who successfully used this
     validation_attempts INTEGER DEFAULT 0,
     successful_validations INTEGER DEFAULT 0,
-    
+
     -- Criticality assessment
     games_solved_by_this INTEGER DEFAULT 0,  -- How many unique games
     alternative_solutions_exist INTEGER DEFAULT 0,  -- Redundancy at game level
     criticality_score REAL DEFAULT 0.0,  -- How critical is this to network survival
     is_viral_core BOOLEAN DEFAULT FALSE,  -- Essential knowledge that must not be lost
-    
+
     -- Persistence tracking
     generations_survived INTEGER DEFAULT 0,  -- How many generations has this knowledge persisted
     last_used_generation INTEGER DEFAULT 0,
     last_used_timestamp TIMESTAMP,
     risk_of_loss REAL DEFAULT 1.0,  -- Probability of being forgotten (0=safe, 1=at risk)
-    
+
     -- Network contribution
     times_taught_to_others INTEGER DEFAULT 0,
     network_enrichment_value REAL DEFAULT 0.0,
-    
+
     FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
 );
 
@@ -2680,29 +2680,29 @@ CREATE TABLE learned_rules (
     source_game_id TEXT NOT NULL,          -- Game where rule was learned
     rule_name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- Rule definition
     preconditions TEXT NOT NULL,           -- JSON: visual conditions that must be met
     action_template TEXT NOT NULL,         -- JSON: sequence of actions to take
     expected_outcome TEXT NOT NULL,        -- 'win', 'progress', 'score_increase'
-    
+
     -- Confidence and success tracking
     confidence REAL DEFAULT 0.5,
     success_count INTEGER DEFAULT 0,
     failure_count INTEGER DEFAULT 0,
     success_rate REAL DEFAULT 0.0,         -- success / (success + failure)
-    
+
     -- Transfer learning
     applicable_games TEXT,                 -- JSON: list of game_ids where rule works
     transferred_successfully BOOLEAN DEFAULT 0,
     transfer_attempts INTEGER DEFAULT 0,
     successful_transfers INTEGER DEFAULT 0,
-    
+
     -- Rule characteristics
     visual_signature TEXT,                 -- Compact signature for quick matching
     complexity_level TEXT,                 -- 'simple', 'moderate', 'complex'
     generality_score REAL DEFAULT 0.0,     -- How many games rule works on
-    
+
     last_updated TIMESTAMP,
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
@@ -2745,42 +2745,42 @@ CREATE TABLE level_mastery (
                 mastery_id TEXT PRIMARY KEY,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Diversity Metrics (max 30 points)
                 unique_sequence_count INTEGER DEFAULT 0,
                 diversity_score REAL DEFAULT 0.0,
-                
+
                 -- Ablation Metrics (max 30 points)
                 ablation_tests_total INTEGER DEFAULT 0,
                 ablation_tests_passed INTEGER DEFAULT 0,
                 ablation_success_rate REAL DEFAULT 0.0,
                 ablation_score REAL DEFAULT 0.0,
-                
+
                 -- Consistency Metrics (max 20 points)
                 unique_agents_succeeded INTEGER DEFAULT 0,
                 cross_agent_success_rate REAL DEFAULT 0.0,
                 consistency_score REAL DEFAULT 0.0,
-                
+
                 -- Efficiency Metrics (max 20 points)
                 best_actions_ever INTEGER,
                 best_actions_generation INTEGER,
                 improvement_count INTEGER DEFAULT 0,
                 efficiency_score REAL DEFAULT 0.0,
-                
+
                 -- Aggregate
                 total_mastery_score REAL DEFAULT 0.0,
                 mastery_tier TEXT DEFAULT 'novice',
-                
+
                 -- Decay tracking
                 last_decay_at TIMESTAMP,
                 decay_count INTEGER DEFAULT 0,
-                
+
                 -- Timestamps
                 first_win_at TIMESTAMP,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_updated_generation INTEGER DEFAULT 0,
                 tier_upgraded_at TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number)
             );
 
@@ -2815,16 +2815,16 @@ CREATE TABLE metacognitive_assumptions (
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The assumption
                 assumption_text TEXT NOT NULL,
                 assumption_type TEXT NOT NULL,  -- 'control', 'goal', 'obstacle', 'rule'
-                
+
                 -- Status
                 is_valid BOOLEAN DEFAULT NULL,  -- NULL = untested, TRUE/FALSE = tested
                 tested_at DATETIME,
                 test_result TEXT,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             , source_attempt_id TEXT, source_mode TEXT, last_observed_generation INTEGER DEFAULT 0, decay_score REAL DEFAULT 0.0, reliability REAL DEFAULT 0.5, consensus REAL DEFAULT 0.0);
 
@@ -2833,16 +2833,16 @@ CREATE TABLE metacognitive_eliminations (
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- What was eliminated
                 eliminated_action TEXT NOT NULL,  -- "ACTION1", "ACTION2", etc.
                 reason TEXT NOT NULL,
                 confidence REAL DEFAULT 0.8,
-                
+
                 -- Evidence
                 test_count INTEGER DEFAULT 1,
                 consistent_failure BOOLEAN DEFAULT TRUE,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             , source_attempt_id TEXT, source_mode TEXT, last_observed_generation INTEGER DEFAULT 0, decay_score REAL DEFAULT 0.0, reliability REAL DEFAULT 0.5, consensus REAL DEFAULT 0.0);
 
@@ -2851,16 +2851,16 @@ CREATE TABLE metacognitive_failure_patterns (
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The pattern
                 common_factor TEXT NOT NULL,  -- "all failures involved color_3"
                 failure_count INTEGER NOT NULL,
                 example_actions TEXT,  -- JSON list of actions that failed
-                
+
                 -- Insight derived
                 insight TEXT,
                 insight_applied BOOLEAN DEFAULT FALSE,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             , source_attempt_id TEXT, source_mode TEXT, last_observed_generation INTEGER DEFAULT 0, decay_score REAL DEFAULT 0.0, reliability REAL DEFAULT 0.5, consensus REAL DEFAULT 0.0);
 
@@ -2869,20 +2869,20 @@ CREATE TABLE metacognitive_insights (
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The insight
                 key_insight TEXT NOT NULL,
                 winning_strategy TEXT NOT NULL,
-                
+
                 -- What led to the breakthrough
                 breakthrough_action TEXT,
                 theory_at_breakthrough TEXT,
                 actions_before_breakthrough INTEGER,
-                
+
                 -- Transferability
                 is_transferable BOOLEAN DEFAULT FALSE,
                 applicable_to TEXT,  -- JSON list of similar game types
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             , source_attempt_id TEXT, source_mode TEXT, last_observed_generation INTEGER DEFAULT 0, decay_score REAL DEFAULT 0.0, reliability REAL DEFAULT 0.5, consensus REAL DEFAULT 0.0);
 
@@ -2891,17 +2891,17 @@ CREATE TABLE metacognitive_predictions (
                 agent_id TEXT NOT NULL,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The prediction
                 theory_text TEXT NOT NULL,
                 predicted_outcome TEXT NOT NULL,  -- "score will increase", "object will move right"
                 action_taken TEXT NOT NULL,
-                
+
                 -- Outcome
                 actual_outcome TEXT,
                 prediction_correct BOOLEAN,
                 theory_revised BOOLEAN DEFAULT FALSE,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             , source_attempt_id TEXT, source_mode TEXT, last_observed_generation INTEGER DEFAULT 0, decay_score REAL DEFAULT 0.0, reliability REAL DEFAULT 0.5, consensus REAL DEFAULT 0.0);
 
@@ -2911,22 +2911,22 @@ CREATE TABLE metacognitive_questions (
         game_id TEXT,
         level_number INTEGER,
         action_number INTEGER,
-        
+
         -- Question content
         question_type TEXT NOT NULL,       -- Q1-Q9 from framework
         query TEXT NOT NULL,
         urgency TEXT DEFAULT 'medium',     -- low, medium, high, critical
-        
+
         -- Enforcement (questions with teeth)
         blocks_action BOOLEAN DEFAULT FALSE,
         score_modifier REAL DEFAULT 1.0,
         allowed_actions TEXT,              -- JSON array of allowed action types when blocked
-        
+
         -- Resolution
         answered BOOLEAN DEFAULT FALSE,
         answer TEXT,
         led_to_theory_revision BOOLEAN DEFAULT FALSE,
-        
+
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -2945,24 +2945,24 @@ CREATE TABLE navigation_state_history (
         agent_id TEXT NOT NULL,
         game_id TEXT NOT NULL,
         generation INTEGER NOT NULL,
-        
+
         -- State tracking
         navigation_state REAL NOT NULL, -- Internal emotional state
         dominant_emotion TEXT, -- 'confident', 'frustrated', 'curious', 'cautious'
-        
+
         -- Context when state was recorded
         game_score INTEGER DEFAULT 0,
         actions_taken INTEGER DEFAULT 0,
         recent_success_rate REAL DEFAULT NULL,
-        
+
         -- State change triggers
         state_change_trigger TEXT, -- What caused this emotional state
         previous_state REAL DEFAULT NULL,
         state_change_magnitude REAL DEFAULT NULL,
-        
+
         -- Timestamp
         state_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        
+
         FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
     );
 
@@ -2972,32 +2972,32 @@ CREATE TABLE near_miss_games (
                     game_id TEXT NOT NULL,
                     session_id TEXT NOT NULL,
                     generation INTEGER DEFAULT 0,
-                    
+
                     -- Score details
                     final_score REAL NOT NULL,
                     win_threshold REAL DEFAULT 20.0,
                     score_gap REAL NOT NULL,  -- How many points away from win
                     near_miss_category TEXT NOT NULL,  -- 'near_win', 'strong_partial', 'partial_progress'
-                    
+
                     -- Game execution
                     total_actions INTEGER NOT NULL,
                     actions_sequence TEXT,  -- JSON: action sequence taken
                     coordinates_used TEXT,  -- JSON: coordinates for ACTION6
                     frame_states TEXT,  -- JSON: key frame states during game
-                    
+
                     -- Analysis
                     what_worked TEXT,  -- JSON: successful patterns/actions
                     what_failed TEXT,  -- JSON: failure points
                     missing_elements TEXT,  -- JSON: what was missing for win
                     critical_mistakes TEXT,  -- JSON: identified mistakes
-                    
+
                     -- Recommendations
                     improvement_suggestions TEXT,  -- JSON: specific suggestions
                     estimated_actions_to_win INTEGER,  -- How many more actions might win
-                    
+
                     -- Timestamps
                     analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
                 );
 
@@ -3005,27 +3005,27 @@ CREATE TABLE near_miss_insights (
                     insight_id TEXT PRIMARY KEY,
                     agent_id TEXT NOT NULL,
                     generation INTEGER NOT NULL,
-                    
+
                     -- Insight details
                     insight_type TEXT NOT NULL,  -- 'action_timing', 'coordinate_selection', 'strategy_flaw'
                     insight_description TEXT NOT NULL,
                     supporting_evidence TEXT,  -- JSON: near_miss_ids that support this
-                    
+
                     -- Actionability
                     is_actionable BOOLEAN DEFAULT TRUE,
                     recommended_change TEXT,  -- JSON: specific behavior changes
                     priority REAL DEFAULT 0.5,  -- 0-1, higher = more important
-                    
+
                     -- Validation
                     times_applied INTEGER DEFAULT 0,
                     success_count INTEGER DEFAULT 0,
                     failure_count INTEGER DEFAULT 0,
                     effectiveness_score REAL DEFAULT 0.0,
-                    
+
                     -- Timestamps
                     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_applied TIMESTAMP,
-                    
+
                     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
                 );
 
@@ -3033,20 +3033,20 @@ CREATE TABLE near_miss_patterns (
                     pattern_id TEXT PRIMARY KEY,
                     pattern_type TEXT NOT NULL,  -- 'action_sequence', 'coordinate_pattern', 'strategy'
                     pattern_description TEXT NOT NULL,
-                    
+
                     -- Pattern details
                     pattern_signature TEXT NOT NULL,  -- JSON: pattern definition
                     game_types_affected TEXT,  -- JSON: which game types show this
-                    
+
                     -- Occurrence
                     occurrence_count INTEGER DEFAULT 1,
                     affected_agents TEXT,  -- JSON: list of agent IDs
-                    
+
                     -- Impact
                     avg_score_when_present REAL DEFAULT 0.0,
                     prevents_completion BOOLEAN DEFAULT FALSE,
                     correction_strategy TEXT,  -- JSON: how to fix this pattern
-                    
+
                     -- Discovery
                     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -3098,23 +3098,23 @@ CREATE TABLE network_failure_hypotheses (
         level_number INTEGER NOT NULL,
         agent_id TEXT NOT NULL,
         generation INTEGER DEFAULT 0,
-        
+
         -- The hypothesis itself
         failure_reason TEXT NOT NULL,
         win_strategy TEXT NOT NULL,
-        
+
         -- Context that led to hypothesis
         final_score REAL DEFAULT 0.0,
         actions_taken INTEGER DEFAULT 0,
         stuck_at_frame_pattern TEXT,
         last_action_sequence TEXT,
-        
+
         -- Validation tracking
         upvotes INTEGER DEFAULT 0,
         downvotes INTEGER DEFAULT 0,
         confidence REAL DEFAULT 0.5,
         validated_by_win BOOLEAN DEFAULT FALSE,
-        
+
         -- Timestamps
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         last_referenced DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -3124,22 +3124,22 @@ CREATE TABLE network_object_control_hypotheses (
                 hypothesis_id TEXT PRIMARY KEY,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The hypothesis: "I control object at these coordinates"
                 control_pattern TEXT NOT NULL,
                 action_response_map TEXT NOT NULL,
-                
+
                 -- Discovery context
                 discovered_by_agent TEXT NOT NULL,
                 discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 discovery_generation INTEGER DEFAULT 0,
-                
+
                 -- Validation tracking (Bayesian reputation)
                 validation_attempts INTEGER DEFAULT 0,
                 validation_successes INTEGER DEFAULT 0,
                 validation_failures INTEGER DEFAULT 0,
                 reliability_score REAL DEFAULT 0.5,
-                
+
                 -- Status
                 is_active BOOLEAN DEFAULT TRUE,
                 last_validated DATETIME,
@@ -3206,26 +3206,26 @@ CREATE TABLE novel_primitives (
                 primitive_id TEXT PRIMARY KEY,
                 discovered_name TEXT NOT NULL,  -- System-generated name
                 composition_tree TEXT NOT NULL,  -- JSON: how it's composed from seeds
-                
+
                 -- Discovery context
                 discovered_by_agent TEXT,
                 discovered_in_game TEXT,
                 discovered_at_generation INTEGER,
-                
+
                 -- Validation
                 success_rate REAL DEFAULT 0.0,
                 games_validated_on INTEGER DEFAULT 0,
                 cross_game_generalization REAL DEFAULT 0.0,
-                
+
                 -- Competition with human primitives
                 competes_with_human TEXT,  -- If similar to locked primitive
                 outperforms_human BOOLEAN DEFAULT FALSE,
-                
+
                 -- Lifecycle
                 is_active BOOLEAN DEFAULT TRUE,
                 times_used INTEGER DEFAULT 0,
                 last_used_at TIMESTAMP,
-                
+
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -3234,19 +3234,19 @@ CREATE TABLE object_property_changes (
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
                 action_number INTEGER NOT NULL,
-                
+
                 -- Object identification
                 object_color INTEGER NOT NULL,
-                
+
                 -- What changed
                 property_name TEXT NOT NULL,      -- 'size', 'shape', 'position', 'controllable', 'selectable', 'color'
                 value_before TEXT,                -- String representation of before value
                 value_after TEXT,                 -- String representation of after value
-                
+
                 -- Context: what action triggered this change?
                 triggering_action TEXT,           -- ACTION1-7
                 triggering_object_color INTEGER,  -- If collision, what color did we interact with?
-                
+
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -3255,10 +3255,10 @@ CREATE TABLE object_property_snapshots (
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
                 action_number INTEGER NOT NULL,
-                
+
                 -- Object identification
                 object_color INTEGER NOT NULL,
-                
+
                 -- Object properties at this moment
                 cell_count INTEGER,               -- Size = number of cells
                 bounding_box_width INTEGER,       -- Shape approximation
@@ -3267,15 +3267,15 @@ CREATE TABLE object_property_snapshots (
                 center_y REAL,
                 shape_hash TEXT,                  -- Hash of relative positions (for shape comparison)
                 is_contiguous INTEGER DEFAULT 1,  -- Is object one connected piece?
-                
+
                 -- Orientation/rotation tracking
                 orientation TEXT,                 -- 'original', 'rot90', 'rot180', 'rot270', 'flip_h', 'flip_v', etc.
                 orientation_hash TEXT,            -- Canonical shape hash (same for all rotations of same shape)
-                
+
                 -- Controllability state
                 is_controlled INTEGER DEFAULT 0,     -- Currently controlled by player?
                 is_selectable INTEGER DEFAULT 0,     -- Can be selected (ACTION6 would select it)?
-                
+
                 -- Context
                 frame_hash TEXT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -3285,26 +3285,26 @@ CREATE TABLE object_selection_state (
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
                 object_color INTEGER NOT NULL,
-                
+
                 -- Object identification
                 object_coordinates TEXT,           -- Last known "(x,y)" of selectable object
                 object_signature TEXT,             -- Stable identifier for the object
-                
+
                 -- What kind of object is this?
                 is_selectable BOOLEAN DEFAULT FALSE,    -- Can it be selected via ACTION6?
                 is_moveable BOOLEAN DEFAULT FALSE,      -- Does it respond to ACTION1-4 when selected?
                 is_button BOOLEAN DEFAULT FALSE,        -- Does clicking trigger an event instead?
-                
+
                 -- Selection mechanics
                 selection_method TEXT DEFAULT 'action6_click',  -- How is it selected?
                 control_actions TEXT,                   -- Which actions control it when selected (JSON list)
-                
+
                 -- Network learning
                 confidence REAL DEFAULT 0.5,
                 discovery_count INTEGER DEFAULT 1,
                 discovered_by_agent TEXT,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP, click_behavior_type TEXT DEFAULT 'unknown', is_self_toggle BOOLEAN DEFAULT FALSE, is_trigger BOOLEAN DEFAULT FALSE, affects_objects TEXT, state_changes_observed INTEGER DEFAULT 0, movement_verified BOOLEAN DEFAULT FALSE, movement_test_count INTEGER DEFAULT 0, is_reference INTEGER DEFAULT 0, shape_signature TEXT, shape_width INTEGER, shape_height INTEGER, shape_density REAL,
-                
+
                 PRIMARY KEY (game_type, level_number, object_color)
             );
 
@@ -3312,24 +3312,24 @@ CREATE TABLE object_sensation_mappings (
         mapping_id TEXT PRIMARY KEY,
         agent_id TEXT NOT NULL,
         generation INTEGER NOT NULL,
-        
+
         -- Object identification
         object_type TEXT NOT NULL,
         object_characteristics TEXT, -- JSON: color, size, pattern, etc.
-        
+
         -- Sensation data
         sensation_score REAL NOT NULL, -- -1.0 to 1.0 (negative=avoid, positive=approach)
         confidence_level REAL DEFAULT 0.5, -- How confident agent is in this sensation
-        
+
         -- Learning context
         learn_count INTEGER DEFAULT 1, -- How many times this sensation was reinforced
         success_count INTEGER DEFAULT 0, -- How many successful outcomes with this sensation
         failure_count INTEGER DEFAULT 0, -- How many failed outcomes with this sensation
-        
+
         -- Timestamps
         first_learned DATETIME DEFAULT CURRENT_TIMESTAMP,
         last_updated DATETIME DEFAULT CURRENT_TIMESTAMP, personal_meaning TEXT, impression_strength REAL DEFAULT 0.5,
-        
+
         FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
         UNIQUE(agent_id, object_type)
     );
@@ -3348,16 +3348,16 @@ CREATE TABLE operator_remix_history (
                 parent_operator_id TEXT NOT NULL,
                 child_operator_id TEXT NOT NULL,
                 remix_type TEXT NOT NULL,  -- 'compose', 'parallel', 'simplify', etc.
-                
+
                 -- What changed
                 mutation_description TEXT,
-                
+
                 -- Outcome
                 child_better BOOLEAN,
                 improvement_amount REAL,
-                
+
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
+
                 FOREIGN KEY (parent_operator_id) REFERENCES composed_operators(operator_id),
                 FOREIGN KEY (child_operator_id) REFERENCES composed_operators(operator_id)
             );
@@ -3367,25 +3367,25 @@ CREATE TABLE operator_test_results (
                 operator_id TEXT NOT NULL,
                 game_id TEXT NOT NULL,
                 level_number INTEGER DEFAULT 1,
-                
+
                 -- Test context
                 input_frame_hash TEXT,
                 agent_id TEXT,
                 generation INTEGER DEFAULT 0,
-                
+
                 -- Results
                 success BOOLEAN,
                 output_value TEXT,  -- JSON
                 execution_time_ms REAL,
                 error_message TEXT,
-                
+
                 -- Contribution to game outcome
                 contributed_to_win BOOLEAN,
                 score_before REAL,
                 score_after REAL,
-                
+
                 tested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, is_frontier BOOLEAN DEFAULT 0, competition_weight REAL DEFAULT 1.0,
-                
+
                 FOREIGN KEY (operator_id) REFERENCES composed_operators(operator_id)
             );
 
@@ -3393,45 +3393,45 @@ CREATE TABLE optimization_status (
                 status_id TEXT PRIMARY KEY,
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Optimization metrics
                 is_optimized BOOLEAN DEFAULT FALSE,
                 best_sequence_id TEXT,
                 best_actions INTEGER,
                 best_efficiency REAL,
-                
+
                 -- Tracking improvement
                 last_improvement_generation INTEGER,
                 generations_without_improvement INTEGER DEFAULT 0,
                 improvement_rate REAL DEFAULT 0.0,  -- % improvement in recent generations
-                
+
                 -- Sequence diversity
                 total_sequences INTEGER DEFAULT 0,
                 active_sequences INTEGER DEFAULT 0,
-                
+
                 -- Timestamps
                 first_sequence_at TIMESTAMP,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 optimized_at TIMESTAMP,
-                
+
                 UNIQUE(game_id, level_number)
             );
 
 CREATE TABLE oracle_accuracy (
                 accuracy_id TEXT PRIMARY KEY,
                 decision_id TEXT NOT NULL,
-                
+
                 -- Validation
                 was_correct BOOLEAN,
                 validation_method TEXT,  -- 'game_performance', 'human_review', 'cross_validation'
-                
+
                 -- Performance impact
                 pre_decision_success_rate REAL,
                 post_decision_success_rate REAL,
                 improvement REAL,
-                
+
                 validated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
+
                 FOREIGN KEY (decision_id) REFERENCES oracle_decisions(decision_id)
             );
 
@@ -3439,25 +3439,25 @@ CREATE TABLE oracle_decisions (
                 decision_id TEXT PRIMARY KEY,
                 attempt_id TEXT NOT NULL,
                 primitive_name TEXT,
-                
+
                 -- Verdict
                 verdict TEXT NOT NULL,
                 confidence REAL DEFAULT 0.5,
                 reasoning TEXT,
-                
+
                 -- Pattern analysis
                 similarity_to_locked REAL DEFAULT 0.0,
                 matched_features TEXT,  -- JSON: which features matched
-                
+
                 -- For novel discoveries
                 novel_primitive_id TEXT,
-                
+
                 -- Oracle metadata
                 oracle_type TEXT DEFAULT 'automated',  -- 'automated', 'human', 'llm'
                 review_needed BOOLEAN DEFAULT FALSE,
-                
+
                 decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
+
                 FOREIGN KEY (attempt_id) REFERENCES primitive_unlock_attempts(attempt_id)
             );
 
@@ -3522,22 +3522,22 @@ CREATE TABLE oracle_pending_reviews (
                 review_id TEXT PRIMARY KEY,
                 decision_id TEXT NOT NULL,
                 attempt_id TEXT NOT NULL,
-                
+
                 -- Context for human reviewer
                 primitive_name TEXT,
                 discovered_pattern TEXT,
                 success_rate REAL,
                 cross_game_rate REAL,
                 automated_similarity REAL,
-                
+
                 -- Review status
                 reviewed BOOLEAN DEFAULT FALSE,
                 reviewer_verdict TEXT,
                 reviewer_notes TEXT,
-                
+
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 reviewed_at TIMESTAMP,
-                
+
                 FOREIGN KEY (decision_id) REFERENCES oracle_decisions(decision_id)
             );
 
@@ -3563,16 +3563,16 @@ CREATE TABLE oracle_reasoning_bugs (
 CREATE TABLE pariah_package_interactions (
     pariah_id TEXT NOT NULL,
     package_id TEXT NOT NULL,
-    
+
     interaction_type TEXT NOT NULL,  -- 'protective', 'causative', 'neutral'
     interaction_strength REAL DEFAULT 0.0,  -- -1.0 (causes) to +1.0 (protects)
-    
+
     -- Evidence
     co_occurrence_count INTEGER DEFAULT 0,  -- Times package + pariah in same context
     protection_score REAL DEFAULT 0.0,  -- Does package prevent pariah?
     causation_score REAL DEFAULT 0.0,  -- Does package trigger pariah?
     observations INTEGER DEFAULT 0,
-    
+
     PRIMARY KEY (pariah_id, package_id),
     FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
     FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id)
@@ -3582,35 +3582,35 @@ CREATE TABLE pariahs (
     pariah_id TEXT PRIMARY KEY,
     pariah_name TEXT NOT NULL,
     pariah_type TEXT NOT NULL,  -- 'action_sequence', 'coordinate_trap', 'strategy_failure'
-    
+
     -- Failure pattern (what should agents avoid?)
     action_sequence TEXT,  -- JSON array - this sequence leads to failure
     coordinate_pattern TEXT,  -- JSON array - these coordinates are traps
     failure_description TEXT,  -- Why does this fail?
-    
+
     -- Pariah characteristics
     toxicity REAL DEFAULT 0.5,  -- How harmful is this pattern? (0-1)
     detection_difficulty REAL DEFAULT 0.3,  -- How hard to recognize? (0-1)
     context_specificity REAL DEFAULT 0.5,  -- Game-specific or universal? (0-1)
-    
+
     -- Pariah impact (network-level damage)
     trigger_count INTEGER DEFAULT 0,  -- Times agents fell into this trap
     avg_score_loss REAL DEFAULT 0.0,  -- Average score lost when triggered
     total_awareness INTEGER DEFAULT 0,  -- How many agents know this?
     active_awareness INTEGER DEFAULT 0,  -- How many actively avoid this?
-    
+
     -- Origins
     discovery_generation INTEGER NOT NULL,
     source_game_id TEXT,  -- Game where this failure was discovered
     source_agent_id TEXT,  -- Agent who discovered (failed)
     parent_pariah_id TEXT,  -- If this is a variant of another failure
-    
+
     -- Lifecycle
     is_active BOOLEAN DEFAULT TRUE,
     obsolescence_score REAL DEFAULT 0.0,  -- Is this pariah no longer relevant?
     last_triggered_generation INTEGER,
     avoidance_success_rate REAL DEFAULT 0.0, source_level_number INTEGER DEFAULT 1, false_positive_count INTEGER DEFAULT 0, validated_at_generation INTEGER,  -- % of aware agents who avoid
-    
+
     FOREIGN KEY (source_agent_id) REFERENCES agents(agent_id),
     FOREIGN KEY (parent_pariah_id) REFERENCES pariahs(pariah_id)
 );
@@ -3622,12 +3622,12 @@ CREATE TABLE pattern_applications (
     game_id TEXT NOT NULL,
     agent_id TEXT NOT NULL,
     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- Results
     success BOOLEAN NOT NULL,
     score_achieved REAL NOT NULL,
     actions_taken INTEGER NOT NULL,
-    
+
     FOREIGN KEY (pattern_id) REFERENCES discovered_patterns(pattern_id),
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
@@ -3648,19 +3648,19 @@ CREATE TABLE pattern_synthesis (
             pattern_a_id TEXT NOT NULL,
             pattern_b_id TEXT NOT NULL,
             synthesized_pattern_id TEXT NOT NULL,
-            
+
             novelty_score REAL DEFAULT 0.0,
             effectiveness_score REAL DEFAULT 0.0,
             games_applied_to INTEGER DEFAULT 0,
             success_count INTEGER DEFAULT 0,
-            
+
             discovery_agent_id TEXT,
             discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             discovery_generation INTEGER DEFAULT 0,
-            
+
             times_recombined INTEGER DEFAULT 0,
             descendant_count INTEGER DEFAULT 0,
-            
+
             FOREIGN KEY (pattern_a_id) REFERENCES discovered_patterns(pattern_id),
             FOREIGN KEY (pattern_b_id) REFERENCES discovered_patterns(pattern_id),
             FOREIGN KEY (synthesized_pattern_id) REFERENCES discovered_patterns(pattern_id),
@@ -3820,9 +3820,9 @@ CREATE TABLE persona_theory_bindings (
                 theory_id TEXT NOT NULL,
                 bound_at_action INTEGER,
                 agent_id TEXT,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(persona_id, theory_id)
             );
 
@@ -3858,52 +3858,52 @@ CREATE TABLE position_death_patterns (
                     pattern_id TEXT PRIMARY KEY,
                     game_type TEXT NOT NULL,
                     level_number INTEGER NOT NULL,
-                    
+
                     -- Position bucket (grid divided by bucket_size)
                     bucket_x INTEGER NOT NULL,
                     bucket_y INTEGER NOT NULL,
                     bucket_size INTEGER DEFAULT 8,
-                    
+
                     -- The fatal action at this position
                     fatal_action INTEGER NOT NULL,
-                    
+
                     -- Death/survival tracking
                     death_count INTEGER DEFAULT 1,
                     survival_count INTEGER DEFAULT 0,
-                    
+
                     -- Calculated danger: death_count / (death_count + survival_count)
                     danger_score REAL DEFAULT 0.8,
-                    
+
                     -- Decay support: If proven wrong, weaken over time
                     last_death_at TEXT,
                     last_survival_at TEXT,
                     generations_since_update INTEGER DEFAULT 0,
-                    
+
                     -- Metadata
                     discovered_at TEXT,
                     discovered_by_agent TEXT,
                     is_active INTEGER DEFAULT 1,
-                    
+
                     UNIQUE(game_type, level_number, bucket_x, bucket_y, fatal_action)
                 );
 
 CREATE TABLE primitive_competition (
                 competition_id TEXT PRIMARY KEY,
                 primitive_name TEXT NOT NULL,
-                
+
                 -- Discovered version stats
                 discovered_wins INTEGER DEFAULT 0,
                 discovered_uses INTEGER DEFAULT 0,
                 discovered_avg_score REAL DEFAULT 0.0,
-                
-                -- Human version stats  
+
+                -- Human version stats
                 human_wins INTEGER DEFAULT 0,
                 human_uses INTEGER DEFAULT 0,
                 human_avg_score REAL DEFAULT 0.0,
-                
+
                 -- Current winner
                 current_winner TEXT DEFAULT 'tie',  -- 'discovered', 'human', 'tie'
-                
+
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -3915,17 +3915,17 @@ CREATE TABLE primitive_status (
                 unlock_condition TEXT,
                 implementation_hint TEXT,
                 difficulty REAL DEFAULT 0.5,
-                
+
                 -- Unlock metadata
                 unlocked_at TIMESTAMP,
                 unlocked_by_agent TEXT,
                 discovered_pattern TEXT,  -- JSON: the pattern that earned unlock
-                
+
                 -- Usage tracking
                 times_used INTEGER DEFAULT 0,
                 avg_success_rate REAL DEFAULT 0.0,
                 last_used_at TIMESTAMP,
-                
+
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -3934,29 +3934,29 @@ CREATE TABLE primitive_unlock_attempts (
                 primitive_name TEXT NOT NULL,
                 agent_id TEXT,
                 generation INTEGER DEFAULT 0,
-                
+
                 -- What the system composed
                 discovered_pattern TEXT NOT NULL,  -- JSON: composition tree
                 pattern_hash TEXT,  -- For deduplication
-                
+
                 -- Validation results
                 game_ids_tested TEXT,  -- JSON: list of game IDs
                 games_tested_count INTEGER DEFAULT 0,
                 success_rate REAL DEFAULT 0.0,
                 cross_game_success_rate REAL DEFAULT 0.0,
                 rlvr_validation_passed BOOLEAN DEFAULT FALSE,
-                
+
                 -- Oracle decision
                 oracle_verdict TEXT,  -- 'approved', 'rejected', 'pending'
                 oracle_reasoning TEXT,
                 similarity_to_locked REAL DEFAULT 0.0,
-                
+
                 -- Outcome
                 unlocked BOOLEAN DEFAULT FALSE,
                 marked_as_novel BOOLEAN DEFAULT FALSE,
-                
+
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
+
                 FOREIGN KEY (primitive_name) REFERENCES primitive_status(primitive_name)
             );
 
@@ -3965,18 +3965,18 @@ CREATE TABLE pseudo_button_behavior (
                 level_number INTEGER NOT NULL,
                 region_x INTEGER NOT NULL,
                 region_y INTEGER NOT NULL,
-                
+
                 -- What does clicking this region do?
                 produces_action TEXT,
                 movement_direction TEXT,
                 affected_objects TEXT,
                 effect_description TEXT,
-                
+
                 -- Confidence tracking
                 confidence REAL DEFAULT 0.5,
                 discovery_count INTEGER DEFAULT 1,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 PRIMARY KEY (game_type, level_number, region_x, region_y)
             );
 
@@ -4024,34 +4024,34 @@ CREATE TABLE relative_threat_patterns (
                     pattern_id TEXT PRIMARY KEY,
                     game_type TEXT NOT NULL,
                     level_number INTEGER NOT NULL,
-                    
+
                     -- The fatal action
                     fatal_action INTEGER NOT NULL,
-                    
+
                     -- Threat context at time of death (relative to agent)
                     -- JSON: [{"color": 7, "rel_x": -1, "rel_y": 0, "distance": 1}, ...]
                     -- rel_x/rel_y: threat position relative to agent (negative = left/up)
                     threat_relative_positions TEXT NOT NULL,
-                    
+
                     -- What color was the threat that likely killed us?
                     threat_color INTEGER,
-                    
+
                     -- Agent's movement direction (1=up, 2=down, 3=right, 4=left)
                     -- Helps identify "moved toward threat" patterns
                     movement_direction TEXT,
-                    
+
                     -- Pattern reliability
                     occurrence_count INTEGER DEFAULT 1,
                     confirmed_lethal INTEGER DEFAULT 1,
-                    
+
                     -- Metadata
                     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_occurrence TIMESTAMP,
                     discovered_by_agent TEXT,
-                    
+
                     -- Confidence that this relative pattern predicts danger
                     confidence REAL DEFAULT 0.6,
-                    
+
                     is_active INTEGER DEFAULT 1
                 );
 
@@ -4094,7 +4094,7 @@ CREATE TABLE replay_inferred_patterns (
                     observation_count INTEGER DEFAULT 1,
                     last_observed TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     UNIQUE(game_type, pattern_type, pattern_description)
                 );
 
@@ -4109,27 +4109,27 @@ CREATE TABLE replay_learning_events (
                     action_type INTEGER NOT NULL,
                     coordinate_x INTEGER,
                     coordinate_y INTEGER,
-                    
+
                     -- Predictions (made before action)
                     predicted_frame_change TEXT,
                     predicted_object_effect TEXT,
                     predicted_score_change REAL DEFAULT 0.0,
                     hypothesized_rule TEXT,
                     prediction_confidence REAL DEFAULT 0.0,
-                    
+
                     -- Actuals (observed after action)
                     actual_frame_change TEXT,
                     actual_object_effect TEXT,
                     actual_score_change REAL DEFAULT 0.0,
                     prediction_correct BOOLEAN DEFAULT FALSE,
-                    
+
                     -- Learning outputs
                     inferred_rule TEXT,
                     primitive_candidate TEXT,
                     wasted_action BOOLEAN DEFAULT FALSE,
-                    
+
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
                 );
 
@@ -4156,7 +4156,7 @@ CREATE TABLE replay_wasted_actions (
                     potential_savings INTEGER DEFAULT 1,
                     verified_removable BOOLEAN DEFAULT FALSE,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     UNIQUE(sequence_id, action_index)
                 );
 
@@ -4172,23 +4172,23 @@ CREATE TABLE representation_model_history (
 
 CREATE TABLE resonance_patterns (
                     pattern_hash TEXT PRIMARY KEY,
-                    
+
                     -- Resonance metrics
                     role_diversity INTEGER DEFAULT 1,
                     roles_found TEXT,  -- JSON list of roles that found this
                     independent_discoverers INTEGER DEFAULT 1,
                     resonance_score REAL DEFAULT 0.0,
-                    
+
                     -- Pattern content (abstract)
                     theory_type TEXT,
                     control_type TEXT,
                     strategy_type TEXT,
                     canonical_beliefs TEXT,  -- JSON of canonicalized beliefs
-                    
+
                     -- Example sequences using this pattern
                     example_sequences TEXT,  -- JSON list of sequence_ids
                     game_types TEXT,  -- JSON list of game types
-                    
+
                     -- Tracking
                     first_detected DATETIME DEFAULT CURRENT_TIMESTAMP,
                     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -4226,23 +4226,23 @@ CREATE TABLE rule_redundancy (
     rule_id TEXT PRIMARY KEY,
     discovery_timestamp TIMESTAMP,
     discovery_generation INTEGER,
-    
+
     -- Backup metrics
     agents_who_discovered INTEGER DEFAULT 1,
     agent_carriers TEXT,  -- JSON: list of agent IDs who independently discovered this
     independent_discoveries INTEGER DEFAULT 1,
-    
+
     -- Criticality for network
     games_applicable_to INTEGER DEFAULT 0,
     transfer_success_count INTEGER DEFAULT 0,
     criticality_score REAL DEFAULT 0.0,
     is_viral_core BOOLEAN DEFAULT FALSE,
-    
+
     -- Persistence
     generations_survived INTEGER DEFAULT 0,
     last_used_generation INTEGER DEFAULT 0,
     risk_of_loss REAL DEFAULT 1.0,
-    
+
     FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id)
 );
 
@@ -4253,20 +4253,20 @@ CREATE TABLE rule_transfers (
     target_game_id TEXT NOT NULL,
     agent_id TEXT NOT NULL,
     transfer_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- Transfer results
     transfer_successful BOOLEAN NOT NULL,
     confidence_before REAL NOT NULL,
     confidence_after REAL,
     score_achieved REAL,
     actions_taken INTEGER,
-    
+
     -- Analysis
     match_confidence REAL,                 -- How well preconditions matched
     execution_quality REAL,                -- How well actions were executed
     actual_result TEXT,                    -- 'full_win', 'partial_success', 'no_progress', 'failure'
     failure_reason TEXT,
-    
+
     FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id),
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
@@ -4306,21 +4306,21 @@ CREATE TABLE selectability_conditions (
                 condition_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- What triggers selectability change
                 trigger_action TEXT,                 -- e.g., "ACTION1", "ACTION6"
                 trigger_coords TEXT,                 -- Coordinates if relevant
                 trigger_object_color INTEGER,        -- Object involved in trigger
                 trigger_description TEXT,            -- Human-readable description
-                
+
                 -- Result of trigger
                 action6_became_available INTEGER,    -- 1 = appeared, 0 = disappeared
-                
+
                 -- Validation
                 occurrence_count INTEGER DEFAULT 1,
                 confidence REAL DEFAULT 0.5,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_type, level_number, trigger_action, trigger_coords, action6_became_available)
             );
 
@@ -4328,30 +4328,30 @@ CREATE TABLE self_object_identity (
                 identity_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Current controlled object
                 self_object_color INTEGER NOT NULL,       -- Color ID of controlled object
                 self_object_signature TEXT,               -- Shape hash for stable identification
                 self_object_center_x REAL,                -- Center of mass at identification
                 self_object_center_y REAL,
-                
+
                 -- Confidence and evidence
                 confidence REAL DEFAULT 0.5,              -- 0.0 to 1.0
                 correlation_score REAL DEFAULT 0.0,       -- Action-direction correlation
                 sample_count INTEGER DEFAULT 0,           -- Number of action samples
-                
+
                 -- Singularity check (should be exactly 1 controlled object)
                 total_candidate_objects INTEGER DEFAULT 1,  -- How many objects responded?
                 is_ambiguous INTEGER DEFAULT 0,             -- 1 = multiple objects respond equally
-                
+
                 -- When was this identity established?
                 established_at_action INTEGER DEFAULT 0,    -- Action number when identified
                 still_valid INTEGER DEFAULT 1,              -- 0 = object lost/changed
-                
+
                 -- Timestamps
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(game_id, level_number, established_at_action)
             );
 
@@ -4360,25 +4360,25 @@ CREATE TABLE sensation_learning_events (
         agent_id TEXT NOT NULL,
         game_id TEXT NOT NULL,
         generation INTEGER NOT NULL,
-        
+
         -- Sensation context
         object_type TEXT NOT NULL,
         pre_sensation_score REAL NOT NULL,
         post_sensation_score REAL NOT NULL,
-        
-        -- Navigation context  
+
+        -- Navigation context
         pre_navigation_state REAL NOT NULL,
         post_navigation_state REAL NOT NULL,
         action_taken INTEGER NOT NULL, -- 1-7 only
-        
+
         -- Learning outcome
         reward_received REAL NOT NULL,
         sensation_adjustment REAL NOT NULL,
         learning_success BOOLEAN DEFAULT FALSE,
-        
+
         -- Timestamps
         event_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, aligned_with_stream TEXT,
-        
+
         FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
     );
 
@@ -4399,20 +4399,20 @@ CREATE TABLE sequence_dependencies (
             parent_sequence_id TEXT NOT NULL,
             child_sequence_id TEXT NOT NULL,
             dependency_type TEXT NOT NULL CHECK(dependency_type IN ('chain', 'variation', 'synthesis')),
-            
+
             combined_efficiency REAL DEFAULT 0.0,
             improvement_over_parent REAL DEFAULT 0.0,
             discovery_agent_id TEXT,
             discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             discovery_generation INTEGER DEFAULT 0,
-            
+
             times_used INTEGER DEFAULT 0,
             success_rate REAL DEFAULT 0.0,
             viral_spread_count INTEGER DEFAULT 0,
-            
+
             is_beneficial BOOLEAN DEFAULT NULL,
             fitness_impact REAL DEFAULT 0.0,
-            
+
             FOREIGN KEY (parent_sequence_id) REFERENCES winning_sequences(sequence_id),
             FOREIGN KEY (child_sequence_id) REFERENCES winning_sequences(sequence_id),
             FOREIGN KEY (discovery_agent_id) REFERENCES agents(agent_id)
@@ -4422,17 +4422,17 @@ CREATE TABLE sequence_improvements (
                 improvement_id TEXT PRIMARY KEY,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- Before/After
                 previous_sequence_id TEXT,
                 previous_actions INTEGER NOT NULL,
                 new_sequence_id TEXT NOT NULL,
                 new_actions INTEGER NOT NULL,
-                
+
                 -- Calculated improvement
                 reduction_count INTEGER,
                 reduction_pct REAL,
-                
+
                 -- Context
                 discovered_by_agent TEXT,
                 generation INTEGER,
@@ -4441,23 +4441,23 @@ CREATE TABLE sequence_improvements (
 
 CREATE TABLE sequence_reputation (
     sequence_id TEXT PRIMARY KEY,
-    
+
     -- Validation statistics
     total_validation_attempts INTEGER DEFAULT 0,
     successful_validations INTEGER DEFAULT 0,
     failed_validations INTEGER DEFAULT 0,
     partial_validations INTEGER DEFAULT 0,
-    
+
     -- Reputation metrics
     success_rate REAL DEFAULT 0.0,              -- successful / total
     reliability_score REAL DEFAULT 0.5,         -- Bayesian confidence-adjusted score
     agent_diversity INTEGER DEFAULT 1,          -- How many different agents tried it
-    
+
     -- Temporal tracking
     recent_success_rate REAL DEFAULT 0.0,       -- Last 10 attempts only
     trending TEXT DEFAULT 'stable',             -- 'improving', 'declining', 'stable'
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP, role_success_pioneer REAL DEFAULT 0.5, role_success_optimizer REAL DEFAULT 0.5, role_success_exploiter REAL DEFAULT 0.5, role_success_generalist REAL DEFAULT 0.5, avg_frustration_on_success REAL DEFAULT 0.5, avg_satisfaction_on_success REAL DEFAULT 0.5,
-    
+
     FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
 );
 
@@ -4468,21 +4468,21 @@ CREATE TABLE sequence_validation_attempts (
     game_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
     attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- Validation results
     validation_success BOOLEAN NOT NULL,       -- Did sequence work for this agent?
     partial_success BOOLEAN DEFAULT FALSE,     -- Got partway through sequence
     actions_completed INTEGER DEFAULT 0,       -- How many actions from sequence worked
     total_actions_in_sequence INTEGER NOT NULL,
-    
+
     -- Performance
     score_achieved REAL DEFAULT 0.0,
     efficiency_vs_original REAL DEFAULT 1.0,   -- This agent's efficiency / original efficiency
-    
+
     -- Context
     agent_epigenetics TEXT,                    -- JSON: agent's epigenetic state during attempt
     failure_reason TEXT,                       -- If failed, why? 'state_mismatch', 'invalid_action', etc.
-    
+
     FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id),
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
@@ -4496,7 +4496,7 @@ CREATE TABLE sequence_validation_queue (
     last_validated_at TIMESTAMP,
     validation_count INTEGER DEFAULT 0,
     status TEXT DEFAULT 'pending',  -- pending, in_progress, completed, failed
-    
+
     FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
 );
 
@@ -4547,33 +4547,33 @@ CREATE TABLE stuck_game_interventions (
             game_id TEXT NOT NULL,
             game_type TEXT NOT NULL,
             generation INTEGER NOT NULL,
-            
+
             -- Analysis
             bottleneck_level INTEGER,
             agents_stuck INTEGER,
             total_agents INTEGER,
             stuck_ratio REAL,
-            
+
             -- Knowledge synthesis
             death_zones_found INTEGER DEFAULT 0,
             dangerous_objects_found INTEGER DEFAULT 0,
             theories_found INTEGER DEFAULT 0,
             hypotheses_found INTEGER DEFAULT 0,
-            
+
             -- Gaps identified
             knowledge_gaps TEXT,  -- JSON list
-            
+
             -- Interventions applied
             interventions_applied TEXT,  -- JSON list
             action_budget_boost REAL DEFAULT 0,
             investigators_assigned INTEGER DEFAULT 0,
             experiments_requested INTEGER DEFAULT 0,
-            
+
             -- Outcome tracking
             resolved BOOLEAN DEFAULT FALSE,
             resolution_generation INTEGER,
             breakthrough_action TEXT,
-            
+
             -- Timestamps
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             resolved_at TIMESTAMP
@@ -4585,28 +4585,28 @@ CREATE TABLE subgoal_executions (
                     subgoal_index INTEGER NOT NULL,
                     agent_id TEXT NOT NULL,
                     game_id TEXT NOT NULL,
-                    
+
                     -- Subgoal details
                     subgoal_type TEXT NOT NULL,  -- 'identify_pattern', 'fill_region', 'transform', etc.
                     subgoal_description TEXT NOT NULL,
                     preconditions TEXT,  -- JSON: what must be true before
                     postconditions TEXT,  -- JSON: what should be true after
-                    
+
                     -- Execution
                     actions_taken TEXT,  -- JSON: list of actions executed
                     execution_status TEXT NOT NULL,  -- 'success', 'partial', 'failed'
                     score_before REAL DEFAULT 0.0,
                     score_after REAL DEFAULT 0.0,
                     score_delta REAL DEFAULT 0.0,
-                    
+
                     -- Learning
                     success_factors TEXT,  -- JSON: what worked
                     failure_factors TEXT,  -- JSON: what didn't work
-                    
+
                     -- Timestamps
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
-                    
+
                     FOREIGN KEY (plan_id) REFERENCES subgoal_plans(plan_id),
                     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
                 );
@@ -4614,27 +4614,27 @@ CREATE TABLE subgoal_executions (
 CREATE TABLE subgoal_patterns (
                     pattern_id TEXT PRIMARY KEY,
                     pattern_name TEXT NOT NULL,
-                    
+
                     -- Pattern structure
                     subgoal_sequence TEXT NOT NULL,  -- JSON: ordered subgoals
                     game_context TEXT,  -- JSON: when this pattern applies
-                    
+
                     -- Effectiveness
                     times_attempted INTEGER DEFAULT 0,
                     times_succeeded INTEGER DEFAULT 0,
                     success_rate REAL DEFAULT 0.0,
                     avg_score_improvement REAL DEFAULT 0.0,
                     avg_actions_required REAL DEFAULT 0.0,
-                    
+
                     -- Discovery
                     discovered_by_agent TEXT,
                     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     discovered_generation INTEGER DEFAULT 0,
-                    
+
                     -- Usage
                     last_used TIMESTAMP,
                     is_active BOOLEAN DEFAULT TRUE,
-                    
+
                     FOREIGN KEY (discovered_by_agent) REFERENCES agents(agent_id)
                 );
 
@@ -4644,29 +4644,29 @@ CREATE TABLE subgoal_plans (
                     game_id TEXT NOT NULL,
                     session_id TEXT NOT NULL,
                     generation INTEGER DEFAULT 0,
-                    
+
                     -- Plan structure
                     high_level_objective TEXT NOT NULL,
                     subgoal_sequence TEXT NOT NULL,  -- JSON: ordered list of subgoals
                     total_subgoals INTEGER NOT NULL,
-                    
+
                     -- Execution tracking
                     plan_status TEXT DEFAULT 'active',  -- 'active', 'completed', 'failed', 'abandoned'
                     current_subgoal_index INTEGER DEFAULT 0,
                     completed_subgoals INTEGER DEFAULT 0,
                     failed_subgoals INTEGER DEFAULT 0,
-                    
+
                     -- Performance
                     actions_planned INTEGER DEFAULT 0,
                     actions_executed INTEGER DEFAULT 0,
                     score_at_start REAL DEFAULT 0.0,
                     score_at_end REAL DEFAULT 0.0,
                     plan_efficiency REAL DEFAULT 0.0,
-                    
+
                     -- Timestamps
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
-                    
+
                     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
                 );
 
@@ -4749,12 +4749,12 @@ CREATE TABLE theory_action_links (
         theory_id TEXT NOT NULL,
         action_number INTEGER NOT NULL,
         game_id TEXT NOT NULL,
-        
+
         -- Prediction vs outcome
         predicted_outcome TEXT,
         actual_outcome TEXT,
         matched BOOLEAN,
-        
+
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -4772,19 +4772,19 @@ CREATE TABLE theory_elimination_events (
 CREATE TABLE theory_experiments (
                 experiment_id TEXT PRIMARY KEY,
                 theory_id TEXT NOT NULL,
-                
+
                 hypothesis TEXT,
                 prediction TEXT,
                 preconditions TEXT,
                 test_action TEXT,
                 expected_result TEXT,
-                
+
                 actual_result TEXT,
                 prediction_matched INTEGER,
-                
+
                 executed_at TEXT,
                 executed_by_agent TEXT,
-                
+
                 FOREIGN KEY (theory_id) REFERENCES agent_theories(theory_id)
             );
 
@@ -4793,14 +4793,14 @@ CREATE TABLE theory_transitions (
         agent_id TEXT NOT NULL,
         game_type TEXT NOT NULL,
         level_number INTEGER,
-        
+
         from_stage TEXT NOT NULL,
         to_stage TEXT NOT NULL,
         action_number INTEGER NOT NULL,
-        
+
         -- What triggered the transition
         trigger_reason TEXT,               -- 'evidence_accumulated', 'contradiction', 'transfer_success'
-        
+
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -4874,23 +4874,23 @@ CREATE TABLE trigger_sequence_events (
                 game_id TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
                 action_number INTEGER NOT NULL,
-                
+
                 -- What trigger was activated
                 trigger_action TEXT NOT NULL,
                 trigger_object_color INTEGER,
                 trigger_interaction_type TEXT,
-                
+
                 -- What effect occurred
                 effect_object_color INTEGER,
                 effect_type TEXT,
-                
+
                 -- Position in the sequence (1-indexed)
                 step_number INTEGER NOT NULL,
-                
+
                 -- Context
                 score_before REAL,
                 score_after REAL,
-                
+
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -4898,34 +4898,34 @@ CREATE TABLE trigger_sequences (
                 sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- The sequence itself (JSON array of trigger steps)
                 -- Each step: {action, object_color, effect_type, step_number}
                 sequence_json TEXT NOT NULL,
                 sequence_length INTEGER NOT NULL,
                 sequence_hash TEXT,               -- Hash for quick comparison
-                
+
                 -- What did this sequence achieve?
                 outcome_type TEXT NOT NULL,       -- 'level_win', 'score_increase', 'unlock', 'progress'
                 outcome_details TEXT,             -- JSON with specifics
-                
+
                 -- Validation tracking
                 times_succeeded INTEGER DEFAULT 1,
                 times_attempted INTEGER DEFAULT 1,
                 success_rate REAL DEFAULT 1.0,
-                
+
                 -- Discovery context
                 discovered_by_agent TEXT,
                 discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 -- Is this a complete solution or partial?
                 is_complete_solution INTEGER DEFAULT 0,  -- Did it win the level?
-                
+
                 -- Deprecation tracking (for safe_cleanup.py)
                 is_active INTEGER DEFAULT 1,              -- 0 = deprecated
                 last_observed_generation INTEGER DEFAULT 0, -- For staleness detection
-                
+
                 UNIQUE(game_type, level_number, sequence_hash)
             );
 
@@ -4947,42 +4947,42 @@ CREATE TABLE ui_layout_hypotheses (
 
 CREATE TABLE universal_object_patterns (
                 pattern_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                
+
                 -- Pattern signature (game-agnostic identifier)
                 -- Format: "color_{color}_action_{action}_response_{direction}"
                 -- Example: "color_5_action_1_response_up"
                 pattern_signature TEXT NOT NULL UNIQUE,
-                
+
                 -- Object characteristics (what defines this pattern)
                 object_color INTEGER NOT NULL,
-                
+
                 -- Control response (how it responds to actions)
                 action_type TEXT NOT NULL,            -- ACTION1, ACTION2, etc.
                 response_type TEXT NOT NULL,          -- 'move_up', 'move_down', 'rotate', 'toggle', etc.
-                
+
                 -- Pattern classification
-                pattern_class TEXT DEFAULT 'unknown', -- 'player_controlled', 'selectable', 'obstacle', 
+                pattern_class TEXT DEFAULT 'unknown', -- 'player_controlled', 'selectable', 'obstacle',
                                                       -- 'collectible', 'enemy', 'button', 'goal'
-                
+
                 -- Cross-game validation (Bayesian aggregation across ALL games)
                 total_observations INTEGER DEFAULT 0,
                 total_confirmations INTEGER DEFAULT 0,
                 total_contradictions INTEGER DEFAULT 0,
                 global_confidence REAL DEFAULT 0.5,   -- Confidence across all games
-                
+
                 -- Which games contributed to this pattern
                 contributing_games TEXT,              -- JSON list of game_types
                 game_count INTEGER DEFAULT 0,         -- Number of different games
-                
+
                 -- Transfer tracking
                 transfer_successes INTEGER DEFAULT 0, -- Times pattern worked in new game
                 transfer_failures INTEGER DEFAULT 0,  -- Times pattern failed in new game
                 transfer_reliability REAL DEFAULT 0.5,
-                
+
                 -- Timestamps
                 first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 -- Deprecation tracking
                 is_active INTEGER DEFAULT 1
             );
@@ -4991,31 +4991,31 @@ CREATE TABLE valence_associations (
                 association_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_type TEXT NOT NULL,
                 level_number INTEGER NOT NULL,
-                
+
                 -- What triggered this valence?
                 trigger_type TEXT NOT NULL,               -- 'collision', 'action', 'proximity', 'selection'
                 trigger_action TEXT,                      -- ACTION1-7 if applicable
                 trigger_object_color INTEGER,             -- Object color if applicable
                 trigger_target_color INTEGER,             -- Target of interaction if applicable
-                
+
                 -- What was the consequence?
                 consequence_type TEXT NOT NULL,           -- 'score_change', 'counter_change', 'game_end', 'level_end'
                 consequence_details TEXT,                 -- JSON with specifics
-                
+
                 -- Valence: -1.0 (very bad) to +1.0 (very good)
                 valence REAL NOT NULL,
                 valence_magnitude REAL DEFAULT 0.5,       -- How strong is this association?
-                
+
                 -- Validation
                 observation_count INTEGER DEFAULT 1,
                 consistent_count INTEGER DEFAULT 1,       -- Times this valence was confirmed
                 confidence REAL DEFAULT 0.5,
-                
+
                 -- Timestamps
                 first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP, source_attempt_id TEXT, source_mode TEXT, last_observed_generation INTEGER DEFAULT 0, decay_score REAL DEFAULT 0.0,
-                
-                UNIQUE(game_type, level_number, trigger_type, trigger_object_color, 
+
+                UNIQUE(game_type, level_number, trigger_type, trigger_object_color,
                        trigger_target_color, consequence_type)
             );
 
@@ -5023,34 +5023,34 @@ CREATE TABLE viral_information_packages (
     package_id TEXT PRIMARY KEY,
     package_name TEXT NOT NULL,
     package_type TEXT NOT NULL,  -- 'action_sequence', 'coordinate_pattern', 'meta_strategy'
-    
+
     -- Package content (what does this virus carry?)
     action_sequence TEXT,  -- JSON array of action IDs (e.g., [1,2,6,6,3])
     coordinate_pattern TEXT,  -- JSON array of (x,y) coordinates
     meta_strategy_description TEXT,  -- High-level strategy description
-    
+
     -- Package characteristics
     virulence REAL DEFAULT 0.5,  -- How strongly does this influence host behavior? (0-1)
     transmission_rate REAL DEFAULT 0.3,  -- How easily does this spread? (0-1)
     mutation_rate REAL DEFAULT 0.05,  -- How stable is this package? (0-1)
-    
+
     -- Package fitness (network-level evaluation)
     success_rate REAL DEFAULT 0.0,  -- % of hosts that succeed using this
     avg_score_contribution REAL DEFAULT 0.0,  -- Average score boost from this package
     total_infections INTEGER DEFAULT 0,  -- How many agents carry this?
     active_infections INTEGER DEFAULT 0,  -- How many currently active carriers?
-    
+
     -- Origins and evolution
     discovery_generation INTEGER NOT NULL,
     source_sequence_id TEXT,  -- Original winning_sequence this came from
     parent_package_id TEXT,  -- If this is a mutated variant
     generation_discovered INTEGER NOT NULL,
-    
+
     -- Lifecycle
     is_active BOOLEAN DEFAULT TRUE,
     obsolescence_score REAL DEFAULT 0.0,  -- Is this package becoming irrelevant?
     last_successful_use_generation INTEGER, is_frontier_temp BOOLEAN DEFAULT FALSE, frontier_level INTEGER, frontier_game_type TEXT, deactivated_reason TEXT, retrieval_count INTEGER DEFAULT 0, improvement_count INTEGER DEFAULT 0, last_retrieval_generation INTEGER, source_attempt_id TEXT, source_mode TEXT,
-    
+
     FOREIGN KEY (source_sequence_id) REFERENCES winning_sequences(sequence_id),
     FOREIGN KEY (parent_package_id) REFERENCES viral_information_packages(package_id)
 );
@@ -5058,15 +5058,15 @@ CREATE TABLE viral_information_packages (
 CREATE TABLE viral_package_interactions (
     package_a_id TEXT NOT NULL,
     package_b_id TEXT NOT NULL,
-    
+
     interaction_type TEXT NOT NULL,  -- 'synergistic', 'antagonistic', 'neutral'
     interaction_strength REAL DEFAULT 0.0,  -- -1.0 (interfere) to +1.0 (synergy)
-    
+
     -- Evidence
     co_infection_count INTEGER DEFAULT 0,  -- Times both packages in same host
     synergy_score_boost REAL DEFAULT 0.0,  -- Extra score when both present
     observations INTEGER DEFAULT 0,
-    
+
     PRIMARY KEY (package_a_id, package_b_id),
     FOREIGN KEY (package_a_id) REFERENCES viral_information_packages(package_id),
     FOREIGN KEY (package_b_id) REFERENCES viral_information_packages(package_id)
@@ -5100,29 +5100,29 @@ CREATE TABLE winning_sequences (
     agent_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- The winning sequence
     action_sequence TEXT NOT NULL,         -- JSON: ordered list of actions
     coordinate_sequence TEXT,              -- JSON: coordinates for ACTION6
     total_actions INTEGER NOT NULL,
     total_score REAL NOT NULL,
     efficiency_score REAL NOT NULL,        -- score / actions
-    
+
     -- Game state context
     initial_frame TEXT NOT NULL,           -- JSON: starting frame state
     final_frame TEXT NOT NULL,             -- JSON: winning frame state
     frame_transitions TEXT,                -- JSON: key frame changes
-    
+
     -- Abstraction tags (for pattern matching)
     pattern_tags TEXT,                     -- JSON: ['grid_clear', 'color_match', 'sequence_repeat']
     difficulty_level TEXT,                 -- 'easy', 'medium', 'hard'
     game_type TEXT,                        -- 'action6_only', 'mixed_actions', 'pattern_based'
-    
+
     -- Reuse tracking
     times_referenced INTEGER DEFAULT 0,
     success_rate_when_reused REAL DEFAULT 0.0,
     last_referenced TIMESTAMP, generation_discovered INTEGER DEFAULT 0, is_recombination BOOLEAN DEFAULT 0, scorecard_id TEXT, is_uber_sequence BOOLEAN DEFAULT FALSE, is_active INTEGER DEFAULT 1, quick_flagged INTEGER DEFAULT 0, consecutive_failures INTEGER DEFAULT 0, flag_reason TEXT, level_breakpoints TEXT, source_attempt_id TEXT, source_mode TEXT, w_A REAL, w_B REAL, w_R REAL,
-    
+
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
@@ -5158,24 +5158,24 @@ CREATE TABLE working_theories (
         agent_id TEXT NOT NULL,
         game_type TEXT NOT NULL,
         level_number INTEGER NOT NULL,
-        
+
         -- Theory content
         hypothesis TEXT NOT NULL,
         hypothesis_type TEXT,              -- 'control', 'goal', 'physics', 'trigger'
         stage TEXT DEFAULT 'speculating',  -- speculating, exploring, hypothesis_formed, partial_confirmation, contradicted, confident, transferred
-        
+
         -- Evidence tracking
         evidence_for INTEGER DEFAULT 0,
         evidence_against INTEGER DEFAULT 0,
         contradictions_json TEXT,          -- JSON array of contradictions
-        
+
         -- Last action this theory was active
         last_action INTEGER,
-        
+
         -- Timestamps
         formed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-        
+
         -- Source tracking
         source_observations TEXT           -- JSON of observations that led to theory
     );
@@ -5205,11 +5205,11 @@ CREATE TABLE world_model_states (
     );
 
 -- Indexes
-CREATE INDEX idx_ablation_lookup 
+CREATE INDEX idx_ablation_lookup
             ON ablation_test_results(game_type, level_number)
         ;
 
-CREATE INDEX idx_ablation_recent 
+CREATE INDEX idx_ablation_recent
             ON ablation_test_results(tested_at DESC)
         ;
 
@@ -5219,7 +5219,7 @@ CREATE INDEX idx_abstraction_quality_target ON abstraction_quality(target_game_t
 
 CREATE INDEX idx_abstraction_quality_transfer ON abstraction_quality(transfer_succeeded);
 
-CREATE INDEX idx_action6_availability_game 
+CREATE INDEX idx_action6_availability_game
             ON action6_availability_events(game_id, level_number, action6_available)
         ;
 
@@ -5227,7 +5227,7 @@ CREATE INDEX idx_action_budgets_game_level
                 ON game_action_budgets(game_type, level_number)
             ;
 
-CREATE INDEX idx_action_coverage_game_level 
+CREATE INDEX idx_action_coverage_game_level
                     ON network_action_coverage(game_type, level_number)
                 ;
 
@@ -5239,11 +5239,11 @@ CREATE INDEX idx_agent_biographies_agent
             ON agent_biographies (agent_id, generation)
             ;
 
-CREATE INDEX idx_agent_hypotheses_agent 
+CREATE INDEX idx_agent_hypotheses_agent
             ON agent_hypotheses(agent_id, status)
         ;
 
-CREATE INDEX idx_agent_hypotheses_game 
+CREATE INDEX idx_agent_hypotheses_game
             ON agent_hypotheses(game_type, level_number, status)
         ;
 
@@ -5259,15 +5259,15 @@ CREATE INDEX idx_archived_discoveries_agent ON archived_agent_discoveries(agent_
 
 CREATE INDEX idx_attempts_mode_role_game_level ON attempts(mode, role, game_id, level);
 
-CREATE INDEX idx_autonomous_objects_game 
+CREATE INDEX idx_autonomous_objects_game
             ON autonomous_objects(game_type, level_number)
         ;
 
-CREATE INDEX idx_autopoiesis_gen 
+CREATE INDEX idx_autopoiesis_gen
                 ON autopoiesis_snapshots(generation)
             ;
 
-CREATE INDEX idx_beliefs_pattern_hash 
+CREATE INDEX idx_beliefs_pattern_hash
                 ON inferred_beliefs(pattern_hash)
             ;
 
@@ -5277,23 +5277,23 @@ CREATE INDEX idx_breakthrough_reports_game
 
 CREATE INDEX idx_budget_agent ON budget_usage_log(agent_id, game_id);
 
-CREATE INDEX idx_cods_bayes_game 
+CREATE INDEX idx_cods_bayes_game
                 ON cods_bayesian_hypotheses(game_type, level_number)
             ;
 
-CREATE INDEX idx_cods_bayes_status 
+CREATE INDEX idx_cods_bayes_status
                 ON cods_bayesian_hypotheses(status, posterior_probability DESC)
             ;
 
-CREATE INDEX idx_cods_hints_game 
+CREATE INDEX idx_cods_hints_game
                 ON cods_primitive_hints(game_type, confidence DESC)
             ;
 
-CREATE INDEX idx_cods_level_game 
+CREATE INDEX idx_cods_level_game
                 ON cods_level_outcomes(game_id, level_number)
             ;
 
-CREATE INDEX idx_cognitive_stage 
+CREATE INDEX idx_cognitive_stage
             ON agent_cognitive_stages(current_stage)
         ;
 
@@ -5309,19 +5309,19 @@ CREATE INDEX idx_collective_sessions_status ON collective_reasoning_sessions(ses
 
 CREATE INDEX idx_collective_votes_proposal ON collective_votes(proposal_id);
 
-CREATE INDEX idx_collision_effects_game 
+CREATE INDEX idx_collision_effects_game
             ON collision_effects(game_type, level_number)
         ;
 
-CREATE INDEX idx_collision_events_game 
+CREATE INDEX idx_collision_events_game
             ON collision_events(game_id, level_number, controlled_object_color)
         ;
 
-CREATE INDEX idx_composed_operators_status 
+CREATE INDEX idx_composed_operators_status
             ON composed_operators(status, success_rate DESC)
         ;
 
-CREATE INDEX idx_concept_candidates_success 
+CREATE INDEX idx_concept_candidates_success
             ON concept_candidates(success_count DESC)
         ;
 
@@ -5333,11 +5333,11 @@ CREATE INDEX idx_consciousness_logs_agent_game ON consciousness_logs(agent_id, g
 
 CREATE INDEX idx_consciousness_logs_type ON consciousness_logs(log_type);
 
-CREATE INDEX idx_control_transfer_game 
+CREATE INDEX idx_control_transfer_game
             ON control_transfer_events(game_id, level_number)
         ;
 
-CREATE INDEX idx_control_transfer_patterns_game 
+CREATE INDEX idx_control_transfer_patterns_game
             ON control_transfer_patterns(game_type, level_number)
         ;
 
@@ -5373,15 +5373,15 @@ CREATE INDEX idx_episodic_game_type
                 ON i_thread_episodic_memories(game_type, episode_type)
             ;
 
-CREATE INDEX idx_exploration_map_game_level 
+CREATE INDEX idx_exploration_map_game_level
                     ON network_exploration_map(game_type, level_number)
                 ;
 
-CREATE INDEX idx_failed_attempts_game 
+CREATE INDEX idx_failed_attempts_game
             ON agent_failed_attempts(game_type, level_number)
         ;
 
-CREATE INDEX idx_frame_embeddings_game_level 
+CREATE INDEX idx_frame_embeddings_game_level
             ON frame_embeddings(game_type, level_number)
         ;
 
@@ -5389,7 +5389,7 @@ CREATE INDEX idx_frame_embeddings_trace
             ON frame_embeddings(trace_id)
         ;
 
-CREATE INDEX idx_frontier_checkpoints_best 
+CREATE INDEX idx_frontier_checkpoints_best
 ON frontier_checkpoints(game_type, level_number, survival_score DESC)
 ;
 
@@ -5415,11 +5415,11 @@ CREATE INDEX idx_frustration_states_frustrated ON agent_frustration_states(is_fr
 
 CREATE INDEX idx_frustration_states_level ON agent_frustration_states(frustration_level DESC);
 
-CREATE INDEX idx_game_pattern_links_game 
+CREATE INDEX idx_game_pattern_links_game
             ON game_pattern_links(game_type, level_number)
         ;
 
-CREATE INDEX idx_game_pattern_links_pattern 
+CREATE INDEX idx_game_pattern_links_pattern
             ON game_pattern_links(pattern_id)
         ;
 
@@ -5433,7 +5433,7 @@ CREATE INDEX idx_goal_structure_game ON goal_structure_hypotheses(game_type);
 
 CREATE INDEX idx_goal_structure_type ON goal_structure_hypotheses(goal_type, is_active);
 
-CREATE INDEX idx_grid_region_classification_game 
+CREATE INDEX idx_grid_region_classification_game
             ON grid_region_classification(game_type, level_number, classification)
         ;
 
@@ -5441,27 +5441,27 @@ CREATE INDEX idx_i_thread_agent
                 ON i_thread_history(agent_id, created_at DESC)
             ;
 
-CREATE INDEX idx_improvements_game 
+CREATE INDEX idx_improvements_game
             ON sequence_improvements(game_type, level_number)
         ;
 
-CREATE INDEX idx_indirect_causation_game 
+CREATE INDEX idx_indirect_causation_game
             ON indirect_causation_events(game_id, level_number)
         ;
 
-CREATE INDEX idx_inferred_goals_confidence 
+CREATE INDEX idx_inferred_goals_confidence
             ON inferred_goal_states(confidence DESC)
         ;
 
-CREATE INDEX idx_inferred_goals_game 
+CREATE INDEX idx_inferred_goals_game
             ON inferred_goal_states(game_type, level_number)
         ;
 
-CREATE INDEX idx_interaction_triggers_confidence 
+CREATE INDEX idx_interaction_triggers_confidence
             ON interaction_triggers(confidence DESC)
         ;
 
-CREATE INDEX idx_interaction_triggers_game 
+CREATE INDEX idx_interaction_triggers_game
             ON interaction_triggers(game_type, level_number)
         ;
 
@@ -5475,7 +5475,7 @@ CREATE INDEX idx_lesson_interpretations_game_level ON lesson_interpretations(gam
 
 CREATE INDEX idx_lesson_v2_game_level ON lesson_interpretations_v2(game_type, level_number);
 
-CREATE INDEX idx_lessons_game_type 
+CREATE INDEX idx_lessons_game_type
                 ON game_lessons_learned(game_type, confidence DESC)
             ;
 
@@ -5483,15 +5483,15 @@ CREATE INDEX idx_lessons_hash
                 ON game_lessons_learned(game_type, lesson_hash)
             ;
 
-CREATE INDEX idx_level_mastery_lookup 
+CREATE INDEX idx_level_mastery_lookup
             ON level_mastery(game_type, level_number)
         ;
 
-CREATE INDEX idx_level_mastery_tier 
+CREATE INDEX idx_level_mastery_tier
             ON level_mastery(mastery_tier, total_mastery_score DESC)
         ;
 
-CREATE INDEX idx_metacog_assumptions_game 
+CREATE INDEX idx_metacog_assumptions_game
             ON metacognitive_assumptions(game_type, level_number, is_valid)
         ;
 
@@ -5499,7 +5499,7 @@ CREATE INDEX idx_metacognitive_questions_agent ON metacognitive_questions(agent_
 
 CREATE INDEX idx_metacognitive_questions_type ON metacognitive_questions(question_type);
 
-CREATE INDEX idx_mode_agent_gen 
+CREATE INDEX idx_mode_agent_gen
             ON agent_operating_modes(agent_id, generation)
         ;
 
@@ -5521,39 +5521,39 @@ CREATE INDEX idx_nfh_game_type ON network_failure_hypotheses(game_type);
 
 CREATE INDEX idx_nfh_level ON network_failure_hypotheses(game_type, level_number);
 
-CREATE INDEX idx_object_hypotheses_game 
+CREATE INDEX idx_object_hypotheses_game
             ON network_object_control_hypotheses(game_type, level_number, is_active)
         ;
 
-CREATE INDEX idx_object_selection_game 
+CREATE INDEX idx_object_selection_game
             ON object_selection_state(game_type, level_number, is_selectable)
         ;
 
-CREATE INDEX idx_object_selection_shape 
+CREATE INDEX idx_object_selection_shape
             ON object_selection_state(game_type, shape_signature, is_selectable)
         ;
 
-CREATE INDEX idx_object_snapshots_color 
+CREATE INDEX idx_object_snapshots_color
             ON object_property_snapshots(game_id, object_color)
         ;
 
-CREATE INDEX idx_object_snapshots_game 
+CREATE INDEX idx_object_snapshots_game
             ON object_property_snapshots(game_id, level_number, action_number)
         ;
 
-CREATE INDEX idx_optimization_game_level 
+CREATE INDEX idx_optimization_game_level
             ON optimization_status(game_id, level_number)
         ;
 
-CREATE INDEX idx_optimization_status 
+CREATE INDEX idx_optimization_status
             ON optimization_status(is_optimized, generations_without_improvement)
         ;
 
-CREATE INDEX idx_oracle_exp_active 
+CREATE INDEX idx_oracle_exp_active
             ON oracle_experiments(verdict)
         ;
 
-CREATE INDEX idx_oracle_obs_gen 
+CREATE INDEX idx_oracle_obs_gen
             ON oracle_observations(generation)
         ;
 
@@ -5567,15 +5567,15 @@ CREATE INDEX idx_position_death_lookup
                 ON position_death_patterns (game_type, level_number, bucket_x, bucket_y, is_active)
             ;
 
-CREATE INDEX idx_primitive_status 
+CREATE INDEX idx_primitive_status
             ON primitive_status(status)
         ;
 
-CREATE INDEX idx_property_changes_game 
+CREATE INDEX idx_property_changes_game
             ON object_property_changes(game_id, level_number)
         ;
 
-CREATE INDEX idx_pseudo_button_game 
+CREATE INDEX idx_pseudo_button_game
             ON pseudo_button_behavior(game_type, level_number)
         ;
 
@@ -5619,19 +5619,19 @@ CREATE INDEX idx_replay_index_attempt ON replay_index(attempt_id);
 
 CREATE INDEX idx_replay_index_replay ON replay_index(replay_id, arc_game_id);
 
-CREATE INDEX idx_replay_learning_game_type 
+CREATE INDEX idx_replay_learning_game_type
                 ON replay_learning_events(game_type, level_number)
             ;
 
-CREATE INDEX idx_replay_patterns_game_type 
+CREATE INDEX idx_replay_patterns_game_type
                 ON replay_inferred_patterns(game_type)
             ;
 
-CREATE INDEX idx_resonance_score 
+CREATE INDEX idx_resonance_score
                 ON resonance_patterns(resonance_score DESC)
             ;
 
-CREATE INDEX idx_resource_counters_game 
+CREATE INDEX idx_resource_counters_game
             ON detected_resource_counters(game_type, level_number)
         ;
 
@@ -5643,11 +5643,11 @@ CREATE INDEX idx_role_perf_role ON agent_role_performance(role);
 
 CREATE INDEX idx_role_transition_agent_gen ON role_transition_attempts(agent_id, generation);
 
-CREATE INDEX idx_selectability_conditions_game 
+CREATE INDEX idx_selectability_conditions_game
             ON selectability_conditions(game_type, level_number, action6_became_available)
         ;
 
-CREATE INDEX idx_self_object_identity_game 
+CREATE INDEX idx_self_object_identity_game
             ON self_object_identity(game_id, level_number, still_valid)
         ;
 
@@ -5661,7 +5661,7 @@ CREATE INDEX idx_stuck_game_lookup
         ON stuck_game_interventions (game_type, resolved, generation)
     ;
 
-CREATE INDEX idx_stuck_points_game_level 
+CREATE INDEX idx_stuck_points_game_level
                     ON network_stuck_points(game_type, level_number)
                 ;
 
@@ -5679,7 +5679,7 @@ CREATE INDEX idx_subgoal_plans_game ON subgoal_plans(game_id);
 
 CREATE INDEX idx_subgoal_plans_status ON subgoal_plans(plan_status);
 
-CREATE INDEX idx_success_insights_game 
+CREATE INDEX idx_success_insights_game
             ON agent_success_insights(game_type, level_number, confidence DESC)
         ;
 
@@ -5687,7 +5687,7 @@ CREATE INDEX idx_symbolic_state_game ON symbolic_state_hypotheses(game_type, lev
 
 CREATE INDEX idx_symbolic_state_role ON symbolic_state_hypotheses(object_role, is_active);
 
-CREATE INDEX idx_symmetry_exp_game 
+CREATE INDEX idx_symmetry_exp_game
             ON pending_symmetry_experiments(game_type, level_number)
         ;
 
@@ -5743,47 +5743,47 @@ CREATE INDEX idx_tool_effect_game ON tool_effect_hypotheses(game_type);
 
 CREATE INDEX idx_tool_effect_type ON tool_effect_hypotheses(effect_type, is_active);
 
-CREATE INDEX idx_trigger_events_game 
+CREATE INDEX idx_trigger_events_game
             ON trigger_sequence_events(game_id, level_number)
         ;
 
-CREATE INDEX idx_trigger_name_gen 
+CREATE INDEX idx_trigger_name_gen
                 ON trigger_history(trigger_name, generation)
             ;
 
-CREATE INDEX idx_trigger_sequences_game 
+CREATE INDEX idx_trigger_sequences_game
             ON trigger_sequences(game_type, level_number, outcome_type)
         ;
 
-CREATE INDEX idx_trigger_sequences_success 
+CREATE INDEX idx_trigger_sequences_success
             ON trigger_sequences(success_rate DESC)
         ;
 
 CREATE INDEX idx_ui_layout_game ON ui_layout_hypotheses(game_type);
 
-CREATE INDEX idx_universal_patterns_class 
+CREATE INDEX idx_universal_patterns_class
             ON universal_object_patterns(pattern_class, is_active)
         ;
 
-CREATE INDEX idx_universal_patterns_color 
+CREATE INDEX idx_universal_patterns_color
             ON universal_object_patterns(object_color, action_type)
         ;
 
-CREATE INDEX idx_universal_patterns_confidence 
+CREATE INDEX idx_universal_patterns_confidence
             ON universal_object_patterns(global_confidence DESC)
         ;
 
-CREATE INDEX idx_unlock_attempts_primitive 
+CREATE INDEX idx_unlock_attempts_primitive
             ON primitive_unlock_attempts(primitive_name, rlvr_validation_passed)
         ;
 
 CREATE INDEX idx_valence_associations_attempt ON valence_associations(source_attempt_id);
 
-CREATE INDEX idx_valence_associations_game 
+CREATE INDEX idx_valence_associations_game
             ON valence_associations(game_type, level_number)
         ;
 
-CREATE INDEX idx_valence_associations_valence 
+CREATE INDEX idx_valence_associations_valence
             ON valence_associations(valence)
         ;
 

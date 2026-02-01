@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 #!/usr/bin/env python3
@@ -10,52 +11,54 @@ Dynamic per-game action allocation based on breakthrough potential.
 Tier 1 Improvement #1: +50% expected gain
 
 Games with 0 level wins → HIGH budget (discovery phase)
-Games with 1-2 level wins → MEDIUM budget (expansion phase)  
+Games with 1-2 level wins → MEDIUM budget (expansion phase)
 Games with 3+ level wins → LOW budget (exploitation phase)
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-from typing import Optional
-from database_interface import DatabaseInterface
 import logging
+from typing import Optional
+
+from database_interface import DatabaseInterface
 
 logger = logging.getLogger(__name__)
 
 
 class BreakthroughBudgetAllocator:
     """Allocate action budgets based on game breakthrough potential."""
-    
+
     def __init__(self, db: DatabaseInterface):
         self.db = db
-        
+
         # Budget levels by discovery phase
         # BUGFIX: Previous budgets (800/400/150) were too low - replay alone can consume 50-100 actions
         # Need enough budget AFTER replay to explore frontier levels
         self.DISCOVERY_BUDGET = 2000   # High: unbeaten games need full exploration
         self.EXPANSION_BUDGET = 1500   # Medium: partial wins, still need to explore new levels
         self.EXPLOITATION_BUDGET = 800 # Low: beaten games, but still need budget for optimization runs
-        
+
         # Per-level budgets (total budget / expected levels)
         self.DISCOVERY_PER_LEVEL = 400
         self.EXPANSION_PER_LEVEL = 300
         self.EXPLOITATION_PER_LEVEL = 200
-        
+
     def calculate_game_budget(self, game_id: str, agent_id: Optional[str] = None) -> dict:
         """
         Calculate optimal action budget for a specific game.
-        
+
         Args:
             game_id: Game to allocate budget for
             agent_id: Optional agent ID for personalization
-            
+
         Returns:
             Dictionary with action_allowance_per_level, action_allowance_total, phase
         """
         # Get network-wide level completion stats for this game
         level_wins = self.get_network_level_wins(game_id)
-        
+
         # Determine phase based on progress
         if level_wins == 0:
             phase = 'DISCOVERY'
@@ -72,10 +75,10 @@ class BreakthroughBudgetAllocator:
             per_level = self.EXPLOITATION_PER_LEVEL
             total = self.EXPLOITATION_BUDGET
             reason = f"Beaten game ({level_wins}+ levels) - optimization budget"
-        
+
         logger.info(f"[TARGET] Budget for {game_id}: {total} total, {per_level}/level ({phase})")
         logger.debug(f"   Reason: {reason}")
-        
+
         return {
             'action_allowance_per_level': per_level,
             'action_allowance_total': total,
@@ -83,11 +86,11 @@ class BreakthroughBudgetAllocator:
             'reason': reason,
             'network_level_wins': level_wins
         }
-    
+
     def get_network_level_wins(self, game_id: str) -> int:
         """
         Get total unique level wins across ALL agents for this game.
-        
+
         Returns:
             Count of unique levels that have been completed by anyone
         """
@@ -97,43 +100,43 @@ class BreakthroughBudgetAllocator:
                 FROM winning_sequences
                 WHERE game_id = ?
             """, (game_id,))
-            
+
             if result and result[0]:
                 return result[0]['level_wins']
             else:
                 return 0
-                
+
         except Exception as e:
             logger.warning(f"Error checking network level wins for {game_id}: {e}")
             return 0
-    
+
     def get_batch_budgets(self, game_ids: list) -> dict:
         """
         Calculate budgets for multiple games efficiently.
-        
+
         Args:
             game_ids: List of game IDs
-            
+
         Returns:
             Dictionary mapping game_id -> budget dict
         """
         budgets = {}
         for game_id in game_ids:
             budgets[game_id] = self.calculate_game_budget(game_id)
-        
+
         return budgets
-    
+
     def log_budget_distribution(self, game_ids: list):
         """Log budget allocation summary for a batch of games."""
         budgets = self.get_batch_budgets(game_ids)
-        
+
         discovery_count = sum(1 for b in budgets.values() if b['phase'] == 'DISCOVERY')
         expansion_count = sum(1 for b in budgets.values() if b['phase'] == 'EXPANSION')
         exploitation_count = sum(1 for b in budgets.values() if b['phase'] == 'EXPLOITATION')
-        
+
         total_budget = sum(b['action_allowance_total'] for b in budgets.values())
         avg_budget = total_budget / len(budgets) if budgets else 0
-        
+
         logger.info(f"\n[STATS] BUDGET ALLOCATION SUMMARY:")
         logger.info(f"   Total Games: {len(game_ids)}")
         logger.info(f"   DISCOVERY ({discovery_count}): {discovery_count/len(game_ids)*100:.1f}% @ {self.DISCOVERY_BUDGET} actions")
@@ -147,18 +150,18 @@ if __name__ == "__main__":
     # Quick test
     db = DatabaseInterface()
     allocator = BreakthroughBudgetAllocator(db)
-    
+
     # Test on a few games
     test_games = db.execute_query("""
-        SELECT DISTINCT game_id 
-        FROM game_results 
+        SELECT DISTINCT game_id
+        FROM game_results
         LIMIT 10
     """)
-    
+
     if test_games:
         game_ids = [g['game_id'] for g in test_games]
         allocator.log_budget_distribution(game_ids)
-        
+
         print("\n[OK] Breakthrough Budget Allocator test complete")
     else:
         print("[WARN]  No games found in database")

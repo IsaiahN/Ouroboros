@@ -1,6 +1,6 @@
 {
   "_comment": "Custom decision rung orderings. Lower priority number = evaluated first.",
-  
+
   "experimental_curiosity_first": [
     ["infinite_loop_breaker", 1],
     ["exploration_phase", 5],
@@ -16,7 +16,7 @@
     ["primitive_suggester", 55],
     ["smart_action_selection", 99]
   ],
-  
+
   "minimal_fear": [
     ["infinite_loop_breaker", 1],
     ["survey", 5],
@@ -29,10 +29,11 @@
     ["death_avoidance", 90],
     ["smart_action_selection", 99]
   ],
-  
+
   "maximum_caution": [
     ["infinite_loop_breaker", 1],
     ["death_avoidance", 2],
+    ["prior_lessons", 3],
     ["questioning_engine", 5],
     ["survey", 10],
     ["network_wisdom", 15],
@@ -43,7 +44,7 @@
     ["primitive_suggester", 40],
     ["smart_action_selection", 99]
   ],
-  
+
   "network_learner": [
     ["infinite_loop_breaker", 1],
     ["network_wisdom", 5],
@@ -56,7 +57,7 @@
     ["primitive_suggester", 40],
     ["smart_action_selection", 99]
   ],
-  
+
   "pure_exploration": [
     ["infinite_loop_breaker", 1],
     ["survey", 5],

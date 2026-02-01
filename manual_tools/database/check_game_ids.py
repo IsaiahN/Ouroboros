@@ -10,9 +10,9 @@ print("AS66 - Game IDs and Deactivation Analysis")
 print("=" * 100)
 
 c.execute("""
-    SELECT game_id, game_type, level_number, is_active, flag_reason, sequence_id, 
+    SELECT game_id, game_type, level_number, is_active, flag_reason, sequence_id,
            success_rate_when_reused, times_referenced
-    FROM winning_sequences 
+    FROM winning_sequences
     WHERE game_type = 'as66'
     ORDER BY level_number, is_active DESC
     LIMIT 30
@@ -35,7 +35,7 @@ print("=" * 100)
 c.execute("""
     SELECT game_id, game_type, level_number, is_active, flag_reason, sequence_id,
            success_rate_when_reused, times_referenced
-    FROM winning_sequences 
+    FROM winning_sequences
     WHERE game_type = 'ls20'
     ORDER BY level_number, is_active DESC
     LIMIT 30
@@ -56,9 +56,9 @@ print("\n" + "=" * 100)
 print("LS20 - Level Distribution")
 print("=" * 100)
 c.execute("""
-    SELECT level_number, COUNT(*) as cnt, 
+    SELECT level_number, COUNT(*) as cnt,
            SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active
-    FROM winning_sequences 
+    FROM winning_sequences
     WHERE game_type = 'ls20'
     GROUP BY level_number
     ORDER BY level_number
@@ -72,7 +72,7 @@ print("Deactivation Reason Distribution (all games)")
 print("=" * 100)
 c.execute("""
     SELECT flag_reason, COUNT(*) as cnt
-    FROM winning_sequences 
+    FROM winning_sequences
     WHERE is_active = 0 AND flag_reason IS NOT NULL
     GROUP BY flag_reason
     ORDER BY cnt DESC

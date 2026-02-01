@@ -132,7 +132,7 @@ Without meta-representation, your system is like a person with **zero metacognit
 
 ```
 Game 1: Container overflow → manually add containment primitives
-Game 2: Reference semantics → manually add template primitives  
+Game 2: Reference semantics → manually add template primitives
 Game 3: Hidden timing rule → manually add temporal primitives
 Game 4: Conservation law → manually add physics primitives
 Game 5: Recursive structure → manually add recursion primitives
@@ -153,31 +153,31 @@ def meta_discovery_loop(game):
     result = try_existing_operators(game)
     if result.success:
         return result
-    
+
     # 2. Analyze the failure
     failure_analysis = analyze_what_went_wrong(result)
-    
+
     # 3. Identify the missing concept
     missing_concept = identify_gap_in_knowledge(failure_analysis)
-    
+
     # 4. Generate hypotheses for new primitives
     primitive_hypotheses = generate_primitive_candidates(
         missing_concept,
         existing_primitives,
         successful_traces_from_other_games
     )
-    
+
     # 5. Test hypotheses through RLVR
     for hypothesis in primitive_hypotheses:
         test_result = test_primitive_hypothesis(hypothesis, game)
         if test_result.improves_performance:
             new_primitive = formalize_primitive(hypothesis)
             add_to_primitive_library(new_primitive)
-            
+
             # 6. Meta-step: Analyze what made this primitive useful
             meta_pattern = analyze_utility_pattern(new_primitive)
             add_to_discovery_strategies(meta_pattern)
-            
+
             return retry_with_new_primitive(game, new_primitive)
 ```
 
@@ -239,7 +239,7 @@ I discovered a NEW PATTERN in primitive discovery:
 - This is a GENERAL principle, not specific to gravity
 - I should create a primitive factory:
   conditional_law_factory(law, property, condition)
-  
+
 This is a HIGHER-ORDER PRIMITIVE.
 It generates other primitives.
 """
@@ -258,7 +258,7 @@ add_discovery_pattern("conditional_law_pattern", {
 # System immediately hypothesizes
 hypothesis = conditional_law_factory(
     law="pushable",
-    property="color", 
+    property="color",
     condition=lambda c: c == BLUE
 )
 
@@ -302,7 +302,7 @@ General pattern:
 
 This suggests I need:
 1. History buffer primitive
-2. Pattern matching over sequences primitive  
+2. Pattern matching over sequences primitive
 3. Precondition checking primitive
 
 These compose into temporal_precondition.
@@ -387,19 +387,19 @@ META_PRIMITIVES = {
     # Represent operators as data
     'serialize_operator': "Convert operator to data structure",
     'deserialize_operator': "Convert data structure to executable operator",
-    
+
     # Analyze operators
     'extract_operator_pattern': "Find common structure across operators",
     'identify_operator_family': "Group operators by similarity",
-    
+
     # Generate operators
     'instantiate_operator_template': "Create operator from pattern + bindings",
     'compose_operators': "Combine operators into new operators",
-    
+
     # Modify operators
     'specialize_operator': "Add constraints to make operator more specific",
     'generalize_operator': "Remove constraints to make operator more general",
-    
+
     # Reason about operators
     'predict_operator_utility': "Estimate if operator will help on problem",
     'explain_operator_success': "Why did this operator work?",
@@ -414,56 +414,56 @@ class SelfExtendingCODS(CODS):
         """
         The core self-extension loop for handling novel games.
         """
-        
+
         # Try existing operators
         attempts = []
         for operator in self.operator_library:
             result = self.test_operator(operator, game)
             attempts.append((operator, result))
-        
+
         # If success, we're done
         if any(r.success for _, r in attempts):
             return max(attempts, key=lambda x: x[1].score)
-        
+
         # Failure analysis: What's missing?
         failure_patterns = self.analyze_failures(attempts)
-        
+
         # Identify knowledge gap
         knowledge_gap = self.identify_missing_concept(
             failure_patterns,
             game_observations=self.observe(game),
             known_concepts=self.concept_library
         )
-        
+
         # Generate primitive hypotheses
         hypotheses = self.generate_primitive_hypotheses(
             gap=knowledge_gap,
             existing_primitives=self.primitive_library,
             meta_patterns=self.discovery_strategy_library
         )
-        
+
         # Test hypotheses
         for hypothesis in hypotheses:
             new_primitive = self.formalize_hypothesis(hypothesis)
             test_result = self.validate_primitive_rlvr(new_primitive, game)
-            
+
             if test_result.significant_improvement:
                 # Add primitive
                 self.primitive_library.add(new_primitive)
-                
+
                 # Meta-learn: WHY did this work?
                 meta_pattern = self.extract_discovery_pattern(
                     problem=game,
                     solution=new_primitive,
                     failure_mode=knowledge_gap
                 )
-                
+
                 # Add discovery strategy
                 self.discovery_strategy_library.add(meta_pattern)
-                
+
                 # Retry with new primitive
                 return self.retry_with_new_knowledge(game, new_primitive)
-        
+
         # If all hypotheses failed, escalate to human
         return self.request_oracle_guidance(
             game=game,
@@ -471,7 +471,7 @@ class SelfExtendingCODS(CODS):
             hypotheses=hypotheses,
             knowledge_gap=knowledge_gap
         )
-    
+
     def extract_discovery_pattern(self, problem, solution, failure_mode):
         """
         Meta-learning: Figure out what made this primitive discovery successful.
@@ -495,7 +495,7 @@ class DiscoveryStrategyLibrary:
     Library of meta-patterns for discovering new primitives.
     These are discovered, not hardcoded.
     """
-    
+
     def __init__(self):
         # Seed with basic strategies
         self.strategies = {
@@ -503,20 +503,20 @@ class DiscoveryStrategyLibrary:
             'specialization': "Try adding constraints to general primitive",
             'inversion': "Try reversing a primitive's logic",
         }
-    
+
     def discover_new_strategy(self, successful_discoveries):
         """
         Analyze successful primitive discoveries to find meta-patterns.
         """
         pattern = self.find_common_structure(successful_discoveries)
-        
+
         if pattern.is_novel():
             new_strategy = self.abstract_to_strategy(pattern)
             self.strategies[new_strategy.name] = new_strategy
-            
+
             # Viral package: Share discovery strategy with other agents
             self.broadcast_discovery_strategy(new_strategy)
-    
+
     def apply_strategy(self, strategy_name, context):
         """
         Use a discovery strategy to generate primitive hypotheses.

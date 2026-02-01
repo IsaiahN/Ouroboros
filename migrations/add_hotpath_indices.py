@@ -1,4 +1,5 @@
 import os
+
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 """Add hot-path indices for attempts, sequences, and lesson tables.

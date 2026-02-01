@@ -5,31 +5,33 @@ Pariah Analysis Tool
 Analyzes pariah system effectiveness and potential analysis paralysis issues.
 """
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import sqlite3
 from pathlib import Path
+
 
 def analyze_pariahs():
     db_path = Path(__file__).parent.parent / 'core_data.db'
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    
+
     print("=" * 70)
     print("PARIAH SYSTEM ANALYSIS")
     print("=" * 70)
-    
+
     # 1. Active pariahs count
     c.execute('SELECT COUNT(*) as cnt FROM pariahs WHERE is_active = 1')
     print(f"\nActive Pariahs: {c.fetchone()['cnt']}")
-    
+
     # 2. Pariah details
     print("\n--- ACTIVE PARIAHS ---")
     c.execute('''
-        SELECT pariah_id, pariah_name, source_game_id, toxicity, trigger_count, 
+        SELECT pariah_id, pariah_name, source_game_id, toxicity, trigger_count,
                discovery_generation, last_triggered_generation, avoidance_success_rate
-        FROM pariahs 
+        FROM pariahs
         WHERE is_active = 1
         ORDER BY trigger_count DESC
         LIMIT 15
@@ -43,17 +45,17 @@ def analyze_pariahs():
                   f"Gen: {p['discovery_generation']} -> {p['last_triggered_generation']} (diff: {gen_diff})")
     else:
         print("  No active pariahs")
-    
+
     # 3. Agent pariah awareness
     print("\n--- AGENT PARIAH AWARENESS ---")
     c.execute('SELECT COUNT(*) as cnt FROM agent_pariah_awareness WHERE is_active = 1')
     print(f"Total awareness records: {c.fetchone()['cnt']}")
-    
+
     c.execute('''
-        SELECT agent_id, COUNT(pariah_id) as pariah_count, 
-               AVG(awareness_level) as avg_awareness, 
+        SELECT agent_id, COUNT(pariah_id) as pariah_count,
+               AVG(awareness_level) as avg_awareness,
                AVG(avoidance_priority) as avg_priority
-        FROM agent_pariah_awareness 
+        FROM agent_pariah_awareness
         WHERE is_active = 1
         GROUP BY agent_id
         ORDER BY pariah_count DESC
@@ -66,7 +68,7 @@ def analyze_pariahs():
                   f"Awareness: {a['avg_awareness']:.2f} | Priority: {a['avg_priority']:.2f}")
     else:
         print("  No agent pariah awareness records")
-    
+
     # 4. lp85 game analysis
     print("\n--- lp85 GAME LEVEL DISTRIBUTION ---")
     c.execute('''
@@ -84,7 +86,7 @@ def analyze_pariahs():
             print(f"  Level {r['level_completions']}: {r['count']} games ({pct:.1f}%) | Avg Score: {r['avg_score']:.2f}")
     else:
         print("  No lp85 games found")
-    
+
     # 5. Frozen state / dead end failures
     print("\n--- FROZEN STATE FAILURES ---")
     try:
@@ -120,13 +122,13 @@ def analyze_pariahs():
                 print("  No frozen state logs found")
         except sqlite3.OperationalError:
             print("  No relevant logs table found")
-    
+
     # 6. Check for pariah decay mechanism
     print("\n--- PARIAH DECAY CHECK ---")
     c.execute('''
         SELECT discovery_generation, last_triggered_generation,
                (SELECT MAX(generation) FROM agents WHERE is_active = 1) as current_gen
-        FROM pariahs 
+        FROM pariahs
         WHERE is_active = 1
     ''')
     decay_check = c.fetchall()
@@ -142,7 +144,7 @@ def analyze_pariahs():
         print(f"  Pariahs not triggered in 50+ generations: {old_pariahs}")
         if old_pariahs > 0:
             print("  [WARNING] Old pariahs may be causing paralysis - consider decay")
-    
+
     # 7. Role-based pariah tolerance check
     print("\n--- ROLE-BASED ANALYSIS ---")
     c.execute('''
@@ -158,7 +160,7 @@ def analyze_pariahs():
             print(f"  social_rule_adherence {a['social_rule_adherence']:.1f}: {a['cnt']} agents")
     else:
         print("  No social_rule_adherence data (pariah tolerance not implemented)")
-    
+
     conn.close()
     print("\n" + "=" * 70)
 

@@ -13,50 +13,49 @@ Design Principles:
 
 Usage:
     from engines.decision import PhaseExecutor
-    
+
     executor = PhaseExecutor(engine_registry, db)
     decision = executor.decide(game_state, agent_context)
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-import time
 import logging
-from typing import Dict, Any, Optional, TYPE_CHECKING
-from dataclasses import asdict
+import time
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from engines.registry import EngineRegistry
     from database_interface import DatabaseInterface
 
 from engines.decision.phase_contracts import (
-    PhaseError,
-    GameState,
     AgentContext,
-    OrientContext,
-    GroundTruthContext,
-    ReasonContext,
-    PatternContext,
-    ProposalContext,
     FilteredContext,
     FinalDecision,
-    create_empty_orient_context,
+    GameState,
+    GroundTruthContext,
+    OrientContext,
+    PatternContext,
+    PhaseError,
+    ProposalContext,
+    ReasonContext,
+    create_empty_filtered_context,
     create_empty_ground_truth_context,
-    create_empty_reason_context,
+    create_empty_orient_context,
     create_empty_pattern_context,
     create_empty_proposal_context,
-    create_empty_filtered_context,
+    create_empty_reason_context,
 )
-
 from engines.decision.phases import (
     EmergencyCheck,
-    OrientPhase,
+    FilterPhase,
     GroundTruthPhase,
-    ReasonPhase,
+    OrientPhase,
     PatternPhase,
     ProposePhase,
-    FilterPhase,
+    ReasonPhase,
     SelectPhase,
 )
 
@@ -66,7 +65,7 @@ logger = logging.getLogger(__name__)
 class PhaseExecutor:
     """
     Executes the 7-phase decision pipeline.
-    
+
     Phases:
     1. ORIENT - "What world am I in?"
     2. GROUND TRUTH - "What do I empirically know?"
@@ -75,10 +74,10 @@ class PhaseExecutor:
     5. PROPOSE - "What's my best move?"
     6. FILTER - "Remove bad options"
     7. SELECT - "Final weighted decision"
-    
+
     Plus a pre-phase emergency check for loop breaking.
     """
-    
+
     def __init__(
         self,
         engine_registry: 'EngineRegistry',
@@ -86,14 +85,14 @@ class PhaseExecutor:
     ):
         """
         Initialize the phase executor.
-        
+
         Args:
             engine_registry: Registry for accessing all engines
             db: Optional database interface for logging decisions
         """
         self.engines = engine_registry
         self.db = db
-        
+
         # Initialize all phases
         self._emergency = EmergencyCheck(engine_registry)
         self._phase1_orient = OrientPhase(engine_registry)
@@ -103,12 +102,12 @@ class PhaseExecutor:
         self._phase5_propose = ProposePhase(engine_registry)
         self._phase6_filter = FilterPhase(engine_registry)
         self._phase7_select = SelectPhase(engine_registry)
-        
+
         # Statistics
         self._decision_count = 0
         self._emergency_count = 0
         self._total_time_ms = 0.0
-    
+
     def decide(
         self,
         game_state: GameState,
@@ -116,14 +115,14 @@ class PhaseExecutor:
     ) -> FinalDecision:
         """
         Execute full decision pipeline.
-        
+
         Args:
             game_state: Current frame, score, game_id, level
             agent_context: Agent ID, wA/wB, urgency, role
-            
+
         Returns:
             FinalDecision with action and full audit trail
-            
+
         Raises:
             PhaseError: If any phase fails critically (NEVER silently)
         """
@@ -136,11 +135,11 @@ class PhaseExecutor:
             'agent_id': agent_context.agent_id,
             'phases': {},
         }
-        
+
         try:
             # Validate inputs
             agent_context.validate()
-            
+
             # === EMERGENCY CHECK (Pre-Phase) ===
             emergency_decision = self._emergency.check(game_state, agent_context)
             if emergency_decision:
@@ -150,53 +149,53 @@ class PhaseExecutor:
                 emergency_decision.audit_trail = audit
                 self._log_decision(emergency_decision)
                 return emergency_decision
-            
+
             # === PHASE 1: ORIENT ===
             orient_ctx = self._run_phase1(game_state, agent_context, audit)
-            
+
             # === PHASE 2: GROUND TRUTH ===
             ground_ctx = self._run_phase2(game_state, agent_context, orient_ctx, audit)
-            
+
             # === PHASE 3: REASON ===
             reason_ctx = self._run_phase3(
                 game_state, agent_context, orient_ctx, ground_ctx, audit
             )
-            
+
             # === PHASE 4: PATTERN MATCH ===
             pattern_ctx = self._run_phase4(
                 game_state, agent_context, orient_ctx, ground_ctx, reason_ctx, audit
             )
-            
+
             # === PHASE 5: PROPOSE ===
             proposal_ctx = self._run_phase5(
                 game_state, agent_context, orient_ctx, ground_ctx,
                 reason_ctx, pattern_ctx, audit
             )
-            
+
             # === PHASE 6: FILTER ===
             filtered_ctx = self._run_phase6(
                 game_state, agent_context, ground_ctx, reason_ctx, proposal_ctx, audit
             )
-            
+
             # === PHASE 7: SELECT ===
             decision = self._run_phase7(
                 game_state, agent_context, filtered_ctx, audit
             )
-            
+
             # Finalize audit
             audit['total_time_ms'] = (time.time() - start_time) * 1000
             audit['emergency'] = False
             decision.audit_trail = audit
-            
+
             # Update statistics
             self._decision_count += 1
             self._total_time_ms += audit['total_time_ms']
-            
+
             # Log decision
             self._log_decision(decision)
-            
+
             return decision
-            
+
         except PhaseError:
             # Re-raise phase errors (they're explicit)
             raise
@@ -204,7 +203,7 @@ class PhaseExecutor:
             # Wrap unexpected errors
             logger.error(f"[EXECUTOR] Unexpected error: {e}", exc_info=True)
             raise PhaseError("EXECUTOR", f"Unexpected error: {e}")
-    
+
     def _run_phase1(
         self,
         game_state: GameState,
@@ -224,7 +223,7 @@ class PhaseExecutor:
             audit['phases']['orient'] = self._context_to_dict(ctx)
             audit['phases']['orient']['error'] = str(e)
             return ctx
-    
+
     def _run_phase2(
         self,
         game_state: GameState,
@@ -247,7 +246,7 @@ class PhaseExecutor:
             audit['phases']['ground_truth'] = self._context_to_dict(ctx)
             audit['phases']['ground_truth']['error'] = str(e)
             return ctx
-    
+
     def _run_phase3(
         self,
         game_state: GameState,
@@ -271,7 +270,7 @@ class PhaseExecutor:
             audit['phases']['reason'] = self._context_to_dict(ctx)
             audit['phases']['reason']['error'] = str(e)
             return ctx
-    
+
     def _run_phase4(
         self,
         game_state: GameState,
@@ -296,7 +295,7 @@ class PhaseExecutor:
             audit['phases']['pattern'] = self._context_to_dict(ctx)
             audit['phases']['pattern']['error'] = str(e)
             return ctx
-    
+
     def _run_phase5(
         self,
         game_state: GameState,
@@ -323,7 +322,7 @@ class PhaseExecutor:
             audit['phases']['propose'] = self._context_to_dict(ctx)
             audit['phases']['propose']['error'] = str(e)
             return ctx
-    
+
     def _run_phase6(
         self,
         game_state: GameState,
@@ -348,7 +347,7 @@ class PhaseExecutor:
             audit['phases']['filter'] = self._context_to_dict(ctx)
             audit['phases']['filter']['error'] = str(e)
             return ctx
-    
+
     def _run_phase7(
         self,
         game_state: GameState,
@@ -361,7 +360,7 @@ class PhaseExecutor:
         return self._phase7_select.execute(
             game_state, agent_context, filtered_ctx, audit
         )
-    
+
     def _context_to_dict(self, ctx: Any) -> Dict[str, Any]:
         """Convert context to dictionary for audit trail."""
         try:
@@ -380,12 +379,12 @@ class PhaseExecutor:
             return {'value': str(ctx)}
         except Exception:
             return {'error': 'serialization_failed'}
-    
+
     def _log_decision(self, decision: FinalDecision) -> None:
         """Log decision to database if available."""
         if self.db is None:
             return
-        
+
         try:
             # Log to decision_audit table if it exists
             if hasattr(self.db, 'log_decision'):
@@ -397,12 +396,12 @@ class PhaseExecutor:
                 )
         except Exception as e:
             logger.debug(f"[EXECUTOR] Failed to log decision: {e}")
-    
+
     def reset(self) -> None:
         """Reset state for new game/level."""
         self._emergency.reset()
         self._phase6_filter.reset()
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """Get executor statistics."""
         return {

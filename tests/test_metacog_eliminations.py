@@ -1,5 +1,6 @@
 import os
 import sys
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: No pycache
 sys.dont_write_bytecode = True
 
@@ -12,18 +13,19 @@ Verifies that:
 """
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database_interface import DatabaseInterface
 from agent_self_model import MetacognitiveReasoningEngine
+from database_interface import DatabaseInterface
+
 
 def test_metacog_eliminations():
     """Test that METACOG elimination tracking works."""
     print("=" * 60)
     print("METACOG ELIMINATIONS TEST")
     print("=" * 60)
-    
+
     db = DatabaseInterface(":memory:")
     metacog = MetacognitiveReasoningEngine(db)
-    
+
     # Test 1: Elimination tracking
     # Note: ACTION6 cannot be eliminated without coordinates (by design)
     # Use ACTION1 instead
@@ -35,14 +37,14 @@ def test_metacog_eliminations():
         action="ACTION1",
         reason="Stop using ACTION1 - it consistently fails"
     )
-    
+
     # Query eliminations
     elims = db.execute_query("""
-        SELECT eliminated_action, reason, test_count 
-        FROM metacognitive_eliminations 
+        SELECT eliminated_action, reason, test_count
+        FROM metacognitive_eliminations
         WHERE game_type = 'lp85' AND level_number = 2
     """)
-    
+
     if elims and len(elims) > 0:
         print(f"  Eliminated: {elims[0]['eliminated_action']}")
         print(f"  Reason: {elims[0]['reason']}")
@@ -50,10 +52,10 @@ def test_metacog_eliminations():
     else:
         print("  [FAIL] No eliminations found")
         assert False, "No eliminations found - MetacognitiveReasoningEngine.eliminate_action() may not be working"
-    
+
     # Test 2: Prediction type suppression
     print("\n[TEST 2] Prediction type suppression after repeated failures")
-    
+
     # Make predictions and evaluate them as wrong
     for i in range(6):
         pred_id = metacog.make_prediction(
@@ -71,7 +73,7 @@ def test_metacog_eliminations():
             score_after=1.0,
             frame_changed=False
         )
-    
+
     # Check if prediction type is suppressed
     if 'discover' in metacog._suppressed_prediction_types or 'discover_pattern' in metacog._suppressed_prediction_types:
         print(f"  Suppressed types: {metacog._suppressed_prediction_types}")
@@ -81,7 +83,7 @@ def test_metacog_eliminations():
         print(f"  Failure tracking: {metacog._prediction_type_failures}")
         print(f"  Suppressed types: {metacog._suppressed_prediction_types}")
         print("  [WARN] Prediction type may not be suppressed - checking count")
-        
+
         # The type might be 'discover' not 'discover_pattern'
         for ptype, data in metacog._prediction_type_failures.items():
             if data.get('consecutive_failures', 0) >= 5:
@@ -90,7 +92,7 @@ def test_metacog_eliminations():
         else:
             print("  [FAIL] No type reached suppression threshold")
             assert False, "No prediction type reached suppression threshold"
-    
+
     print("\n" + "=" * 60)
     print("ALL METACOG ELIMINATIONS TESTS PASSED!")
     print("=" * 60)

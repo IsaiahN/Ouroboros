@@ -98,7 +98,7 @@ I'll identify the novel findings from each document:
   - RC text-structure intervention **transfers to** word-problem solving (g=0.41-0.68)
   - WPS text-structure intervention **transfers to** reading comprehension (g=0.54-0.91)
   - Text-structure knowledge **mediates both** acquisition effects AND cross-domain transfer
-  
+
 **Practical significance:**
 - Suggests schools could address **comorbid RC-WPS difficulties with single-domain intervention** (major resource/scheduling advantage)
 - Provides evidence that WPS should be conceptualized as **a form of text comprehension**
@@ -159,7 +159,7 @@ Both interventions were designed with remarkable parallelism:
 - **Two text types taught:** cause-effect and compare-contrast
 - **Duration:** 45 lessons over 15 weeks (three 30-minute sessions/week)
 - **Delivery:** One-on-one by trained research staff
-- **Structure:** 
+- **Structure:**
   - Unit 1 (3 weeks): foundational skills
   - Unit 2 (3 weeks): cause-effect text
   - Unit 3 (4 weeks): compare-contrast text
@@ -197,7 +197,7 @@ In Unit 4 (just 2 weeks), students received:
 - Instruction on **parallels between passages and word problems**
 - Emphasis on **common text-structure vocabulary**
 
-**Crucially:** 
+**Crucially:**
 - Reading intervention students did NOT learn the word-problem solving strategy
 - Word-problem intervention students did NOT learn the reading passage strategy
 - This made the transfer effects even more impressive
@@ -207,7 +207,7 @@ In Unit 4 (just 2 weeks), students received:
 **Participants:** 221 second-graders with comorbid difficulties
 - Randomly assigned to:
   - Reading comprehension intervention (n=70 completed)
-  - Word-problem solving intervention (n=67 completed)  
+  - Word-problem solving intervention (n=67 completed)
   - Control group (n=70 completed)
 - **45% received English learner services** (though those with very limited English were excluded)
 - Screened from 1,526 students across large urban/suburban district
@@ -248,7 +248,7 @@ Four outcome measures (all researcher-developed):
 
 **Word-problem intervention improved word-problem solving:**
 - Effect size = 1.36 on Word-Problem Solutions
-- Effect size = 1.05 on Word-Problem Retell  
+- Effect size = 1.05 on Word-Problem Retell
 - Performance gap vs. classmates: **nearly eliminated** on Word-Problem Solutions (-0.08 SD vs. -2.18 SD for control)
 - Performance gap on Word-Problem Retell: **substantially reduced** (-0.58 SD vs. -1.31 SD for control)
 
@@ -293,7 +293,7 @@ These effects are consistent with meta-analyses but extend findings to children 
 
 When comparing the two intervention conditions (not just to control):
 
-**For text comprehension measures (Retells):** 
+**For text comprehension measures (Retells):**
 - Transfer effects were similar in both directions
 - Word-problem intervention → Reading Retell: effect size = 0.54
 - Reading intervention → Word-Problem Retell: effect size = 0.68
@@ -311,7 +311,7 @@ When comparing the two intervention conditions (not just to control):
 Control group children (who received typical school instruction plus school-provided intervention) showed **severe performance gaps at post-test:**
 - Reading Notes: -1.88 SD below classmates
 - Reading Retell: -1.64 SD
-- Word-Problem Solutions: -2.18 SD  
+- Word-Problem Solutions: -2.18 SD
 - Word-Problem Retell: -1.31 SD
 
 This highlights:
@@ -434,7 +434,7 @@ This study provides the first evidence that schools don't necessarily need to pr
 
 **This is transformative because:**
 - Resources are limited
-- Scheduling is challenging  
+- Scheduling is challenging
 - Reading intervention typically takes priority, leaving math needs unmet
 - Children with comorbid difficulties face compounding consequences across schooling
 
@@ -493,7 +493,7 @@ Children solved problems with:
 - Objects that were **either bigger or smaller** than anything previously seen
 - Required outcomes they had **never witnessed** the machine produce
 
-**Example**: 
+**Example**:
 - Training: saw 4cm objects become 2cm or 8cm
 - Test: given 10cm object (bigger than any training object)
 - Had to infer it should go in "shrinking" machine even though they'd never seen the machine produce anything that size

@@ -137,17 +137,17 @@ for i in range(5):
     if state in ["WIN", "GAME_OVER"]:
         print(f"\nGame ended! Final state: {state}, Score: {score}")
         break
-    
+
     # Pick a random action
     action = random.choice(actions)
-    
+
     # Build request data
     request_data = {
         "game_id": game_id,
         "card_id": card_id,
         "guid": guid
     }
-    
+
     # ACTION6 needs x,y coordinates
     if action == "ACTION6":
         request_data["x"] = random.randint(0, 29)
@@ -155,13 +155,13 @@ for i in range(5):
         print(f"Action {i+1}: {action} at ({request_data['x']}, {request_data['y']})", end="")
     else:
         print(f"Action {i+1}: {action}", end="")
-    
+
     # Take the action
     response = session.post(
         f"{ROOT_URL}/api/cmd/{action}",
         json=request_data
     )
-    
+
     game_data = response.json()
     state = game_data["state"]
     score = game_data.get("score", 0)

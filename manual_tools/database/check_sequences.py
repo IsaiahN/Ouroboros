@@ -16,7 +16,7 @@ for col in schema:
 # Check ls20 sequences
 print("\n--- ls20 Sequences ---")
 r1 = db.execute_query("""
-    SELECT sequence_id, level_number, is_active, discovered_at, 
+    SELECT sequence_id, level_number, is_active, discovered_at,
            success_rate_when_reused, times_referenced, consecutive_failures,
            flag_reason, LENGTH(action_sequence) as seq_len
     FROM winning_sequences
@@ -29,7 +29,7 @@ for row in r1:
           f"success_rate={row.get('success_rate_when_reused', 'N/A')}, refs={row.get('times_referenced', 0)}, "
           f"consec_fails={row.get('consecutive_failures', 0)}")
 
-# Check as66 sequences  
+# Check as66 sequences
 print("\n--- as66 Sequences ---")
 r2 = db.execute_query("""
     SELECT sequence_id, level_number, is_active, discovered_at,
@@ -48,7 +48,7 @@ for row in r2:
 # Summary of all inactive sequences
 print("\n--- All Inactive Sequences (by game_type) ---")
 r3 = db.execute_query("""
-    SELECT game_type, level_number, COUNT(*) as cnt, 
+    SELECT game_type, level_number, COUNT(*) as cnt,
            GROUP_CONCAT(DISTINCT deactivation_reason) as reasons
     FROM winning_sequences
     WHERE is_active = 0
@@ -61,11 +61,11 @@ for row in r3:
 # Check what's causing deactivations - look at recent deactivations
 print("\n--- Recent Deactivations (last 7 days) ---")
 r4 = db.execute_query("""
-    SELECT game_type, level_number, deactivation_reason, 
+    SELECT game_type, level_number, deactivation_reason,
            validation_attempts, validation_failures,
            updated_at
     FROM winning_sequences
-    WHERE is_active = 0 
+    WHERE is_active = 0
     AND updated_at >= datetime('now', '-7 days')
     ORDER BY updated_at DESC
     LIMIT 20

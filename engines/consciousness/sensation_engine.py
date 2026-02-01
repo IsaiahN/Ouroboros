@@ -21,7 +21,7 @@ Integration Rule: Enhance existing systems, don't replace them.
 TWO STREAMS ARCHITECTURE IMPLEMENTATION
 =============================================================================
 
-This module implements the Two Streams consciousness theory from the 
+This module implements the Two Streams consciousness theory from the
 Unified Agent Consciousness Theory document.
 
 STREAM A (Private Experience):
@@ -30,8 +30,8 @@ STREAM A (Private Experience):
     - Updated by: Direct interaction outcomes (reward/punishment)
     - Accessed via: query_personal_impression(), get_agent_sensation_mappings()
     - Key fields: sensation_score, association, learned locally
-    
-STREAM B (Collective Network Wisdom):  
+
+STREAM B (Collective Network Wisdom):
     - What the NETWORK knows from validated viral packages
     - Stored in: Network sensation mappings (shared across agents)
     - Updated by: CODS validation, viral package spread
@@ -55,6 +55,7 @@ See: persona_runtime.py for persona proposal generation
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
 
 import json
@@ -62,8 +63,10 @@ import math
 import random
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
+
 from database_interface import DatabaseInterface
+
 
 def safe_json_parse(json_str, default=None):
     """Safely parse JSON string, returning default if invalid or empty."""
@@ -78,17 +81,17 @@ def safe_json_parse(json_str, default=None):
 def get_sensation_mode(agent_role: str, is_frontier: bool) -> dict:
     """
     Determine sensation configuration based on role and context.
-    
+
     Per AGI Unified Theory: Sensation is a "multiplier" for learning.
     Q2 (reward/punishment) requires sensation for ALL agents.
-    
+
     Pioneers on frontier: Network sensation isolated (no inherited bias),
     but personal sensation active (can feel rewards/punishments).
-    
+
     Args:
         agent_role: 'pioneer', 'optimizer', 'generalist', 'exploiter'
         is_frontier: True if on unexplored level (network_max < current_level)
-        
+
     Returns:
         dict with sensation mode configuration:
         - network_sensation_read: Whether to read from network mappings
@@ -132,38 +135,38 @@ def get_sensation_mode(agent_role: str, is_frontier: bool) -> dict:
 class SensationEngine:
     """
     Core engine for sensation-based navigation and emotional learning.
-    
+
     Implements the sensation-object mapping system where agents develop
     emotional associations with different game elements and use these
     emotions to bias their navigation actions (1-7).
-    
+
     Three-Layer Integration:
     - Layer 1 (Genome): Basic sensation sensitivity (inherited)
     - Layer 2 (Epigenetic): Sensation learning rates, biases (inherited with decay)
     - Layer 3 (Somatic): Specific object-sensation mappings (community database)
     """
-    
+
     def __init__(self, database_interface: DatabaseInterface):
         self.db = database_interface
-        
+
         # Sensation parameters
         self.sensation_range = (-1.0, 1.0)  # Negative=avoid, Positive=approach
         self.learning_rate_base = 0.3  # Base learning rate for sensation updates
         self.state_decay_rate = 0.1  # How fast navigation state decays to neutral
         self.confidence_threshold = 0.6  # Minimum confidence for strong biasing
-        
+
         # Action mapping for navigation (1-7 only)
         self.navigation_actions = {1, 2, 3, 4, 5, 6, 7}
-        
+
         # Emotional states mapping (standard emotions)
         self.emotion_states = {
             (-1.0, -0.5): 'frustrated',
-            (-0.5, -0.1): 'cautious', 
+            (-0.5, -0.1): 'cautious',
             (-0.1, 0.1): 'neutral',
             (0.1, 0.5): 'curious',
             (0.5, 1.0): 'confident'
         }
-        
+
         # =================================================================
         # MORTALITY SENSATIONS: Existential feelings that drive urgency
         # =================================================================
@@ -183,7 +186,7 @@ class SensationEngine:
             'urgency_pressure': 0.0,       # 0.0 (relaxed) to 1.0 (panicked)
             'legacy_anxiety': 0.0,         # 0.0 (secure) to 1.0 (desperate)
         }
-        
+
         # Mortality sensation thresholds
         self.mortality_thresholds = {
             'fear_trigger': 0.3,       # vitality below this triggers fear
@@ -191,22 +194,22 @@ class SensationEngine:
             'relief_trigger': 0.7,     # vitality above this triggers relief
             'urgency_trigger': 0.4,    # legacy_score below this AND pressure high
         }
-    
+
     def initialize_agent_sensations(self, agent_id: str, agent_type: str) -> Dict[str, Any]:
         """
         Initialize sensation profile for new agent based on agent type.
-        
+
         Creates initial object-sensation mappings and navigation parameters.
         These go into Layer 2 (epigenetic) - inherited but with decay.
-        
+
         Args:
             agent_id: Unique agent identifier
             agent_type: Agent type determines initial sensation biases
-            
+
         Returns:
             Dictionary with initialized sensation profile
         """
-        
+
         # Base sensation profile structure
         sensation_profile = {
             'object_sensations': {},
@@ -217,7 +220,7 @@ class SensationEngine:
                 'emotional_intelligence_score': 0.0
             }
         }
-        
+
         # Agent type-specific sensation initialization
         type_biases = {
             'pattern_specialist': {
@@ -241,7 +244,7 @@ class SensationEngine:
                 'solution_patterns': 0.5
             }
         }
-        
+
         # Initialize with type-specific biases
         if agent_type in type_biases:
             sensation_profile['object_sensations'] = type_biases[agent_type].copy()
@@ -251,91 +254,91 @@ class SensationEngine:
                 'unknown_object': 0.0,
                 'familiar_pattern': 0.1
             }
-        
+
         # Navigation action preferences (random initialization)
         sensation_profile['navigation_preferences'] = {
             str(action): random.uniform(-0.2, 0.2) for action in self.navigation_actions
         }
-        
+
         return sensation_profile
-    
-    def perceive_object(self, agent_id: str, object_type: str, object_data: Dict[str, Any]) -> float:
+
+    def perceive_object(self, agent_id: str, object_type: str, _object_data: Dict[str, Any]) -> float:
         """
         Agent perceives an object and recalls associated sensation score.
-        
+
         This is the "Perceive → Recall" step in the sensation loop.
-        
+
         Args:
             agent_id: Agent doing the perceiving
             object_type: Type of object being perceived
             object_data: Object characteristics (color, size, etc.)
-            
+
         Returns:
             Sensation score for this object (-1.0 to 1.0)
         """
-        
+
         # Get agent's sensation profile
         agent_result = self.db.execute_query(
             "SELECT sensation_profile FROM agents WHERE agent_id = ?",
             (agent_id,)
         )
-        
+
         if not agent_result:
             return 0.0  # Neutral if agent not found
-        
+
         sensation_profile = safe_json_parse(agent_result[0]['sensation_profile'])
         object_sensations = sensation_profile.get('object_sensations', {})
-        
+
         # Direct object type match
         if object_type in object_sensations:
             return object_sensations[object_type]
-        
+
         # Fuzzy matching based on object characteristics
         sensation_score = 0.0
         match_count = 0
-        
+
         for known_object, known_score in object_sensations.items():
             # Simple similarity check (can be enhanced later)
             if object_type.lower() in known_object.lower() or known_object.lower() in object_type.lower():
                 sensation_score += known_score
                 match_count += 1
-        
+
         if match_count > 0:
             sensation_score /= match_count
-        
+
         # Clamp to sensation range
         return max(self.sensation_range[0], min(self.sensation_range[1], sensation_score))
-    
+
     def update_navigation_state(self, agent_id: str, sensation_score: float, context: Dict[str, Any]) -> float:
         """
         Update agent's internal navigation state based on sensation.
-        
+
         This is the "Update internal state" step in the sensation loop.
-        
+
         Args:
             agent_id: Agent whose state to update
             sensation_score: Sensation from perceiving object
             context: Game context (score, recent success, etc.)
-            
+
         Returns:
             New navigation state (-1.0 to 1.0)
         """
-        
+
         # Get current navigation state
         agent_result = self.db.execute_query(
             "SELECT navigation_state, state_update_sensitivity FROM agents WHERE agent_id = ?",
             (agent_id,)
         )
-        
+
         if not agent_result:
             return 0.0
-        
+
         current_state = agent_result[0]['navigation_state']
         sensitivity = agent_result[0]['state_update_sensitivity']
-        
+
         # Calculate state change based on sensation and context
         sensation_influence = sensation_score * sensitivity
-        
+
         # Context modifiers
         context_modifier = 0.0
         if 'recent_success_rate' in context:
@@ -344,26 +347,26 @@ class SensationEngine:
                 context_modifier = 0.2  # Success boosts confidence
             elif success_rate < 0.3:
                 context_modifier = -0.2  # Failure increases frustration
-        
+
         # Update navigation state with decay toward neutral
         new_state = current_state * (1.0 - self.state_decay_rate) + sensation_influence + context_modifier
-        
+
         # Clamp to valid range
         new_state = max(-1.0, min(1.0, new_state))
-        
+
         # Store new state in database
         self.db.execute_query(
             "UPDATE agents SET navigation_state = ? WHERE agent_id = ?",
             (new_state, agent_id)
         )
-        
+
         # Log navigation state change
         emotion = self._get_emotion_from_state(new_state)
         state_change_trigger = f"sensation_{sensation_score:.2f}_context_{context_modifier:.2f}"
-        
+
         self.db.execute_query("""
-            INSERT INTO navigation_state_history 
-            (history_id, agent_id, game_id, generation, navigation_state, dominant_emotion, 
+            INSERT INTO navigation_state_history
+            (history_id, agent_id, game_id, generation, navigation_state, dominant_emotion,
              state_change_trigger, previous_state, state_change_magnitude, game_score, recent_success_rate)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
@@ -371,116 +374,116 @@ class SensationEngine:
             new_state, emotion, state_change_trigger, current_state, abs(new_state - current_state),
             context.get('game_score', 0), context.get('recent_success_rate', None)
         ))
-        
+
         return new_state
-    
+
     def bias_action_selection(self, agent_id: str, available_actions: List[int], navigation_state: float) -> List[Tuple[int, float]]:
         """
         Apply sensation-based biasing to action selection for navigation actions (1-7).
-        
+
         This is the "Bias action" step in the sensation loop.
-        
+
         Args:
             agent_id: Agent selecting actions
             available_actions: List of available action numbers
             navigation_state: Current emotional state of agent
-            
+
         Returns:
             List of (action, bias_score) tuples for navigation actions only
         """
-        
+
         # Filter to navigation actions only (1-7)
         nav_actions = [action for action in available_actions if action in self.navigation_actions]
-        
+
         if not nav_actions:
             return []
-        
+
         # Get agent's action preferences
         agent_result = self.db.execute_query(
             "SELECT action_biases FROM agents WHERE agent_id = ?",
             (agent_id,)
         )
-        
+
         if not agent_result:
             return [(action, 0.0) for action in nav_actions]
-        
+
         action_biases = safe_json_parse(agent_result[0]['action_biases'])
-        
+
         # Calculate biased action preferences
         biased_actions = []
-        
+
         for action in nav_actions:
             # Base bias from learned preferences
             base_bias = action_biases.get(str(action), 0.0)
-            
+
             # Emotional state influence
             emotional_modifier = self._calculate_emotional_modifier(action, navigation_state)
-            
+
             # Combined bias score
             total_bias = base_bias + emotional_modifier
-            
+
             biased_actions.append((action, total_bias))
-        
+
         return biased_actions
-    
-    def learn_from_outcome(self, agent_id: str, object_type: str, action_taken: int, 
+
+    def learn_from_outcome(self, agent_id: str, object_type: str, action_taken: int,
                           outcome: Dict[str, Any], navigation_state: float) -> bool:
         """
         Learn from action outcome and update sensation mappings.
-        
+
         This is the "Learn from outcome" step in the sensation loop.
-        
+
         Args:
             agent_id: Agent that took the action
             object_type: Object that was acted upon
             action_taken: Action number that was executed
             outcome: Action outcome (success, score_change, etc.)
             navigation_state: Emotional state when action was taken
-            
+
         Returns:
             True if learning occurred, False otherwise
         """
-        
+
         if action_taken not in self.navigation_actions:
             return False  # Only learn from navigation actions
-        
+
         # Calculate reward signal
         reward = self._calculate_reward_signal(outcome)
-        
+
         # Get current sensation mapping for this object
         current_sensation = self.perceive_object(agent_id, object_type, {})
-        
+
         # Calculate sensation adjustment based on reward and confidence
         agent_result = self.db.execute_query(
             "SELECT sensation_learning_rate FROM agents WHERE agent_id = ?",
             (agent_id,)
         )
-        
+
         if not agent_result:
             return False
-        
+
         learning_rate = agent_result[0]['sensation_learning_rate']
-        
+
         # Positive reward strengthens positive sensation, negative reward creates negative sensation
         target_sensation = 0.5 * reward  # Scale reward to sensation range
         sensation_adjustment = learning_rate * (target_sensation - current_sensation)
-        
+
         # Update object sensation mapping
         new_sensation = current_sensation + sensation_adjustment
         new_sensation = max(self.sensation_range[0], min(self.sensation_range[1], new_sensation))
-        
+
         self._update_object_sensation_mapping(agent_id, object_type, new_sensation, outcome)
-        
+
         # Update action bias
         self._update_action_bias(agent_id, action_taken, reward, navigation_state)
-        
+
         # Log learning event
         learning_success = abs(sensation_adjustment) > 0.05  # Significant learning threshold
-        
+
         self.db.execute_query("""
             INSERT INTO sensation_learning_events
-            (event_id, agent_id, game_id, generation, object_type, pre_sensation_score, 
-             post_sensation_score, pre_navigation_state, post_navigation_state, action_taken, 
+            (event_id, agent_id, game_id, generation, object_type, pre_sensation_score,
+             post_sensation_score, pre_navigation_state, post_navigation_state, action_taken,
              reward_received, sensation_adjustment, learning_success)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
@@ -488,44 +491,44 @@ class SensationEngine:
             object_type, current_sensation, new_sensation, navigation_state, navigation_state,
             action_taken, reward, sensation_adjustment, learning_success
         ))
-        
+
         return learning_success
-    
+
     def get_agent_emotional_intelligence(self, agent_id: str) -> float:
         """
         Calculate agent's current emotional intelligence score.
-        
+
         Based on sensation learning effectiveness, consistency, and adaptability.
-        
+
         Args:
             agent_id: Agent to assess
-            
+
         Returns:
             Emotional intelligence score (0.0 to 1.0)
         """
-        
+
         # Get learning statistics
         learning_stats = self.db.execute_query("""
-            SELECT 
+            SELECT
                 COUNT(*) as total_events,
                 AVG(CASE WHEN learning_success THEN 1.0 ELSE 0.0 END) as success_rate,
                 AVG(ABS(sensation_adjustment)) as avg_adjustment,
                 COUNT(DISTINCT object_type) as object_diversity
-            FROM sensation_learning_events 
+            FROM sensation_learning_events
             WHERE agent_id = ? AND event_timestamp > datetime('now', '-24 hours')
         """, (agent_id,))
-        
+
         if not learning_stats or learning_stats[0]['total_events'] == 0:
             return 0.0
-        
+
         stats = learning_stats[0]
-        
+
         # Calculate EI components
         learning_effectiveness = stats['success_rate']  # How often learning is successful
         learning_activity = min(1.0, stats['total_events'] / 10.0)  # Learning frequency (capped)
         adaptability = min(1.0, stats['avg_adjustment'] * 5.0)  # How much agent adapts (capped)
         diversity = min(1.0, stats['object_diversity'] / 5.0)  # Object type diversity (capped)
-        
+
         # Weighted EI score
         ei_score = (
             learning_effectiveness * 0.4 +
@@ -533,25 +536,25 @@ class SensationEngine:
             adaptability * 0.2 +
             diversity * 0.2
         )
-        
+
         # Update agent's EI score in database
         self.db.execute_query(
             "UPDATE agents SET emotional_intelligence_score = ? WHERE agent_id = ?",
             (ei_score, agent_id)
         )
-        
+
         return ei_score
-    
+
     def get_agent_sensation_state(self, agent_id: str) -> Optional[Dict[str, float]]:
         """
         Get agent's current sensation/emotional state.
-        
+
         Returns frustration and satisfaction levels derived from navigation_state.
         Navigation state ranges from -1.0 (frustrated) to +1.0 (satisfied).
-        
+
         Args:
             agent_id: Agent to query
-            
+
         Returns:
             Dictionary with 'frustration' and 'satisfaction' (0.0 to 1.0 each),
             or None if agent not found
@@ -561,12 +564,12 @@ class SensationEngine:
                 "SELECT navigation_state FROM agents WHERE agent_id = ?",
                 (agent_id,)
             )
-            
+
             if not result:
                 return None
-            
+
             nav_state = result[0].get('navigation_state', 0.0) or 0.0
-            
+
             # Convert navigation_state (-1 to +1) to frustration/satisfaction (0 to 1)
             # Negative nav_state = frustration, positive = satisfaction
             if nav_state < 0:
@@ -575,51 +578,51 @@ class SensationEngine:
             else:
                 frustration = 0.0
                 satisfaction = nav_state  # +0.5 -> 0.5 satisfaction
-            
+
             return {
                 'frustration': frustration,
                 'satisfaction': satisfaction,
                 'navigation_state': nav_state
             }
-            
+
         except Exception as e:
             logger.debug(f"Failed to get agent sensation state: {e}")
             return None
-    
+
     def get_network_emotional_intelligence(self, generation: Optional[int] = None) -> Dict[str, float]:
         """
         Calculate network-level emotional intelligence metrics.
-        
+
         Assesses collective emotional learning and sensation-based capabilities.
-        
+
         Args:
             generation: Generation to analyze (None for current)
-            
+
         Returns:
             Dictionary with network EI metrics
         """
-        
+
         generation_filter = ""
         params = []
-        
+
         if generation is not None:
             generation_filter = "AND generation = ?"
             params.append(generation)
-        
+
         # Network learning metrics
         network_stats = self.db.execute_query(f"""
-            SELECT 
+            SELECT
                 AVG(emotional_intelligence_score) as avg_ei_score,
                 COUNT(DISTINCT agent_id) as active_agents,
                 AVG(sensation_learning_rate) as avg_learning_rate,
                 AVG(ABS(navigation_state)) as avg_emotional_intensity
-            FROM agents 
+            FROM agents
             WHERE is_active = TRUE {generation_filter}
         """, tuple(params))
-        
+
         # Recent learning activity
         learning_activity = self.db.execute_query(f"""
-            SELECT 
+            SELECT
                 COUNT(*) as total_events,
                 AVG(CASE WHEN learning_success THEN 1.0 ELSE 0.0 END) as network_success_rate,
                 COUNT(DISTINCT agent_id) as learning_agents,
@@ -627,7 +630,7 @@ class SensationEngine:
             FROM sensation_learning_events
             WHERE event_timestamp > datetime('now', '-1 hour') {generation_filter}
         """, tuple(params))
-        
+
         if not network_stats or not learning_activity:
             return {
                 'network_ei_score': 0.0,
@@ -635,25 +638,25 @@ class SensationEngine:
                 'learning_diversity': 0.0,
                 'network_coherence': 0.0
             }
-        
+
         net_stats = network_stats[0]
         learning_stats = learning_activity[0]
-        
+
         # Calculate network EI metrics
         network_ei = net_stats['avg_ei_score'] or 0.0
         emotional_activity = min(1.0, (learning_stats['total_events'] or 0) / 50.0)
         learning_diversity = min(1.0, (learning_stats['object_diversity'] or 0) / 10.0)
-        
+
         # Network coherence: how aligned are emotional states
         coherence_stats = self.db.execute_query(f"""
-            SELECT 
+            SELECT
                 (1.0 - (MAX(navigation_state) - MIN(navigation_state)) / 2.0) as coherence
-            FROM agents 
+            FROM agents
             WHERE is_active = TRUE {generation_filter}
         """, tuple(params))
-        
+
         network_coherence = coherence_stats[0]['coherence'] if coherence_stats else 0.0
-        
+
         return {
             'network_ei_score': network_ei,
             'emotional_activity': emotional_activity,
@@ -662,17 +665,17 @@ class SensationEngine:
             'active_agents': net_stats['active_agents'] or 0,
             'learning_agents': learning_stats['learning_agents'] or 0
         }
-    
+
     def _get_emotion_from_state(self, navigation_state: float) -> str:
         """Get emotion label from navigation state value."""
         for (min_val, max_val), emotion in self.emotion_states.items():
             if min_val <= navigation_state < max_val:
                 return emotion
         return 'neutral'
-    
+
     def _calculate_emotional_modifier(self, action: int, navigation_state: float) -> float:
         """Calculate how emotional state modifies action preferences."""
-        
+
         # Action-specific emotional modifiers
         action_emotion_map = {
             1: {'confident': 0.3, 'frustrated': -0.2},  # Move up - confident agents prefer
@@ -683,54 +686,54 @@ class SensationEngine:
             6: {'confident': 0.5, 'frustrated': 0.2},   # Submit - confident or desperate
             7: {'frustrated': 0.4, 'confident': -0.1}   # Reset - frustration response
         }
-        
+
         emotion = self._get_emotion_from_state(navigation_state)
         action_modifiers = action_emotion_map.get(action, {})
-        
+
         return action_modifiers.get(emotion, 0.0)
-    
+
     def _calculate_reward_signal(self, outcome: Dict[str, Any]) -> float:
         """Calculate reward signal from action outcome."""
-        
+
         reward = 0.0
-        
+
         # Score-based reward
         if 'score_change' in outcome:
             score_change = outcome['score_change']
             reward += score_change * 0.01  # Scale score to reward range
-        
+
         # Success-based reward
         if 'action_success' in outcome:
             reward += 1.0 if outcome['action_success'] else -0.5
-        
+
         # Game completion reward
         if 'game_won' in outcome and outcome['game_won']:
             reward += 2.0
-        
+
         # Clamp to reasonable range
         return max(-2.0, min(2.0, reward))
-    
-    def _update_object_sensation_mapping(self, agent_id: str, object_type: str, 
+
+    def _update_object_sensation_mapping(self, agent_id: str, object_type: str,
                                        new_sensation: float, outcome: Dict[str, Any]) -> None:
         """Update object sensation mapping in database."""
-        
+
         # Check if mapping exists
         existing = self.db.execute_query(
             "SELECT mapping_id, success_count, failure_count FROM object_sensation_mappings WHERE agent_id = ? AND object_type = ?",
             (agent_id, object_type)
         )
-        
+
         success = outcome.get('action_success', False)
-        
+
         if existing:
             # Update existing mapping
             mapping_id = existing[0]['mapping_id']
             success_count = existing[0]['success_count'] + (1 if success else 0)
             failure_count = existing[0]['failure_count'] + (0 if success else 1)
-            
+
             self.db.execute_query("""
-                UPDATE object_sensation_mappings 
-                SET sensation_score = ?, success_count = ?, failure_count = ?, 
+                UPDATE object_sensation_mappings
+                SET sensation_score = ?, success_count = ?, failure_count = ?,
                     learn_count = learn_count + 1, last_updated = CURRENT_TIMESTAMP
                 WHERE mapping_id = ?
             """, (new_sensation, success_count, failure_count, mapping_id))
@@ -738,43 +741,43 @@ class SensationEngine:
             # Create new mapping
             self.db.execute_query("""
                 INSERT INTO object_sensation_mappings
-                (mapping_id, agent_id, generation, object_type, sensation_score, 
+                (mapping_id, agent_id, generation, object_type, sensation_score,
                  success_count, failure_count)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 str(uuid.uuid4()), agent_id, outcome.get('generation', 0), object_type,
                 new_sensation, 1 if success else 0, 0 if success else 1
             ))
-    
+
     def _update_action_bias(self, agent_id: str, action: int, reward: float, navigation_state: float) -> None:
         """Update action bias based on outcome."""
-        
+
         # Get current action biases
         agent_result = self.db.execute_query(
             "SELECT action_biases FROM agents WHERE agent_id = ?",
             (agent_id,)
         )
-        
+
         if not agent_result:
             return
-        
+
         action_biases = safe_json_parse(agent_result[0]['action_biases'])
-        
+
         # Update bias for this action
         current_bias = action_biases.get(str(action), 0.0)
         bias_adjustment = 0.1 * reward  # Small learning rate for bias updates
         new_bias = current_bias + bias_adjustment
-        
+
         # Clamp bias to reasonable range
         new_bias = max(-1.0, min(1.0, new_bias))
         action_biases[str(action)] = new_bias
-        
+
         # Store updated biases
         self.db.execute_query(
             "UPDATE agents SET action_biases = ? WHERE agent_id = ?",
             (json.dumps(action_biases), agent_id)
         )
-    
+
     # ========================================================================
     # MORTALITY SENSATIONS: Existential Feelings System
     # ========================================================================
@@ -784,7 +787,7 @@ class SensationEngine:
     # These sensations create the existential pressure that makes learning
     # meaningful. Without death awareness, there is no urgency to contribute.
     # ========================================================================
-    
+
     def compute_mortality_sensations(
         self,
         vitality: float,
@@ -794,63 +797,63 @@ class SensationEngine:
     ) -> Dict[str, float]:
         """
         Compute mortality-based sensations from existential state.
-        
+
         These meta-sensations modify standard emotions to create urgency.
         The giraffe stands at birth because it feels the lion's presence.
-        
+
         Args:
             vitality: Current life-force (0.0 = dying, 1.0 = thriving)
             cull_distance: Proximity to culling (0.0 = imminent, 1.0 = safe)
             legacy_score: Total contribution to network
             pressure: Current existential pressure (from mortality state)
-            
+
         Returns:
             Dict of mortality sensations with values 0.0-1.0
         """
         sensations = self.mortality_sensations.copy()
-        
+
         # EXISTENTIAL FEAR: Triggered by low vitality or imminent cull
         if vitality < self.mortality_thresholds['fear_trigger']:
             sensations['existential_fear'] = (
                 self.mortality_thresholds['fear_trigger'] - vitality
             ) / self.mortality_thresholds['fear_trigger']
-        
+
         if cull_distance < self.mortality_thresholds['pain_trigger']:
             # Add cull-based fear
             cull_fear = (
                 self.mortality_thresholds['pain_trigger'] - cull_distance
             ) / self.mortality_thresholds['pain_trigger']
             sensations['existential_fear'] = max(sensations['existential_fear'], cull_fear)
-        
+
         # DEATH PAIN: Suffering when cull is very close
         if cull_distance < self.mortality_thresholds['pain_trigger']:
             sensations['death_pain'] = (
                 self.mortality_thresholds['pain_trigger'] - cull_distance
             ) / self.mortality_thresholds['pain_trigger']
-        
+
         # SURVIVAL RELIEF: Easing when doing well
         if vitality > self.mortality_thresholds['relief_trigger']:
             sensations['survival_relief'] = (
                 vitality - self.mortality_thresholds['relief_trigger']
             ) / (1.0 - self.mortality_thresholds['relief_trigger'])
-        
+
         # URGENCY PRESSURE: Compression of time when legacy is low AND pressure is high
         if legacy_score < 5.0 and pressure > self.mortality_thresholds['urgency_trigger']:
             sensations['urgency_pressure'] = pressure * (1.0 - legacy_score / 5.0)
-        
+
         # LEGACY ANXIETY: Worry about what remains
         if legacy_score < 2.0:
             sensations['legacy_anxiety'] = (2.0 - legacy_score) / 2.0
         elif vitality < 0.5 and legacy_score < 10.0:
             # Even with some legacy, low vitality causes anxiety
             sensations['legacy_anxiety'] = (0.5 - vitality) * 0.5
-        
+
         # Clamp all values to 0-1 range
         for key in sensations:
             sensations[key] = max(0.0, min(1.0, sensations[key]))
-        
+
         return sensations
-    
+
     def apply_mortality_to_emotion(
         self,
         base_emotion: str,
@@ -858,15 +861,15 @@ class SensationEngine:
     ) -> Tuple[str, float]:
         """
         Transform base emotion under mortality pressure.
-        
+
         Mortality sensations act as multipliers that intensify or transform
         the base emotional state. Fear makes caution become paralysis.
         Urgency makes curiosity become desperate exploration.
-        
+
         Args:
             base_emotion: Standard emotion ('frustrated', 'cautious', etc.)
             mortality_sensations: Current mortality sensations
-            
+
         Returns:
             Tuple of (transformed_emotion, intensity)
         """
@@ -875,16 +878,16 @@ class SensationEngine:
         relief = mortality_sensations.get('survival_relief', 0.0)
         urgency = mortality_sensations.get('urgency_pressure', 0.0)
         anxiety = mortality_sensations.get('legacy_anxiety', 0.0)
-        
+
         # No mortality pressure - return base emotion
         total_mortality = fear + pain + urgency + anxiety - relief
         if total_mortality < 0.1:
             return (base_emotion, 0.5)
-        
+
         # Transform emotions under mortality pressure
         transformed = base_emotion
         intensity = 0.5
-        
+
         if base_emotion == 'frustrated':
             if pain > 0.5:
                 transformed = 'agonized'  # Frustration + pain = agony
@@ -892,7 +895,7 @@ class SensationEngine:
             elif fear > 0.5:
                 transformed = 'desperate'  # Frustration + fear = desperation
                 intensity = 0.6 + fear * 0.4
-        
+
         elif base_emotion == 'cautious':
             if fear > 0.6:
                 transformed = 'paralyzed'  # Caution + fear = paralysis
@@ -900,7 +903,7 @@ class SensationEngine:
             elif urgency > 0.5:
                 transformed = 'tense'  # Caution + urgency = tension
                 intensity = 0.6 + urgency * 0.3
-        
+
         elif base_emotion == 'neutral':
             if urgency > 0.4:
                 transformed = 'alert'  # Neutral + urgency = alertness
@@ -908,7 +911,7 @@ class SensationEngine:
             elif anxiety > 0.5:
                 transformed = 'uneasy'  # Neutral + anxiety = unease
                 intensity = 0.5 + anxiety * 0.3
-        
+
         elif base_emotion == 'curious':
             if urgency > 0.5:
                 transformed = 'driven'  # Curiosity + urgency = driven exploration
@@ -916,7 +919,7 @@ class SensationEngine:
             elif fear > 0.4:
                 transformed = 'wary'  # Curiosity + fear = wary interest
                 intensity = 0.5 + fear * 0.2
-        
+
         elif base_emotion == 'confident':
             if relief > 0.5:
                 transformed = 'triumphant'  # Confidence + relief = triumph
@@ -924,9 +927,9 @@ class SensationEngine:
             elif anxiety > 0.5:
                 transformed = 'doubting'  # Confidence + anxiety = self-doubt
                 intensity = 0.4 + anxiety * 0.3
-        
+
         return (transformed, intensity)
-    
+
     def get_mortality_action_bias(
         self,
         mortality_sensations: Dict[str, float],
@@ -934,17 +937,17 @@ class SensationEngine:
     ) -> float:
         """
         Calculate action bias from mortality sensations.
-        
+
         Different actions are preferred under different mortality states:
         - Fear increases reset/submit bias (escape behavior)
         - Urgency increases exploration bias (desperate searching)
         - Pain decreases risky action bias (avoidance)
         - Relief increases confident action bias
-        
+
         Args:
             mortality_sensations: Current mortality sensations
             action: Action number (1-7)
-            
+
         Returns:
             Bias adjustment for this action (-1.0 to 1.0)
         """
@@ -952,15 +955,15 @@ class SensationEngine:
         pain = mortality_sensations.get('death_pain', 0.0)
         urgency = mortality_sensations.get('urgency_pressure', 0.0)
         relief = mortality_sensations.get('survival_relief', 0.0)
-        
+
         # Action-specific mortality biases
         # ACTION1-4: Movement (1=up, 2=down, 3=left, 4=right)
         # ACTION5: Stay/wait
         # ACTION6: Submit/confirm
         # ACTION7: Reset
-        
+
         bias = 0.0
-        
+
         if action in [1, 2, 3, 4]:  # Movement actions
             # Urgency increases movement bias (must act!)
             bias += urgency * 0.3
@@ -968,7 +971,7 @@ class SensationEngine:
             bias -= fear * 0.1
             # Relief increases (freedom to move)
             bias += relief * 0.2
-        
+
         elif action == 5:  # Stay action
             # Fear increases stay bias (freeze response)
             bias += fear * 0.3
@@ -976,14 +979,14 @@ class SensationEngine:
             bias += pain * 0.2
             # Urgency strongly decreases (can't afford to wait)
             bias -= urgency * 0.5
-        
+
         elif action == 6:  # Submit action
             # High urgency might trigger desperation submit
             if urgency > 0.7:
                 bias += 0.3
             # Relief allows confident submission
             bias += relief * 0.4
-        
+
         elif action == 7:  # Reset action
             # Pain increases reset desire (escape current suffering)
             bias += pain * 0.4
@@ -991,13 +994,13 @@ class SensationEngine:
             bias += fear * 0.3
             # Urgency also increases reset (try again quickly)
             bias += urgency * 0.2
-        
+
         return max(-1.0, min(1.0, bias))
-    
+
     # ========================================================================
     # TWO-STREAMS: SEMANTIC IMPRESSIONS
     # ========================================================================
-    
+
     def form_semantic_impression(
         self,
         agent_id: str,
@@ -1008,11 +1011,11 @@ class SensationEngine:
     ) -> None:
         """
         Form a personal semantic impression for an object.
-        
+
         Two-Streams Philosophy: Agents develop personal meanings for objects
         based on their unique experiences. This is part of the "semantic network"
         that influences action decisions.
-        
+
         Args:
             agent_id: Agent forming the impression
             object_type: Type of object
@@ -1023,25 +1026,25 @@ class SensationEngine:
         # Get existing mapping or create new one
         existing = self.db.execute_query("""
             SELECT mapping_id, impression_strength, learn_count
-            FROM object_sensation_mappings 
+            FROM object_sensation_mappings
             WHERE agent_id = ? AND object_type = ?
         """, (agent_id, object_type))
-        
+
         personal_meaning = json.dumps({
             'association': association,
             'memory': memory_context,
             'formed_at': datetime.now().isoformat(),
             'game_context': outcome.get('game_id', '')
         })
-        
+
         if existing:
             # Update existing mapping with stronger impression
             mapping = existing[0]
             new_strength = min(1.0, (mapping['impression_strength'] or 0.5) + 0.1)
-            
+
             self.db.execute_query("""
                 UPDATE object_sensation_mappings
-                SET personal_meaning = ?, impression_strength = ?, 
+                SET personal_meaning = ?, impression_strength = ?,
                     learn_count = learn_count + 1, last_updated = CURRENT_TIMESTAMP
                 WHERE mapping_id = ?
             """, (personal_meaning, new_strength, mapping['mapping_id']))
@@ -1056,7 +1059,7 @@ class SensationEngine:
                 str(uuid.uuid4()), agent_id, outcome.get('generation', 0),
                 object_type, 0.0, personal_meaning, 0.5, 0, 0
             ))
-    
+
     def query_personal_impression(
         self,
         agent_id: str,
@@ -1064,14 +1067,14 @@ class SensationEngine:
     ) -> Optional[Dict[str, Any]]:
         """
         Query agent's personal impression of an object.
-        
+
         Returns the semantic meaning the agent has associated with this object,
         which can be used to override or weight network recommendations.
-        
+
         Args:
             agent_id: Agent to query
             object_type: Object type to check
-            
+
         Returns:
             Dictionary with impression data or None if no impression exists
         """
@@ -1081,13 +1084,13 @@ class SensationEngine:
             FROM object_sensation_mappings
             WHERE agent_id = ? AND object_type = ?
         """, (agent_id, object_type))
-        
+
         if not result or not result[0]['personal_meaning']:
             return None
-        
+
         r = result[0]
         personal_meaning = safe_json_parse(r['personal_meaning'], {})
-        
+
         return {
             'association': personal_meaning.get('association', 'unknown'),
             'memory': personal_meaning.get('memory', ''),
@@ -1095,7 +1098,7 @@ class SensationEngine:
             'sensation_score': r['sensation_score'] or 0.0,
             'success_rate': (r['success_count'] or 0) / max(1, (r['success_count'] or 0) + (r['failure_count'] or 0))
         }
-    
+
     def get_impression_action_bias(
         self,
         agent_id: str,
@@ -1103,30 +1106,30 @@ class SensationEngine:
     ) -> float:
         """
         Calculate aggregate action bias from agent's impressions of perceived objects.
-        
+
         Strong negative impressions should bias agent away from actions,
         strong positive impressions should encourage approach.
-        
+
         Args:
             agent_id: Agent perceiving objects
             perceived_objects: List of object types perceived
-            
+
         Returns:
             Aggregate bias (-1.0 to 1.0) where negative=avoid, positive=approach
         """
         if not perceived_objects:
             return 0.0
-        
+
         total_bias = 0.0
         weight_sum = 0.0
-        
+
         for obj_type in perceived_objects:
             impression = self.query_personal_impression(agent_id, obj_type)
-            
+
             if impression:
                 strength = impression['impression_strength']
                 association = impression['association']
-                
+
                 # Map association to bias
                 association_map = {
                     'danger': -1.0,
@@ -1136,16 +1139,16 @@ class SensationEngine:
                     'goal': 1.0,
                     'success': 0.8
                 }
-                
+
                 base_bias = association_map.get(association, 0.0)
                 weighted_bias = base_bias * strength
-                
+
                 total_bias += weighted_bias
                 weight_sum += strength
-        
+
         if weight_sum > 0:
             return total_bias / weight_sum
-        
+
         return 0.0
 
     def get_tetrahedral_sensation(
@@ -1158,18 +1161,18 @@ class SensationEngine:
     ) -> dict:
         """
         Calculate Stream-aware sensation for an object.
-        
+
         Aligned with Two Streams Theory:
         - stream_a: Private sensory observation (what I personally perceive)
         - stream_b: Collective network wisdom (what others know about this type)
         - hypothesis: Current working theory from CODS (how I think it works)
         - synthesis: Weighted integration via w_a/w_b (persona output)
-        
+
         Args:
             agent_id: The perceiving agent
             object_info: Dict with keys:
                 - 'object_type': str (e.g., 'controlled_object_color_4')
-                - 'position': tuple (x, y) 
+                - 'position': tuple (x, y)
                 - 'color': int (0-9)
                 - 'shape': str (optional)
             control_data: Optional control hypothesis from self-model
@@ -1178,7 +1181,7 @@ class SensationEngine:
                 - 'control_method': str
             w_a: Stream A weight (private experience) - 0 to 1
             w_b: Stream B weight (collective wisdom) - 0 to 1
-                
+
         Returns:
             Stream-aware sensation dict with stream_a, stream_b, hypothesis, synthesis
             plus legacy aliases (structure, function, method, interpretation)
@@ -1186,7 +1189,7 @@ class SensationEngine:
         object_type = object_info.get('object_type', 'unknown')
         position = object_info.get('position', (0, 0))
         color = object_info.get('color', 0)
-        
+
         # STREAM A (Private Experience) - What I perceive/know personally
         # Called "structure" in legacy code but renamed to stream_a for Two Streams clarity
         stream_a = {
@@ -1201,10 +1204,10 @@ class SensationEngine:
             'threat_level': 0.0,
             'approach_score': 0.0
         }
-        
+
         # STREAM B (Collective) - What does the network know? (from impression data)
         impression = self.query_personal_impression(agent_id, object_type)
-        
+
         if impression:
             stream_b = {
                 'sensation_score': impression.get('sensation_score', 0.0),
@@ -1230,7 +1233,7 @@ class SensationEngine:
                 'network_threat_level': 0.0,
                 'network_approach_score': 0.0
             }
-        
+
         # HYPOTHESIS (Theory) - Current working hypothesis about control
         if control_data:
             hypothesis = {
@@ -1254,17 +1257,17 @@ class SensationEngine:
                 'expected_control': False,
                 'expected_goal': False
             }
-        
+
         # SYNTHESIS (Persona Output) - Weighted integration of streams
         synthesis = self._calculate_synthesis(
             agent_id, object_type, stream_a, stream_b, hypothesis, w_a, w_b
         )
-        
+
         # Calculate stream conflict (consciousness intensity)
         goal_conflict = abs(stream_a.get('goal_relevance', 0) - stream_b.get('network_goal_relevance', 0))
         threat_conflict = abs(stream_a.get('threat_level', 0) - stream_b.get('network_threat_level', 0))
         stream_conflict = (goal_conflict + threat_conflict) / 2.0
-        
+
         # Determine dominant stream
         if w_a > w_b + 0.2:
             dominant_stream = 'stream_a'
@@ -1272,7 +1275,7 @@ class SensationEngine:
             dominant_stream = 'stream_b'
         else:
             dominant_stream = 'balanced'
-        
+
         return {
             'stream_a': stream_a,
             'stream_b': stream_b,
@@ -1288,7 +1291,7 @@ class SensationEngine:
             'balance': 1.0 - stream_conflict,
             'dominant_axis': dominant_stream
         }
-    
+
     def _calculate_synthesis(
         self,
         agent_id: str,
@@ -1301,10 +1304,10 @@ class SensationEngine:
     ) -> dict:
         """
         Calculate synthesis axis - persona output integrating streams.
-        
+
         From Unified Consciousness Theory: synthesis is the weighted
         integration of Stream A (private) and Stream B (collective).
-        
+
         Enhanced with surprise scoring per consciousness theory:
         - Surprise is high when underdog stream wins or streams strongly disagree
         - Consciousness intensity correlates with surprise
@@ -1313,32 +1316,32 @@ class SensationEngine:
         goal_relevance = w_a * stream_a.get('goal_relevance', 0) + w_b * stream_b.get('network_goal_relevance', 0)
         threat_level = w_a * stream_a.get('threat_level', 0) + w_b * stream_b.get('network_threat_level', 0)
         approach_score = w_a * stream_a.get('approach_score', 0) + w_b * stream_b.get('network_approach_score', 0)
-        
+
         control_quality = hypothesis.get('control_correlation', 0.0)
-        
+
         # Calculate stream disagreement (for surprise scoring)
         goal_disagreement = abs(stream_a.get('goal_relevance', 0) - stream_b.get('network_goal_relevance', 0))
         threat_disagreement = abs(stream_a.get('threat_level', 0) - stream_b.get('network_threat_level', 0))
         stream_disagreement = (goal_disagreement + threat_disagreement) / 2.0
-        
+
         # Surprise scoring (from consciousness theory)
         # High surprise when: underdog stream dominates OR high disagreement
         weight_imbalance = abs(w_a - w_b)
-        
+
         # Check if "underdog" stream is contributing more than expected
         stream_a_contribution = stream_a.get('approach_score', 0) * w_a
         stream_b_contribution = stream_b.get('network_approach_score', 0) * w_b
-        
+
         if w_a < w_b and stream_a_contribution > stream_b_contribution:
             underdog_surprise = weight_imbalance  # Stream A won despite lower weight
         elif w_b < w_a and stream_b_contribution > stream_a_contribution:
             underdog_surprise = weight_imbalance  # Stream B won despite lower weight
         else:
             underdog_surprise = 0.0
-        
+
         # Total surprise = disagreement surprise + underdog surprise
         surprise_score = min(1.0, stream_disagreement * 0.6 + underdog_surprise * 0.4)
-        
+
         # Consciousness intensity based on surprise
         if surprise_score >= 0.6:
             consciousness_intensity = 'vivid'  # High deliberation needed
@@ -1346,7 +1349,7 @@ class SensationEngine:
             consciousness_intensity = 'deliberative'
         else:
             consciousness_intensity = 'automatic'
-        
+
         synthesis = {
             'semantic_role': 'unknown',
             'goal_relevance': goal_relevance,
@@ -1366,7 +1369,7 @@ class SensationEngine:
             'w_a_used': w_a,
             'w_b_used': w_b,
         }
-        
+
         # Determine semantic role from synthesis
         if control_quality > 0.8:
             synthesis['semantic_role'] = 'self'
@@ -1387,7 +1390,7 @@ class SensationEngine:
         else:
             synthesis['semantic_role'] = 'environmental'
             synthesis['meaning_confidence'] = 0.3
-        
+
         # Calculate attraction
         synthesis['attraction'] = max(-1.0, min(1.0, (
             goal_relevance * 0.5 +
@@ -1395,14 +1398,14 @@ class SensationEngine:
             threat_level * 0.5 +
             (0.2 if synthesis['is_tool'] else 0.0)
         )))
-        
+
         return synthesis
-    
+
     def _calculate_attraction(self, impression: dict) -> float:
         """Calculate attraction score from impression data."""
         association = impression.get('association', 'neutral')
         strength = impression.get('impression_strength', 0.5)
-        
+
         attraction_map = {
             'goal': 1.0,
             'success': 0.8,
@@ -1411,14 +1414,14 @@ class SensationEngine:
             'obstacle': -0.3,
             'danger': -1.0
         }
-        
+
         base = attraction_map.get(association, 0.0)
         return base * strength
-    
+
     def _predict_object_behavior(self, object_type: str, impression: dict) -> str:
         """Predict what this object will do based on type and history."""
         association = impression.get('association', 'neutral')
-        
+
         if 'wall' in object_type or 'boundary' in object_type:
             return 'static_blocking'
         elif 'goal' in object_type or association == 'goal':
@@ -1429,7 +1432,7 @@ class SensationEngine:
             return 'dynamic_unpredictable'
         else:
             return 'passive'
-    
+
     def _calculate_interpretation(
         self,
         agent_id: str,
@@ -1440,7 +1443,7 @@ class SensationEngine:
     ) -> dict:
         """
         Calculate the Interpretation/Void axis - semantic meaning.
-        
+
         This is the 'D' axis of the McGuffin tetrahedron that provides
         the WHY - why does this object matter to the agent's goals?
         """
@@ -1461,14 +1464,14 @@ class SensationEngine:
                 semantic_role = 'goal'
             else:
                 semantic_role = 'environment'
-        
+
         # Goal relevance from function data
         goal_relevance = function['attraction'] if function['attraction'] > 0 else 0.0
         if semantic_role == 'goal':
             goal_relevance = 1.0
         elif semantic_role == 'self':
             goal_relevance = 0.8  # Self is highly relevant
-        
+
         # Threat level
         if function['association'] == 'danger':
             threat_level = 0.9
@@ -1476,17 +1479,17 @@ class SensationEngine:
             threat_level = 0.4
         else:
             threat_level = 0.0
-        
+
         # Curiosity - novelty value for unknown/neutral objects
         curiosity = 0.0
         if function['association'] == 'neutral' and method['interaction_history'] < 3:
             curiosity = 0.7
         elif function['association'] == 'unknown':
             curiosity = 1.0
-        
+
         # Personal meaning - retrieve or generate
         personal_meaning = self._get_personal_meaning(agent_id, object_type)
-        
+
         return {
             'semantic_role': semantic_role,
             'goal_relevance': goal_relevance,
@@ -1494,7 +1497,7 @@ class SensationEngine:
             'curiosity': curiosity,
             'personal_meaning': personal_meaning
         }
-    
+
     def _infer_goal_heuristically(
         self,
         object_type: str,
@@ -1503,19 +1506,19 @@ class SensationEngine:
     ) -> bool:
         """
         Infer whether an object is likely a goal based on heuristics.
-        
+
         In ARC games, goals often have these characteristics:
         - Rare colors (appear infrequently in the grid)
         - Small, distinct objects (1-4 cells)
         - Not background colors (0, 1 common backgrounds)
-        
+
         Returns True if object appears to be a goal candidate.
         """
         try:
             # Only apply heuristics to objects with neutral/unknown association
             if function.get('association') not in ('neutral', 'unknown'):
                 return False
-            
+
             # Extract color from object_type (e.g., "object_color_3" -> 3)
             color = 0
             if 'color_' in object_type:
@@ -1523,12 +1526,12 @@ class SensationEngine:
                     color = int(object_type.split('color_')[-1])
                 except (ValueError, IndexError):
                     pass
-            
+
             # HEURISTIC 1: Rare colors (not common background colors)
             # Colors 0 (black) and 1 (blue) are often backgrounds
             # Colors 2-9 when rare are often goals
             rare_color = color >= 2
-            
+
             # HEURISTIC 2: Small, distinct size (goals are usually small targets)
             size = structure.get('size', (0, 0))
             if isinstance(size, (list, tuple)) and len(size) >= 2:
@@ -1536,24 +1539,24 @@ class SensationEngine:
             else:
                 area = 10  # Default to non-small if size unknown
             small_target = area <= 16  # 4x4 or smaller
-            
+
             # HEURISTIC 3: Low interaction history (new, unexplored)
             # If agent hasn't interacted with this type much, it could be goal
-            
+
             # Return True if object has rare color AND is small
             # This bootstraps goal detection for pioneers on new games
             return rare_color and small_target
-            
+
         except Exception:
             return False
 
     def _get_personal_meaning(self, agent_id: str, object_type: str) -> str:
         """Get agent's personal meaning for an object type."""
         impression = self.query_personal_impression(agent_id, object_type)
-        
+
         if impression and impression.get('memory'):
             return impression['memory']
-        
+
         # Default meanings based on object type
         if 'goal' in object_type:
             return 'target to reach'

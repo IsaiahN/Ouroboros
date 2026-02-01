@@ -1,7 +1,7 @@
 # Unified Self-Model and Reasoning Checklist
-**Version**: 1.0  
-**Date**: January 6, 2026  
-**Purpose**: Comprehensive unified checklist for agent self-modeling, consciousness, and reasoning systems  
+**Version**: 1.0
+**Date**: January 6, 2026
+**Purpose**: Comprehensive unified checklist for agent self-modeling, consciousness, and reasoning systems
 **Sources**: All architecture and DOCS documents synthesized into actionable implementation checklist
 
 ---
@@ -81,7 +81,7 @@ Every proposal MUST be scored against the current working theory. No proposal sc
               return base_score * 1.5
           else:
               return base_score * 0.3  # Penalize execution without understanding
-      
+
       if working_theory['stage'] == 'hypothesis_formed':
           # TESTING: Reward testing, penalize ignoring
           if proposal.tests_hypothesis(working_theory):
@@ -90,21 +90,21 @@ Every proposal MUST be scored against the current working theory. No proposal sc
               return base_score * 1.0
           else:
               return base_score * 0.5
-      
+
       if working_theory['stage'] == 'confident':
           # EXPLOITATION: Reward using confirmed knowledge
           if proposal.uses_hypothesis(working_theory):
               return base_score * 1.2
           else:
               return base_score * 0.4
-      
+
       if working_theory['stage'] == 'contradicted':
           # REVISION: Only theory-revision actions score well
           if proposal.intent in ['revise_theory', 'exploration']:
               return base_score * 1.5
           else:
               return base_score * 0.2
-      
+
       return base_score
   ```
 
@@ -184,19 +184,19 @@ Every proposal MUST be scored against the current working theory. No proposal sc
   ```python
   def wire_self_to_world(self_model, world_model):
       snapshot = self_model.get_self_identity_snapshot(frame)
-      
+
       # Tell world about controlled objects
       for obj in snapshot.get('controlled_objects', []):
           world_model.set_object_type(obj['id'], 'AGENT')
-      
+
       # Tell world about autonomous objects
       for obj in self_model.get_autonomous_objects():
           world_model.set_object_type(obj['id'], 'NPC')
-      
+
       # Tell world about collision rules
       for effect in self_model.get_collision_effects():
           world_model.add_physics_rule(effect)
-      
+
       # Tell world about triggers
       for trigger in self_model.get_interaction_triggers():
           world_model.add_trigger_rule(trigger)
@@ -225,19 +225,19 @@ The WorldModel exists but is too passive - it tracks state but doesn't:
           self.beliefs = {}           # rule_id -> BeliefNode
           self.predictions = {}       # action -> expected_outcome
           self.prediction_history = []
-      
+
       def predict_before_action(self, action, current_frame):
           """MUST be called BEFORE action execution."""
           # Predict from current beliefs
           # Store prediction for comparison
-      
+
       def observe_after_action(self, action, frame_before, frame_after):
           """MUST be called AFTER action execution."""
           # Compare prediction to reality
           # Calculate surprise score
           # Update beliefs (strengthen matching, weaken conflicting)
           # Spawn competing beliefs when prediction fails
-      
+
       def decay_unused_beliefs(self):
           """Beliefs not tested decay over time."""
   ```
@@ -282,40 +282,40 @@ This loop must run in `core_gameplay._run_single_action()`:
 def consciousness_step(agent, game_state, frame):
     # 1. OBSERVE: Self-model snapshot
     self_identity = agent.self_model.get_self_identity_snapshot(frame)
-    
+
     # 2. WIRE: Self-model -> World-model
     agent.world_model.integrate_self_discoveries(self_identity)
-    
+
     # 3. PREDICT: Before action (store for comparison)
     prediction = agent.world_model.predict_before_action(
         proposed_action, frame
     )
-    
+
     # 4. QUESTION: Generate metacognitive questions
     questions = agent.metacognition.generate_questions(
         world_model=agent.world_model,
         self_identity=self_identity,
         observer_flags=observer_flags
     )
-    
+
     # 5. APPLY QUESTION CONSTRAINTS: Questions modify scoring
     proposals, blocked = agent.questioning_engine.apply_question_constraints(
         proposals, questions, agent.working_theory
     )
-    
+
     # 6. SPAWN OBSERVERS: If stuck/confused
     if agent.is_stuck(threshold=30):
         agent.persona_manager.spawn_observer(
             type='stuckness_detector',
             reason=f"Been stuck for 30 frames"
         )
-    
+
     # 7. SCORE WITH THEORY: Theory-gated scoring
     for proposal in proposals:
         proposal.score = score_proposal_with_theory(
             proposal, agent.working_theory, proposal.base_score
         )
-    
+
     # 8. INTEGRATE STREAMS: w_A vs w_B
     stream_a_prediction = agent.working_theory.predict(frame) if agent.working_theory else None
     stream_b_prediction = agent.network.get_consensus_prediction(game_state)
@@ -323,16 +323,16 @@ def consciousness_step(agent, game_state, frame):
         agent.log_consciousness(
             f"Stream conflict: A predicts {stream_a_prediction}, B predicts {stream_b_prediction}"
         )
-    
+
     # 9. SELECT ACTION: Weighted choice
     chosen = select_by_score(proposals)
     result = agent.execute_action(chosen.action)
-    
+
     # 10. OBSERVE OUTCOME: Compare to prediction
     surprise = agent.world_model.observe_after_action(
         chosen.action, frame, result.new_frame
     )
-    
+
     # 11. UPDATE THEORY: Based on outcome
     agent.working_theory_manager.update_theory(
         action=chosen.action,
@@ -340,7 +340,7 @@ def consciousness_step(agent, game_state, frame):
         frame_before=frame,
         frame_after=result.new_frame
     )
-    
+
     # 12. LEARN: All systems update
     agent.self_model.learn_from_action(chosen.action, result, frame)
     agent.persona_manager.record_outcome(chosen, result)
@@ -393,10 +393,10 @@ def consciousness_step(agent, game_state, frame):
   class QuestioningEngineWithTeeth:
       BLOCKING_QUESTIONS = {'Q4', 'Q9'}
       PERSONA_SPAWNING_QUESTIONS = {'Q1', 'Q2', 'Q8'}
-      
+
       def generate_questions(self, world_model, self_identity, proposals, observer_flags):
           questions = []
-          
+
           # Q4: What do I control? (BLOCKING if unknown)
           if self_identity.get('controlled_objects') == []:
               questions.append({
@@ -406,7 +406,7 @@ def consciousness_step(agent, game_state, frame):
                   'allowed_actions': ['exploration', 'discovery'],
                   'score_modifier': 0.2
               })
-          
+
           # Q9: Self-test - contradiction detected (BLOCKING)
           if world_model.contradiction_count > 0:
               questions.append({
@@ -417,17 +417,17 @@ def consciousness_step(agent, game_state, frame):
                   'allowed_actions': ['revise_theory', 'test_alternative'],
                   'score_modifier': 0.1
               })
-          
+
           return questions
-      
+
       def apply_question_constraints(self, proposals, questions, working_theory):
           blocked = any(q.get('blocks_action') for q in questions)
-          
+
           for proposal in proposals:
               total_modifier = 1.0
               for q in questions:
                   total_modifier *= q.get('score_modifier', 1.0)
-              
+
               if blocked:
                   # Check if proposal is in allowed_actions
                   allowed = False
@@ -438,9 +438,9 @@ def consciousness_step(agent, game_state, frame):
                           break
                   if not allowed:
                       total_modifier = 0.0  # BLOCKED
-              
+
               proposal.score *= total_modifier
-          
+
           return proposals, blocked
   ```
 
@@ -472,20 +472,20 @@ def consciousness_step(agent, game_state, frame):
   ```python
   def update_world_model_with_speculation(self, frame, action_count):
       """Always theorize - being wrong is okay."""
-      
+
       if action_count < 10:  # First 10 actions are pure speculation
           provisional_theories = []
-          
+
           if self.detected_movement_correlation:
               provisional_theories.append({
                   'hypothesis': f'color {self.likely_player_color} might be player',
                   'confidence': 0.1 + (0.05 * self.correlation_count),
                   'stage': 'speculating'
               })
-          
+
           for theory in provisional_theories:
               self.world_model.add_provisional_theory(theory)
-      
+
       self.world_model.frame_update_count += 1
       return self.world_model.current_theories
   ```
@@ -533,7 +533,7 @@ def consciousness_step(agent, game_state, frame):
       MAX_ACTIVE_PERSONAS = 12
       MAX_TEMPORARY_PERSONAS = 5
       MAX_OBJECT_FOCUSED = 3  # Even if controlling 10 objects
-      
+
       def can_spawn_persona(self, persona_type):
           current_count = len(self.active_personas)
           if current_count >= self.MAX_ACTIVE_PERSONAS:
@@ -646,10 +646,10 @@ Concepts are **semantic models that organize which operators are relevant**. The
   class ConceptDiscoveryEngine:
       def track_successful_operator_pattern(self, operator_id, game_id, sub_patterns):
           """Track which sub-patterns appear in successful operators."""
-      
+
       def check_concept_emergence(self, min_games=3):
           """Concept emerges when pattern succeeds across N different games."""
-      
+
       def extract_concept_from_counterfactuals(self, failed_attempts, successful_attempt):
           """Transform counterfactual analysis into concept discovery."""
   ```
@@ -851,13 +851,13 @@ if lesson.abstraction_score > 0.7 and lesson.transfer_success_count > 3:
 
 **What to look for:**
 ```
-Agent LOG: "I'm confused because my theory (Stream A) predicts blue moves right 
+Agent LOG: "I'm confused because my theory (Stream A) predicts blue moves right
 but network says move down (Stream B), so I'm re-weighting: w_A=0.4, w_B=0.6"
 ```
 
 **Database query:**
 ```sql
-SELECT * FROM consciousness_logs 
+SELECT * FROM consciousness_logs
 WHERE log_text LIKE '%Stream A%Stream B%re-weighting%'
 AND created_at > datetime('now', '-1 hour');
 ```
@@ -876,7 +876,7 @@ Agent LOG: "The 'containment' lesson from Game A applies to Game B - both requir
 **Database query:**
 ```sql
 SELECT source_game_type, target_game_type, transfer_succeeded
-FROM abstraction_quality 
+FROM abstraction_quality
 WHERE is_abstraction = TRUE AND transfer_succeeded = TRUE;
 ```
 
@@ -893,8 +893,8 @@ Agent LOG: "I spawned a stuckness-detector because I've been in position (3,4) f
 
 **Database query:**
 ```sql
-SELECT persona_type, spawn_reason, created_at 
-FROM personas 
+SELECT persona_type, spawn_reason, created_at
+FROM personas
 WHERE persona_type = 'stuckness_detector';
 ```
 
@@ -907,7 +907,7 @@ WHERE persona_type = 'stuckness_detector';
 **Query:**
 ```sql
 SELECT agent_id, game_type, level_number, stage, evidence_for, evidence_against
-FROM working_theories 
+FROM working_theories
 ORDER BY agent_id, formed_at;
 ```
 
@@ -934,7 +934,7 @@ Agent LOG: "Chose 'revise_theory' despite 'exploit_goal' having higher base scor
 **Database query:**
 ```sql
 SELECT question_type, urgency, blocks_action, score_modifier
-FROM metacognitive_questions 
+FROM metacognitive_questions
 WHERE blocks_action = TRUE;
 ```
 
@@ -946,7 +946,7 @@ WHERE blocks_action = TRUE;
 
 **Query:**
 ```sql
-SELECT 
+SELECT
     g.game_id, g.action_number,
     CASE WHEN wt.theory_id IS NOT NULL THEN 'yes' ELSE 'NO' END as has_theory,
     CASE WHEN mq.question_id IS NOT NULL THEN 'yes' ELSE 'NO' END as has_question
@@ -1152,6 +1152,6 @@ CREATE TABLE discovery_strategies (
 
 ---
 
-**Document Status**: READY FOR IMPLEMENTATION  
-**Last Updated**: January 6, 2026  
+**Document Status**: READY FOR IMPLEMENTATION
+**Last Updated**: January 6, 2026
 **Owner**: Autonomous Oracle System

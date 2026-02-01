@@ -18,34 +18,31 @@ This enables:
 
 Usage:
     from engines.registry import EngineRegistry
-    
+
     registry = EngineRegistry(db_path="core_data.db")
-    
+
     # Access via properties
     if registry.self_model:
         suggestion = registry.self_model.get_embedding_suggested_action(...)
-    
+
     # Or by name
     engine = registry.get('scientific_method')
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import importlib
-from typing import Dict, Any, Optional, Set, List, TYPE_CHECKING
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Set
 
 from engines.engine_logger import get_engine_logger, log_import_error
 
-if TYPE_CHECKING:
-    from engines.interfaces import (
-        SelfModelInterface,
-        VisualAnalyzerInterface,
-        TerminalPatternInterface,
-        ScientificMethodInterface,
-        CODSEngineInterface,
-    )
+# Note: TYPE_CHECKING imports removed - interfaces not yet implemented
+# TODO: Add back when engines/interfaces.py is fully typed:
+# if TYPE_CHECKING:
+#     from engines.interfaces import SelfModelInterface, VisualAnalyzerInterface, etc.
 
 logger = get_engine_logger("registry")
 
@@ -75,8 +72,8 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
     # Self-Model Engines
     # =========================================================================
     'self_model': EngineConfig(
-        module='deprecated.agent_self_model_legacy',
-        class_name='AgentSelfModel',
+        module='engines.self_model.cognitive_core',
+        class_name='CognitiveCore',
         requires_db_path=True,
         fallback_legacy_attr='agent_self_model'
     ),
@@ -143,7 +140,7 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         class_name='BeliefSystem',
         requires_db_path=True
     ),
-    
+
     # =========================================================================
     # Perception Engines
     # =========================================================================
@@ -158,7 +155,7 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         requires_db=True,
         fallback_legacy_attr='terminal_pattern_detector'
     ),
-    
+
     # =========================================================================
     # Cognition Engines
     # =========================================================================
@@ -168,7 +165,7 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         requires_db=True,
         fallback_legacy_attr='agent_self_model'
     ),
-    
+
     # =========================================================================
     # Memory Engines
     # =========================================================================
@@ -184,7 +181,7 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         requires_db=True,
         fallback_legacy_attr='near_miss_analyzer'
     ),
-    
+
     # =========================================================================
     # Social Engines
     # =========================================================================
@@ -207,7 +204,7 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         requires_db=True,
         fallback_legacy_attr='resonance_detector'
     ),
-    
+
     # =========================================================================
     # Consciousness Engines
     # =========================================================================
@@ -223,7 +220,7 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         requires_db=True,
         fallback_legacy_attr='i_thread'
     ),
-    
+
     # =========================================================================
     # Regulation Engines
     # =========================================================================
@@ -249,7 +246,7 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         requires_db_path=True,
         fallback_legacy_attr='network_exploration_tracker'
     ),
-    
+
     # =========================================================================
     # Planning Engines
     # =========================================================================
@@ -271,7 +268,7 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         requires_db=True,
         fallback_legacy_attr='replay_learning_engine'
     ),
-    
+
     # =========================================================================
     # Reasoning Engines
     # =========================================================================
@@ -292,7 +289,7 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         class_name='SymbolicStateTracker',
         requires_db=True
     ),
-    
+
     # =========================================================================
     # Other Engines
     # =========================================================================
@@ -314,16 +311,16 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
 class EngineRegistry:
     """
     Central registry for all decision engines.
-    
+
     Lazily loads engines on first access to minimize startup time.
     Falls back to legacy implementations if new modules not available.
     ALL import errors are logged (no silent failures).
     """
-    
+
     def __init__(self, db_path: str = "core_data.db", legacy_core: Any = None):
         """
         Initialize the registry.
-        
+
         Args:
             db_path: Path to the database
             legacy_core: Optional reference to legacy CoreGameplay for fallback
@@ -334,9 +331,9 @@ class EngineRegistry:
         self._loaded: Set[str] = set()
         self._load_errors: Dict[str, str] = {}
         self._db_interface: Optional[Any] = None  # Lazy-loaded
-        
+
         logger.info("Registry initialized", db_path=db_path)
-    
+
     def _get_db_interface(self) -> Any:
         """Get or create DatabaseInterface (lazy loaded)."""
         if self._db_interface is None:
@@ -347,28 +344,28 @@ class EngineRegistry:
                 logger.error("Failed to import DatabaseInterface", exc=e)
                 raise
         return self._db_interface
-    
+
     def get(self, name: str) -> Optional[Any]:
         """
         Get engine by name, lazy-loading if needed.
-        
+
         Args:
             name: Engine name (e.g., 'self_model', 'visual_analyzer')
-            
+
         Returns:
             Engine instance or None if unavailable
         """
         if name not in self._loaded:
             self._load_engine(name)
         return self._engines.get(name)
-    
+
     def _load_engine(self, name: str) -> None:
         """Load engine using data-driven configuration."""
         if name in self._loaded:
             return
-        
+
         self._loaded.add(name)
-        
+
         # Check if we have a configuration for this engine
         if name not in ENGINE_CONFIGS:
             # Handle special cases (stubs, action_handler)
@@ -376,14 +373,14 @@ class EngineRegistry:
             if engine:
                 self._engines[name] = engine
             return
-        
+
         config = ENGINE_CONFIGS[name]
-        
+
         # Try to load the engine
         try:
             module = importlib.import_module(config.module)
             cls = getattr(module, config.class_name)
-            
+
             # Instantiate with appropriate arguments
             if config.requires_db:
                 db = self._get_db_interface()
@@ -392,15 +389,15 @@ class EngineRegistry:
                 engine = cls(self._db_path)
             else:
                 engine = cls()
-            
+
             self._engines[name] = engine
             logger.debug(f"Loaded engine: {name}", module=config.module)
             return
-            
+
         except ImportError as e:
             log_import_error(name, config.module, e)
             self._load_errors[name] = f"ImportError: {e}"
-            
+
         except AttributeError as e:
             logger.warning(
                 f"Class not found: {config.class_name}",
@@ -408,11 +405,11 @@ class EngineRegistry:
                 error=str(e)
             )
             self._load_errors[name] = f"AttributeError: {e}"
-            
+
         except Exception as e:
             logger.error(f"Failed to instantiate {name}", exc=e)
             self._load_errors[name] = f"{type(e).__name__}: {e}"
-        
+
         # Try fallback to legacy_core
         if config.fallback_legacy_attr and self._legacy_core:
             if hasattr(self._legacy_core, config.fallback_legacy_attr):
@@ -420,210 +417,186 @@ class EngineRegistry:
                 self._engines[name] = engine
                 logger.debug(f"Using legacy fallback for {name}")
                 return
-        
+
         # Engine unavailable
         logger.warning(f"Engine unavailable: {name}")
-    
-    def _load_special_engine(self, name: str) -> Optional[Any]:
+
+    def _load_special_engine(self, name: str) -> Optional[Any]:  # noqa: ANN401
         """Load engines that need special handling."""
-        if name == 'counterfactual_analyzer':
-            return CounterfactualAnalyzerStub()
-        
-        if name == 'primitive_helper':
-            # Try to load from core_gameplay_legacy
-            try:
-                from deprecated.core_gameplay_legacy import CoreGameplayLegacy
-                legacy = CoreGameplayLegacy(self._db_path)
-                if hasattr(legacy, 'primitive_helper'):
-                    return legacy.primitive_helper
-            except ImportError as e:
-                log_import_error('primitive_helper', 'deprecated.core_gameplay_legacy', e)
-            return PrimitiveHelperStub()
-        
         if name == 'action_handler':
             # Action handler requires session manager, can't standalone load
             if self._legacy_core and hasattr(self._legacy_core, 'action_handler'):
                 return self._legacy_core.action_handler
             return None
-        
+
         logger.warning(f"Unknown engine: {name}")
         return None
-    
+
     # =========================================================================
     # PROPERTY ACCESS (Preferred way to access engines)
     # Keep for IDE autocomplete and type hints
     # =========================================================================
-    
+
     @property
     def self_model(self) -> Optional[Any]:
         return self.get('self_model')
-    
+
     @property
     def embedding_matcher(self) -> Optional[Any]:
         return self.get('embedding_matcher')
-    
+
     @property
     def few_shot_relations(self) -> Optional[Any]:
         return self.get('few_shot_relations')
-    
+
     @property
     def metacognitive_engine(self) -> Optional[Any]:
         return self.get('metacognitive_engine')
-    
+
     @property
     def episodic_memory(self) -> Optional[Any]:
         return self.get('episodic_memory')
-    
+
     @property
     def network_sharing(self) -> Optional[Any]:
         return self.get('network_sharing')
-    
+
     @property
     def action6_behavior(self) -> Optional[Any]:
         return self.get('action6_behavior')
-    
+
     @property
     def visual_analyzer(self) -> Optional[Any]:
         return self.get('visual_analyzer')
-    
+
     @property
     def terminal_pattern_detector(self) -> Optional[Any]:
         return self.get('terminal_pattern_detector')
-    
+
     @property
     def scientific_method_engine(self) -> Optional[Any]:
         return self.get('scientific_method_engine')
-    
+
     @property
     def primitive_suggester(self) -> Optional[Any]:
         """Direct primitive-to-action mapping (replaces deprecated CODS)."""
         return self.get('primitive_suggester')
-    
+
     @property
     def cods_engine(self) -> Optional[Any]:
         """DEPRECATED: Use primitive_suggester instead."""
         import warnings
         warnings.warn("cods_engine is deprecated, use primitive_suggester", DeprecationWarning)
         return self.get('primitive_suggester')  # Return primitive_suggester as fallback
-    
+
     @property
     def viral_package_engine(self) -> Optional[Any]:
         return self.get('viral_package_engine')
-    
+
     @property
     def frustration_detector(self) -> Optional[Any]:
         return self.get('frustration_detector')
-    
+
     @property
     def sensation_engine(self) -> Optional[Any]:
         return self.get('sensation_engine')
-    
+
     @property
     def i_thread(self) -> Optional[Any]:
         return self.get('i_thread')
-    
+
     @property
     def near_miss_analyzer(self) -> Optional[Any]:
         return self.get('near_miss_analyzer')
-    
+
     @property
     def subgoal_planner(self) -> Optional[Any]:
         return self.get('subgoal_planner')
-    
+
     @property
     def breakthrough_allocator(self) -> Optional[Any]:
         return self.get('breakthrough_allocator')
-    
+
     @property
     def regulatory_engine(self) -> Optional[Any]:
         return self.get('regulatory_engine')
-    
+
     @property
     def resonance_detector(self) -> Optional[Any]:
         return self.get('resonance_detector')
-    
-    @property
-    def counterfactual_analyzer(self) -> Optional[Any]:
-        return self.get('counterfactual_analyzer')
-    
+
     @property
     def action_handler(self) -> Optional[Any]:
         return self.get('action_handler')
-    
+
     @property
     def multi_stage_pipeline(self) -> Optional[Any]:
         return self.get('multi_stage_pipeline')
-    
+
     @property
     def abstraction_engine(self) -> Optional[Any]:
         return self.get('abstraction_engine')
-    
+
     @property
     def replay_learning_engine(self) -> Optional[Any]:
         return self.get('replay_learning_engine')
-    
+
     @property
     def imagination_budget(self) -> Optional[Any]:
         return self.get('imagination_budget')
-    
+
     @property
     def network_exploration_tracker(self) -> Optional[Any]:
         return self.get('network_exploration_tracker')
-    
-    @property
-    def primitive_helper(self) -> Optional[Any]:
-        return self.get('primitive_helper')
-    
+
     @property
     def control_tracker(self) -> Optional[Any]:
         return self.get('control_tracker')
-    
+
     @property
     def discovery_engine(self) -> Optional[Any]:
         return self.get('discovery_engine')
-    
+
     @property
     def grid_analyzer(self) -> Optional[Any]:
         return self.get('grid_analyzer')
-    
+
     @property
     def trigger_sequences(self) -> Optional[Any]:
         return self.get('trigger_sequences')
-    
+
     @property
     def valence_goals(self) -> Optional[Any]:
         return self.get('valence_goals')
-    
+
     @property
     def universal_patterns(self) -> Optional[Any]:
         return self.get('universal_patterns')
-    
+
     @property
     def click_behavior(self) -> Optional[Any]:
         return self.get('click_behavior')
-    
+
     @property
     def belief_system(self) -> Optional[Any]:
         return self.get('belief_system')
-    
+
     @property
     def hypothesis_system(self) -> Optional[Any]:
         return self.get('hypothesis_system')
-    
+
     @property
     def symbolic_tracker(self) -> Optional[Any]:
         return self.get('symbolic_tracker')
-    
+
     # =========================================================================
     # DIAGNOSTICS
     # =========================================================================
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Get loading status for all engines."""
-        all_engines = list(ENGINE_CONFIGS.keys()) + [
-            'counterfactual_analyzer', 'primitive_helper', 'action_handler'
-        ]
-        
+        all_engines = list(ENGINE_CONFIGS.keys()) + ['action_handler']
+
         status = {}
         for name in all_engines:
             if name in self._loaded:
@@ -635,26 +608,24 @@ class EngineRegistry:
                     status[name] = 'unavailable'
             else:
                 status[name] = 'not_loaded'
-        
+
         return {
             'engines': status,
             'loaded_count': len(self._engines),
             'error_count': len(self._load_errors),
             'errors': self._load_errors,
         }
-    
+
     def preload_all(self) -> Dict[str, str]:
         """
         Preload all engines (for diagnostics or warm start).
-        
+
         Returns:
             Dict mapping engine name to status
         """
-        all_engines = list(ENGINE_CONFIGS.keys()) + [
-            'counterfactual_analyzer', 'primitive_helper', 'action_handler'
-        ]
-        
-        results = {}
+        all_engines = list(ENGINE_CONFIGS.keys()) + ['action_handler']
+
+        results: Dict[str, str] = {}
         for name in all_engines:
             self.get(name)
             if name in self._engines:
@@ -663,41 +634,13 @@ class EngineRegistry:
                 results[name] = self._load_errors[name]
             else:
                 results[name] = 'unavailable'
-        
+
         logger.info(
             f"Preloaded engines",
             loaded=len(self._engines),
             errors=len(self._load_errors)
         )
         return results
-
-
-# =============================================================================
-# STUB IMPLEMENTATIONS (for engines that don't exist yet)
-# =============================================================================
-
-class CounterfactualAnalyzerStub:
-    """Stub implementation for counterfactual analyzer."""
-    
-    def generate_micro_rollouts(
-        self,
-        game_state: Any,
-        max_rollouts: int = 5
-    ) -> List[Any]:
-        """Return empty list - not yet implemented."""
-        return []
-
-
-class PrimitiveHelperStub:
-    """Stub implementation for primitive helper."""
-    
-    def detect_stuck_pattern(
-        self,
-        recent_frames: List[Any],
-        recent_actions: List[Any]
-    ) -> Dict[str, Any]:
-        """Return not stuck - not yet implemented."""
-        return {'is_stuck': False, 'reason': 'stub implementation'}
 
 
 # =============================================================================

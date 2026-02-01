@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
@@ -9,17 +10,17 @@ Provides clean interface for storing and retrieving game data.
 No architect, governor, or director-specific functionality.
 """
 
-import sqlite3
 import json
 import logging
-from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
-from pathlib import Path
+import os
+import shutil
+import sqlite3
 import threading
 import uuid
-import shutil
-import os
 import weakref
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -379,21 +380,21 @@ class DatabaseInterface:
         persistence_value = persistence_class if persistence_class is not None else None
         exposures_value = lifetime_exposures if lifetime_exposures is not None else None
         stream_type_value = stream_type if stream_type is not None else 'neutral'  # FIX #9
-        
+
         # FIX #9: Ensure stream_type column exists (ALTER TABLE is idempotent if column exists)
         conn = self._get_connection()
         try:
             conn.execute("ALTER TABLE persona_profiles ADD COLUMN stream_type TEXT DEFAULT 'neutral'")
         except Exception:
             pass  # Column already exists
-        
+
         with conn:
             conn.execute(
                 """
                 INSERT INTO persona_profiles (
                     persona_id, agent_id, role, stage, world_model, bias_vector,
                     persona_type, bias_risk, bias_abstraction, bias_symbolic,
-                    persistence_class, lifetime_exposures, reliability_global, novelty_bias, 
+                    persistence_class, lifetime_exposures, reliability_global, novelty_bias,
                     stream_type, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT(persona_id) DO UPDATE SET
@@ -641,24 +642,24 @@ class DatabaseInterface:
 
     def get_action_effectiveness(self, game_id: str) -> list:
         """Get action effectiveness data for a game (stub - not yet implemented).
-        
+
         Args:
             game_id: Game ID
-            
+
         Returns:
             Empty list (feature not implemented)
         """
         logger.debug(f"get_action_effectiveness called for {game_id} (stub)")
         return []
-    
+
     def get_action_traces(self, game_id=None, limit=100):
         """Get action traces (stub - returns empty for now)."""
         return []
-    
+
     def get_score_history(self, game_id: str) -> list:
         """Get score history (stub - returns empty for now)."""
         return []
-    
+
     def close(self):
         """Close database connections and checkpoint WAL."""
         if hasattr(self._local, 'connection'):
@@ -683,12 +684,12 @@ class DatabaseInterface:
     def checkpoint_wal(self):
         """
         Force a WAL checkpoint to persist all pending writes to main database file.
-        
+
         This should be called:
         - Before creating checkpoints/backups
         - During graceful shutdown
         - Periodically during long-running operations
-        
+
         Returns:
             bool: True if checkpoint successful, False otherwise
         """
@@ -816,16 +817,16 @@ class DatabaseInterface:
             existing_start_time = None
             if 'start_time' not in game_data:
                 cursor = conn.execute("""
-                    SELECT start_time FROM game_results 
+                    SELECT start_time FROM game_results
                     WHERE game_id = ? AND session_id = ?
                 """, (game_data['game_id'], game_data['session_id']))
                 row = cursor.fetchone()
                 if row:
                     existing_start_time = row[0]
-            
+
             # Use existing start_time if found, otherwise use provided or now()
             start_time = game_data.get('start_time') or existing_start_time or datetime.now()
-            
+
             conn.execute("""
                 INSERT OR REPLACE INTO game_results (
                     game_id, session_id, scorecard_id, start_time, end_time, status,
@@ -895,12 +896,12 @@ class DatabaseInterface:
     # ACTION TRACES
     # ========================================================================
 
-    def log_level_sequence_usage(self, session_id: str, game_id: str, agent_id: str, 
-                                  level_number: int, used_sequence: bool, 
-                                  sequence_id: Optional[str] = None, 
+    def log_level_sequence_usage(self, session_id: str, game_id: str, agent_id: str,
+                                  level_number: int, used_sequence: bool,
+                                  sequence_id: Optional[str] = None,
                                   exploration_mode: Optional[str] = None):
         """Log whether agent used a sequence or explored for a level.
-        
+
         Args:
             session_id: Training session ID
             game_id: Game ID
@@ -1280,7 +1281,7 @@ class DatabaseInterface:
 
     def execute_query(self, query: str, params: Tuple = ()) -> List[Dict[str, Any]]:
         """Execute a custom query.
-        
+
         FIX #16: Auto-commit after write operations so discoveries are
         immediately queryable in the same session.
 
@@ -1294,13 +1295,13 @@ class DatabaseInterface:
         with self._get_connection() as conn:
             cursor = conn.execute(query, params)
             results = [dict(row) for row in cursor.fetchall()]
-            
+
             # FIX #16: Auto-commit after write operations
             # This ensures discoveries made in action N are queryable in action N+1
             query_upper = query.strip().upper()
             if query_upper.startswith(('INSERT', 'UPDATE', 'DELETE', 'REPLACE')):
                 conn.commit()
-            
+
             return results
 
     def get_database_stats(self) -> Dict[str, Any]:
@@ -1347,7 +1348,7 @@ class DatabaseInterface:
 
     def store_agent(self, agent_data: Dict[str, Any]):
         """Store agent in database.
-        
+
         Fix #3 (CHECKLIST): Include Two-Streams columns so network wisdom isn't empty.
         """
         with self._get_connection() as conn:
@@ -1435,7 +1436,7 @@ class DatabaseInterface:
             # FIX (2025-01-11): session_id is NOT NULL in schema
             # Generate a fallback session_id if not provided
             session_id = reward_data.get('session_id') or str(uuid.uuid4())
-            
+
             conn.execute("""
                 INSERT INTO agent_arc_performance (
                     performance_id, agent_id, game_id, session_id, game_timestamp,
@@ -1503,37 +1504,37 @@ class DatabaseInterface:
             # Update all agents from their performance data
             conn.execute("""
                 UPDATE agents
-                SET 
+                SET
                     total_games_played = (
-                        SELECT COUNT(*) 
-                        FROM agent_arc_performance 
+                        SELECT COUNT(*)
+                        FROM agent_arc_performance
                         WHERE agent_id = agents.agent_id
                     ),
                     total_games_won = (
                         SELECT SUM(CASE WHEN win_achieved = 1 THEN 1 ELSE 0 END)
-                        FROM agent_arc_performance 
+                        FROM agent_arc_performance
                         WHERE agent_id = agents.agent_id
                     ),
                     avg_score_per_game = (
                         SELECT AVG(final_score)
-                        FROM agent_arc_performance 
+                        FROM agent_arc_performance
                         WHERE agent_id = agents.agent_id
                     ),
                     score_efficiency = (
                         SELECT AVG(score_efficiency)
-                        FROM agent_arc_performance 
+                        FROM agent_arc_performance
                         WHERE agent_id = agents.agent_id
                     )
                 WHERE EXISTS (
-                    SELECT 1 FROM agent_arc_performance 
+                    SELECT 1 FROM agent_arc_performance
                     WHERE agent_id = agents.agent_id
                 )
             """)
             conn.commit()
-            
+
             # Return count of agents updated
             cursor = conn.execute("""
-                SELECT COUNT(DISTINCT agent_id) 
+                SELECT COUNT(DISTINCT agent_id)
                 FROM agent_arc_performance
             """)
             return cursor.fetchone()[0]

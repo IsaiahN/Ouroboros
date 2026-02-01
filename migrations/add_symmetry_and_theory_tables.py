@@ -11,15 +11,16 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from database_interface import DatabaseInterface
 import logging
+
+from database_interface import DatabaseInterface
 
 logger = logging.getLogger(__name__)
 
 def run_migration():
     """Add pending_symmetry_experiments and working_theory_history tables."""
     db = DatabaseInterface()
-    
+
     try:
         # Create pending_symmetry_experiments table
         db.execute_query("""
@@ -37,7 +38,7 @@ def run_migration():
             )
         """)
         logger.info("[MIGRATION] Created pending_symmetry_experiments table")
-        
+
         # Create working_theory_history table
         db.execute_query("""
             CREATE TABLE IF NOT EXISTS working_theory_history (
@@ -53,21 +54,21 @@ def run_migration():
             )
         """)
         logger.info("[MIGRATION] Created working_theory_history table")
-        
+
         # Add indexes for performance
         db.execute_query("""
-            CREATE INDEX IF NOT EXISTS idx_symmetry_exp_game 
+            CREATE INDEX IF NOT EXISTS idx_symmetry_exp_game
             ON pending_symmetry_experiments(game_type, level_number)
         """)
-        
+
         db.execute_query("""
             CREATE INDEX IF NOT EXISTS idx_theory_hist_agent_game
             ON working_theory_history(agent_id, game_type, level_number)
         """)
-        
+
         logger.info("[MIGRATION] Migration completed successfully")
         return True
-        
+
     except Exception as e:
         logger.error(f"[MIGRATION] Failed: {e}")
         return False

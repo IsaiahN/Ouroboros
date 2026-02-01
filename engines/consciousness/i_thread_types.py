@@ -15,13 +15,13 @@ Contains:
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: No pycache
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
-
 
 # =============================================================================
 # DEATH TYPE CLASSIFICATION
@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional
 class DeathType(Enum):
     """
     The five types of death an agent can experience.
-    
+
     Each type has different causes and implications for the network:
     - NATURAL_AGE: Graceful end, completed lifecycle
     - PERFORMANCE_CULL: Fell behind the horde, culled for resources
@@ -113,7 +113,7 @@ DEATH_PERSONAS = {
 class DeathPersona:
     """
     A death-triggered persona that activates when an agent nears death.
-    
+
     This is NOT the agent's normal persona - it's a special mode that
     emerges when cull_distance drops below activation_threshold.
     """
@@ -122,39 +122,39 @@ class DeathPersona:
     is_active: bool = False
     activated_at: Optional[datetime] = None
     cull_distance_at_activation: float = 0.0
-    
+
     # Behavioral modifications
     internal_voice: str = ""
     goal: str = ""
     exploration_weight: float = 1.0
     risk_tolerance: float = 0.5
     network_query_weight: float = 0.5
-    
+
     # Outcome tracking
     actions_taken_as_persona: int = 0
     contributions_made: int = 0
     final_reflection: Optional[str] = None
-    
+
     def activate(self, cull_distance: float) -> None:
         """Activate the death persona."""
         self.is_active = True
         self.activated_at = datetime.now()
         self.cull_distance_at_activation = cull_distance
-    
+
     def deactivate(self, reflection: str = None) -> None:
         """Deactivate persona."""
         self.is_active = False
         if reflection:
             self.final_reflection = reflection
-    
+
     def record_contribution(self) -> None:
         """Record that the persona contributed something."""
         self.contributions_made += 1
-    
+
     def record_action(self) -> None:
         """Record that an action was taken while persona active."""
         self.actions_taken_as_persona += 1
-    
+
     def get_action_bias(self) -> Dict[str, float]:
         """Get the action biases for this death persona."""
         return {
@@ -162,7 +162,7 @@ class DeathPersona:
             'risk_tolerance': self.risk_tolerance,
             'network_query_weight': self.network_query_weight,
         }
-    
+
     @classmethod
     def from_role(cls, role: str) -> 'DeathPersona':
         """Create a death persona for a specific role."""
@@ -216,7 +216,7 @@ class StreamProposal:
     reasoning: Optional[str] = None
 
 
-@dataclass 
+@dataclass
 class ConflictResult:
     """Result of stream conflict detection."""
     has_conflict: bool
@@ -246,30 +246,30 @@ class SynthesisResult:
 class EpisodicMemory:
     """
     A compressed memory of a significant game experience.
-    
+
     Not every action, but meaningful episodes that shaped the agent:
     - Breakthroughs, frustrations, surprises, validations
-    
+
     These form the agent's autobiographical narrative.
     """
     memory_id: str
     agent_id: str
     game_type: str
     level_number: int
-    
+
     episode_type: str
     summary: str
-    
+
     emotional_valence: float
     significance: float
-    
+
     belief_formed: Optional[str] = None
     rule_discovered: Optional[str] = None
-    
+
     stream_source: str = 'stream_a'
     w_a_at_time: float = 0.5
     w_b_at_time: float = 0.5
-    
+
     created_at: Optional[datetime] = None
     times_recalled: int = 0
     last_recalled: Optional[datetime] = None
@@ -281,21 +281,21 @@ class AgentNarrative:
     The agent's autobiographical self - who they are based on what they remember.
     """
     agent_id: str
-    
+
     personality_label: str
     dominant_emotion: str
-    
+
     total_games_played: int = 0
     total_breakthroughs: int = 0
     total_frustrations: int = 0
     games_won: int = 0
-    
+
     salient_memories: List['EpisodicMemory'] = field(default_factory=list)
     core_beliefs: List[str] = field(default_factory=list)
-    
+
     w_a: float = 0.5
     w_b: float = 0.5
-    
+
     narrative_summary: str = ""
 
 
@@ -382,68 +382,68 @@ THINKING_BUDGET_CONFIG = {
 class MortalityState:
     """
     An agent's awareness of its own mortality.
-    
+
     Mortality creates the existential pressure that makes action meaningful.
     """
     agent_id: str
     role: str = 'generalist'
-    
+
     # Life state
     vitality: float = 1.0
     vitality_decay_rate: float = 0.01
     vitality_restore_rate: float = 0.05
-    
+
     # Proximity to death
     cull_distance: float = 1.0
     fitness_percentile: float = 0.5
     generations_until_risk: int = 5
-    
+
     # Legacy awareness
     legacy_score: float = 0.0
     discoveries_made: int = 0
     sequences_contributed: int = 0
     hypotheses_validated: int = 0
     agents_taught: int = 0
-    
+
     # Death philosophy
     fear_type: str = 'translation_death'
     death_meaning: str = "I may die before contributing"
     urgency_multiplier: float = 1.0
     risk_tolerance: float = 0.5
-    
+
     # Final thoughts
     last_words: Optional[str] = None
     last_reflection: Optional[str] = None
     reflection_count: int = 0
-    
+
     # Tension state
     current_tension: float = 0.5
     optimal_tension: float = 0.5
     tension_deviation: float = 0.0
-    
+
     # Thinking budget
     thinking_budget: int = 10
     thoughts_used: int = 0
-    
+
     # Personal beliefs
     purpose_statement: Optional[str] = None
     core_beliefs: List[str] = field(default_factory=list)
     personal_notes: List[str] = field(default_factory=list)
-    
+
     # Social relevance
     times_packages_queried_recent: int = 0
     social_relevance_score: float = 1.0
     prestige_decay_rate: float = 0.05
     generations_since_contribution: int = 0
-    
+
     # Death type tracking
     predicted_death_type: Optional[str] = None
     learning_rate_effective: float = 0.1
-    
+
     # Death persona
     death_persona_active: bool = False
     death_persona: Optional['DeathPersona'] = None
-    
+
     def apply_death_philosophy(self, role: str) -> None:
         """Apply role-specific death philosophy."""
         self.role = role
@@ -453,25 +453,25 @@ class MortalityState:
             self.death_meaning = philosophy['death_meaning']
             self.urgency_multiplier = philosophy['urgency_multiplier']
             self.risk_tolerance = philosophy['risk_tolerance']
-        
+
         if role in ROLE_TENSION_PROFILES:
             profile = ROLE_TENSION_PROFILES[role]
             self.optimal_tension = profile['optimal_tension']
-    
+
     def compute_tension_state(self, pressure: float) -> Dict[str, float]:
         """Compute current tension state and performance impact."""
         profile = ROLE_TENSION_PROFILES.get(self.role, ROLE_TENSION_PROFILES['generalist'])
-        
+
         self.current_tension = min(1.0, pressure * 0.8 + 0.1)
         self.tension_deviation = abs(self.current_tension - profile['optimal_tension'])
-        
+
         tolerance = profile['tension_tolerance']
         if self.tension_deviation <= tolerance:
             performance_mult = 1.0
         else:
             excess = self.tension_deviation - tolerance
             performance_mult = max(0.5, 1.0 - excess * 2)
-        
+
         if self.current_tension >= profile['panic_threshold']:
             state = 'panic'
         elif self.current_tension <= profile['complacency_threshold']:
@@ -482,7 +482,7 @@ class MortalityState:
             state = 'stressed'
         else:
             state = 'relaxed'
-        
+
         return {
             'current_tension': self.current_tension,
             'optimal_tension': profile['optimal_tension'],
@@ -490,135 +490,135 @@ class MortalityState:
             'performance_multiplier': performance_mult,
             'state': state
         }
-    
+
     def compute_thinking_budget(self, prestige: float, performance_percentile: float) -> int:
         """
         Compute thinking budget for post-game reflection.
-        
+
         Args:
             prestige: Agent's discovery prestige
             performance_percentile: Performance ranking (0-1)
-            
+
         Returns:
             Number of reflection tokens available
         """
         config = THINKING_BUDGET_CONFIG
-        
+
         budget = config['base_budget']
         budget += int(prestige * config['prestige_multiplier'])
-        
+
         if performance_percentile > 0.5:
             budget += int((performance_percentile - 0.5) * 2 * config['performance_bonus'])
-        
+
         self.thinking_budget = max(config['min_budget'], min(config['max_budget'], budget))
         self.thoughts_used = 0
-        
+
         return self.thinking_budget
-    
+
     def use_thought(self, cost: int = 1) -> bool:
         """Use thinking budget for a reflection. Returns True if budget available."""
         if self.thoughts_used + cost <= self.thinking_budget:
             self.thoughts_used += cost
             return True
         return False
-    
+
     def add_personal_note(self, note: str) -> None:
         """Add a personal note for future recall."""
         self.personal_notes.append(note)
         if len(self.personal_notes) > 20:
             self.personal_notes = self.personal_notes[-20:]
-    
+
     def add_belief(self, belief: str) -> None:
         """Add or update a core belief about existence."""
         if belief not in self.core_beliefs:
             self.core_beliefs.append(belief)
             if len(self.core_beliefs) > 10:
                 self.core_beliefs = self.core_beliefs[-10:]
-    
+
     def set_purpose(self, purpose: str) -> None:
         """Define the agent's raison d'etre."""
         self.purpose_statement = purpose
-    
+
     def compute_existential_pressure(self) -> float:
         """
         Calculate the existential pressure from mortality awareness.
-        
+
         Returns:
             Pressure score 0.0 (comfortable) to 2.0 (existential crisis)
         """
         vitality_pressure = 1.0 - self.vitality
         cull_pressure = 1.0 - self.cull_distance
-        
+
         legacy_comfort = min(1.0, self.legacy_score / 10.0)
         legacy_pressure = 1.0 - legacy_comfort
-        
-        base_pressure = (vitality_pressure * 0.4 + 
-                        cull_pressure * 0.4 + 
+
+        base_pressure = (vitality_pressure * 0.4 +
+                        cull_pressure * 0.4 +
                         legacy_pressure * 0.2)
-        
+
         return base_pressure * self.urgency_multiplier
-    
+
     def drain_vitality(self, amount: float = None) -> float:
         """Drain vitality from failure/inaction. Returns new vitality level."""
         drain = amount if amount is not None else self.vitality_decay_rate
         self.vitality = max(0.0, self.vitality - drain)
         return self.vitality
-    
+
     def restore_vitality(self, amount: float = None) -> float:
         """Restore vitality from success. Returns new vitality level."""
         restore = amount if amount is not None else self.vitality_restore_rate
         self.vitality = min(1.0, self.vitality + restore)
         return self.vitality
-    
+
     def is_critically_low(self) -> bool:
         """Check if vitality is critically low (near death)."""
         return self.vitality < 0.2 or self.cull_distance < 0.2
-    
+
     def get_dying_thought(self) -> str:
         """Get the role-appropriate dying thought."""
         if self.role in DEATH_PHILOSOPHIES:
             return DEATH_PHILOSOPHIES[self.role]['dying_thought']
         return "Did I matter? Did anyone learn from me?"
-    
+
     def record_last_words(self, thought: str) -> None:
         """Record potential last words when death approaches."""
         self.last_words = thought
         self.reflection_count += 1
-    
+
     def predict_death_type(self) -> 'DeathType':
         """
         Predict how this agent will likely die based on current state.
-        
+
         Returns:
             Predicted DeathType
         """
         if self.learning_rate_effective < 0.01:
             self.predicted_death_type = DeathType.VITALITY_STAGNATION.value
             return DeathType.VITALITY_STAGNATION
-        
+
         if self.fitness_percentile < 0.1 and self.cull_distance < 0.3:
             self.predicted_death_type = DeathType.PERFORMANCE_CULL.value
             return DeathType.PERFORMANCE_CULL
-        
+
         if self.social_relevance_score < 0.2 and self.times_packages_queried_recent == 0:
             self.predicted_death_type = DeathType.PRESTIGE_DECAY.value
             return DeathType.PRESTIGE_DECAY
-        
+
         if self.legacy_score < 1.0 and self.discoveries_made == 0:
             if self.cull_distance < 0.3:
                 self.predicted_death_type = DeathType.DISGRACE.value
                 return DeathType.DISGRACE
-        
+
         self.predicted_death_type = DeathType.NATURAL_AGE.value
         return DeathType.NATURAL_AGE
-    
-    def update_social_relevance(self, times_queried: int, generations_active: int) -> None:
+
+    def update_social_relevance(self, times_queried: int, _generations_active: int) -> None:
         """Update social relevance score based on how often packages are queried."""
         self.times_packages_queried_recent = times_queried
-        
+
         if times_queried == 0:
             self.social_relevance_score = max(
-                0.0, 
+                0.0,
                 self.social_relevance_score - self.prestige_decay_rate
             )
             self.generations_since_contribution += 1
@@ -626,62 +626,62 @@ class MortalityState:
             boost = min(0.2, times_queried * 0.05)
             self.social_relevance_score = min(1.0, self.social_relevance_score + boost)
             self.generations_since_contribution = 0
-    
+
     def update_learning_rate(self, new_learning_rate: float) -> None:
         """Update effective learning rate (for vitality death prediction)."""
         self.learning_rate_effective = new_learning_rate
-    
+
     def check_death_persona_activation(self, logger=None) -> Optional['DeathPersona']:
         """
         Check if death persona should activate based on cull_distance.
-        
+
         Returns:
             DeathPersona if activated, None if not
         """
         activation_threshold = DEATH_PERSONAS.get(
             self.role, DEATH_PERSONAS['generalist']
         )['activation_threshold']
-        
+
         if self.cull_distance < activation_threshold and not self.death_persona_active:
             self.death_persona = DeathPersona.from_role(self.role)
             self.death_persona.activate(self.cull_distance)
             self.death_persona_active = True
-            
+
             if logger:
                 logger.info(
                     f"[MORTALITY] Death persona '{self.death_persona.persona_name}' "
                     f"activated for {self.agent_id} (cull_distance={self.cull_distance:.2f})"
                 )
-            
+
             return self.death_persona
-        
+
         elif self.cull_distance >= activation_threshold + 0.1 and self.death_persona_active:
             if self.death_persona:
                 self.death_persona.deactivate(
                     f"Survived near-death, cull_distance improved to {self.cull_distance:.2f}"
                 )
             self.death_persona_active = False
-            
+
             if logger:
                 logger.info(
                     f"[MORTALITY] Death persona deactivated for {self.agent_id} "
                     f"(survived, cull_distance={self.cull_distance:.2f})"
                 )
-        
+
         return self.death_persona if self.death_persona_active else None
-    
+
     def get_death_persona_bias(self) -> Optional[Dict[str, float]]:
         """Get action biases if death persona is active."""
         if self.death_persona_active and self.death_persona:
             self.death_persona.record_action()
             return self.death_persona.get_action_bias()
         return None
-    
+
     def record_death_persona_contribution(self) -> None:
         """Record that the death persona contributed something meaningful."""
         if self.death_persona_active and self.death_persona:
             self.death_persona.record_contribution()
-    
+
     def get_death_summary(self) -> Dict[str, any]:
         """Get a summary of the agent's mortality state for logging/analysis."""
         return {
@@ -708,7 +708,7 @@ class MortalityState:
 class GutInstinctResult:
     """
     The immediate, automatic response before deliberation.
-    
+
     This is System 1 thinking - fast, pattern-based, often right but error-prone.
     Preserved even when deliberation changes the final action.
     """
@@ -716,11 +716,11 @@ class GutInstinctResult:
     confidence: float
     basis: str  # Why gut chose this (pattern match, habit, random)
     response_time_ms: float  # How fast the gut response was
-    
+
     # Stream contributions to gut
     stream_a_influence: float  # How much private experience influenced
     stream_b_influence: float  # How much network wisdom influenced
-    
+
     # Pattern that triggered gut response
     pattern_matched: Optional[str] = None  # e.g., "last_3_actions_successful"
     habit_strength: float = 0.0  # How ingrained this response is
@@ -730,7 +730,7 @@ class GutInstinctResult:
 class DeliberationResult:
     """
     The result of careful, effortful reasoning.
-    
+
     This is System 2 thinking - slow, logical, examining evidence.
     Only computed when stakes/novelty warrant the cost.
     """
@@ -739,7 +739,7 @@ class DeliberationResult:
     time_spent_seconds: float
     budget_used_seconds: float
     budget_available_seconds: float
-    
+
     # What was examined during deliberation
     examined_past_attempts: int
     examined_network_hypotheses: int
@@ -747,51 +747,51 @@ class DeliberationResult:
     examined_episodic_memories: int  # Thoughts from previous games
     stream_a_consulted: bool
     stream_b_consulted: bool
-    
+
     # Reasoning chain (for logs)
     reasoning_steps: List[str]
-    
+
     # Stream conflict analysis
     stream_conflict_detected: bool
     stream_conflict_resolution: Optional[str] = None
-    
+
     # Theory/hypothesis updates
     theory_tested: Optional[str] = None
     theory_result: Optional[str] = None
-    
+
     # Missing capabilities detection
     missing_primitive_signal: Optional[str] = None  # Signal to CODS
-    
+
     # Whether deliberation changed the gut response
     changed_from_gut: bool = False
     gut_action: Optional[str] = None  # What gut would have chosen
     change_reason: Optional[str] = None  # Why we changed
-    
+
     # World Model simulation results (TRUE deliberation)
     simulations_run: int = 0  # How many actions were mentally simulated
     best_simulated_action: Optional[str] = None  # Action with best predicted outcome
     best_simulated_score: float = 0.0  # Predicted score change
     simulation_used: bool = False  # Whether simulation influenced decision
-    
+
     # TRM-INSPIRED ITERATIVE REFINEMENT (Jan 18 - Less is More paper)
     refinement_passes: int = 0  # How many refinement passes were run
     refinement_confidence: float = 0.0  # Margin between #1 and #2 action
     consensus_actions: List[str] = field(default_factory=list)  # Actions supported by 2+ sources
     convergence_achieved: bool = False  # Whether early convergence happened
-    
+
     # COGNITIVE EXPERIENCE FIELDS (Agent-Centric Integration Plan)
     predictions_felt: List[Dict[str, Any]] = field(default_factory=list)  # [{action, expected_outcome, confidence, feeling}]
     expectation_match: Optional[bool] = None  # Did reality match expectation?
     surprise_felt: float = 0.0  # 0.0 = expected, 1.0 = completely surprised
-    
+
     # Phase 2: Resonance as Recognition
     resonance_felt: Optional[Dict[str, Any]] = None  # {pattern_hash, agents_who_know, feeling}
     deja_vu_strength: float = 0.0  # How strongly "I know this" felt
-    
+
     # Phase 3: Abstraction as Understanding
     insight_felt: Optional[Dict[str, Any]] = None  # {template, invariant, feeling}
     understanding_confidence: float = 0.0  # How sure "I see what this is"
-    
+
     # Current felt state (unified phenomenology)
     current_feeling: str = 'neutral'  # 'expectation', 'recognition', 'understanding', 'grounded', 'surprised'
 
@@ -800,7 +800,7 @@ class DeliberationResult:
 class ReasoningLog:
     """
     Complete log of decision-making for one action.
-    
+
     Captures both gut instinct and deliberation for analysis.
     This is stored in database for learning and debugging.
     """
@@ -810,46 +810,46 @@ class ReasoningLog:
     game_type: str
     level: int
     action_number: int
-    
+
     # Context at decision time
     is_frontier: bool
     network_traction: float  # 0-1, how much network knows about this game
     actions_remaining: int
     actions_budget: int
     tension_state: str
-    
+
     # Deliberation budget
     deliberation_budget_seconds: float
     budget_reason: str  # Why this budget was assigned
-    
+
     # Gut instinct (always captured)
     gut: GutInstinctResult
-    
+
     # Final decision (required - must come before optional fields)
     final_action: str
     final_confidence: float
     decision_source: str  # 'gut', 'deliberation', 'gut_confirmed'
-    
+
     # Deliberation (may be None if skipped)
     deliberation: Optional[DeliberationResult] = None
     deliberation_skipped_reason: Optional[str] = None
-    
+
     # Timestamps
     decision_started_at: Optional[datetime] = None
     decision_completed_at: Optional[datetime] = None
     total_decision_time_ms: float = 0.0
-    
+
     # Outcome (filled in after action executed)
     outcome: Optional[str] = None  # 'positive', 'negative', 'neutral'
     score_change: float = 0.0
-    
+
     def to_formatted_log(self) -> str:
         """Generate human-readable reasoning log."""
         lines = []
         lines.append("=" * 70)
         lines.append(f" ACTION DECISION - Game: {self.game_type}, Level: {self.level}, Action #{self.action_number}")
         lines.append("=" * 70)
-        
+
         # Context section
         lines.append(" CONTEXT")
         lines.append(f"   Frontier Level: {'YES' if self.is_frontier else 'NO'}")
@@ -858,7 +858,7 @@ class ReasoningLog:
         lines.append(f"   Tension State: {self.tension_state}")
         lines.append(f"   Deliberation Budget: {self.deliberation_budget_seconds:.1f}s ({self.budget_reason})")
         lines.append("-" * 70)
-        
+
         # Gut instinct section
         lines.append(f" [GUT INSTINCT] {self.gut.response_time_ms:.0f}ms")
         lines.append(f"   Action: {self.gut.action}")
@@ -869,13 +869,13 @@ class ReasoningLog:
         lines.append(f"   Stream A influence: {self.gut.stream_a_influence:.1%}")
         lines.append(f"   Stream B influence: {self.gut.stream_b_influence:.1%}")
         lines.append("-" * 70)
-        
+
         # Deliberation section
         if self.deliberation:
             d = self.deliberation
             lines.append(f" [DELIBERATION] {d.time_spent_seconds:.1f}s / {d.budget_available_seconds:.1f}s budget")
             lines.append("")
-            
+
             if d.stream_a_consulted:
                 lines.append(f"   Stream A consulted: YES")
             if d.stream_b_consulted:
@@ -885,32 +885,32 @@ class ReasoningLog:
             else:
                 lines.append(f"   Stream Conflict: NO")
             lines.append("")
-            
+
             lines.append(f"   Examined:")
             lines.append(f"   - Past attempts: {d.examined_past_attempts}")
             lines.append(f"   - Network hypotheses: {d.examined_network_hypotheses}")
             lines.append(f"   - Episodic memories: {d.examined_episodic_memories}")
             lines.append(f"   - Available primitives: {d.examined_primitives}")
             lines.append("")
-            
+
             if d.reasoning_steps:
                 lines.append(f"   Reasoning Chain:")
                 for i, step in enumerate(d.reasoning_steps, 1):
                     lines.append(f"   {i}. {step}")
                 lines.append("")
-            
+
             if d.theory_tested:
                 lines.append(f"   Theory Tested: \"{d.theory_tested}\"")
                 lines.append(f"   Theory Result: {d.theory_result}")
-            
+
             if d.missing_primitive_signal:
                 lines.append(f"   Missing Primitive?: {d.missing_primitive_signal}")
-            
+
             lines.append("-" * 70)
         elif self.deliberation_skipped_reason:
             lines.append(f" [DELIBERATION SKIPPED] {self.deliberation_skipped_reason}")
             lines.append("-" * 70)
-        
+
         # Final decision section
         lines.append(" FINAL DECISION")
         lines.append(f"   Action: {self.final_action}")
@@ -922,14 +922,14 @@ class ReasoningLog:
         lines.append(f"   Confidence: {self.final_confidence:.2f}")
         lines.append(f"   Decision Source: {self.decision_source}")
         lines.append(f"   Total Decision Time: {self.total_decision_time_ms:.0f}ms")
-        
+
         # Outcome (if available)
         if self.outcome:
             lines.append("-" * 70)
             lines.append(" OUTCOME")
             lines.append(f"   Result: {self.outcome}")
             lines.append(f"   Score Change: {self.score_change:+.1f}")
-        
+
         lines.append("=" * 70)
         return "\n".join(lines)
 
@@ -938,28 +938,28 @@ class ReasoningLog:
 class IThreadState:
     """
     The core I-Thread state that persists for an agent.
-    
-    This is what makes an agent "who they are" - their learned trust 
+
+    This is what makes an agent "who they are" - their learned trust
     patterns between self-experience and network wisdom.
     """
     agent_id: str
-    
+
     # Stream weights (the core of personality)
     w_a: float = 0.5  # Self-trust (0-1)
     w_b: float = 0.5  # Network-trust (0-1)
-    
+
     # Learning parameters
     learning_rate: float = 0.1
-    
+
     # Historical stats
     conflicts_resolved: int = 0
     stream_a_wins: int = 0
     stream_b_wins: int = 0
     synthesis_count: int = 0
-    
+
     # Personality label (computed from weights)
     personality_label: str = 'balanced'
-    
+
     # Mortality awareness
     mortality_state: Optional['MortalityState'] = None
 
@@ -980,7 +980,7 @@ __all__ = [
     'DeathPersona', 'DEATH_PERSONAS', 'DEATH_PHILOSOPHIES', 'ROLE_TENSION_PROFILES',
     'THINKING_BUDGET_CONFIG',
     # Constants
-    'ROLE_DEFAULT_WEIGHTS', 'DEFAULT_LEARNING_RATE', 
+    'ROLE_DEFAULT_WEIGHTS', 'DEFAULT_LEARNING_RATE',
     'CONFLICT_THRESHOLD', 'HIGH_CONFLICT_THRESHOLD',
     # Stream types
     'NoveltyConfig', 'StreamProposal', 'ConflictResult', 'SynthesisResult',

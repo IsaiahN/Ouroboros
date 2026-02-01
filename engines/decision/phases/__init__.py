@@ -14,6 +14,7 @@ Contains the 7 phase implementations:
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 from engines.decision.phases.emergency import EmergencyCheck, EmergencyThresholds

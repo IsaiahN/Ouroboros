@@ -42,7 +42,7 @@ Everyone approaches death differently depending on the role, but over time they 
 
 
 optimizers - they approach life trying to spend their actions efficiently and getting the action count down on each level = success = life well lived. DEath = they relied on sequences too much, didnt optimize, didnt do their role.
-exploiters 
+exploiters
 generalists
 pioneers
 

@@ -30,7 +30,7 @@ for row in r1:
 if best_seq_id:
     print(f"\n>>> Reactivating: {best_seq_id[:40]}...")
     db.execute_query("""
-        UPDATE winning_sequences 
+        UPDATE winning_sequences
         SET is_active = 1, flag_reason = 'manually_reactivated'
         WHERE sequence_id = ?
     """, (best_seq_id,))
@@ -48,7 +48,7 @@ else:
         best_seq_id = r1b[0]['sequence_id']
         print(f"\n>>> Reactivating highest-referenced: {best_seq_id[:40]}...")
         db.execute_query("""
-            UPDATE winning_sequences 
+            UPDATE winning_sequences
             SET is_active = 1, flag_reason = 'manually_reactivated'
             WHERE sequence_id = ?
         """, (best_seq_id,))
@@ -76,7 +76,7 @@ for row in r2:
 if best_ls20_seq:
     print(f"\n>>> Reactivating: {best_ls20_seq[:40]}...")
     db.execute_query("""
-        UPDATE winning_sequences 
+        UPDATE winning_sequences
         SET is_active = 1, flag_reason = 'manually_reactivated'
         WHERE sequence_id = ?
     """, (best_ls20_seq,))

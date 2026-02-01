@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """Audit CODS and self-model status across all game types."""
@@ -13,9 +14,9 @@ print("=" * 70)
 
 print("\n=== CODS COMPOSED OPERATORS STATUS ===")
 ops = conn.execute('''
-    SELECT operator_id, name, status, success_rate, times_tested 
-    FROM composed_operators 
-    WHERE status != 'deprecated' 
+    SELECT operator_id, name, status, success_rate, times_tested
+    FROM composed_operators
+    WHERE status != 'deprecated'
     ORDER BY success_rate DESC LIMIT 20
 ''').fetchall()
 if ops:
@@ -28,8 +29,8 @@ else:
 print("\n=== CODS OPERATOR TEST RESULTS (recent) ===")
 try:
     tests = conn.execute('''
-        SELECT operator_id, game_id, success, execution_time_ms, tested_at 
-        FROM cods_operator_test_results 
+        SELECT operator_id, game_id, success, execution_time_ms, tested_at
+        FROM cods_operator_test_results
         ORDER BY tested_at DESC LIMIT 10
     ''').fetchall()
     if tests:
@@ -42,11 +43,11 @@ except sqlite3.OperationalError:
 
 print("\n=== OBJECT SELECTION STATE (by game_type) ===")
 sel = conn.execute('''
-    SELECT game_type, COUNT(*) as cnt, 
-           SUM(is_selectable) as selectable, 
-           SUM(is_moveable) as moveable, 
-           SUM(is_button) as button 
-    FROM object_selection_state 
+    SELECT game_type, COUNT(*) as cnt,
+           SUM(is_selectable) as selectable,
+           SUM(is_moveable) as moveable,
+           SUM(is_button) as button
+    FROM object_selection_state
     GROUP BY game_type
 ''').fetchall()
 if sel:
@@ -57,9 +58,9 @@ else:
 
 print("\n=== NETWORK OBJECT CONTROL HYPOTHESES ===")
 hyp = conn.execute('''
-    SELECT game_type, level_number, reliability_score, validation_attempts, validated_by_win 
-    FROM network_object_control_hypotheses 
-    WHERE is_active = 1 
+    SELECT game_type, level_number, reliability_score, validation_attempts, validated_by_win
+    FROM network_object_control_hypotheses
+    WHERE is_active = 1
     ORDER BY reliability_score DESC LIMIT 10
 ''').fetchall()
 if hyp:
@@ -113,7 +114,7 @@ for game_type in ['ft09', 'sp80', 'as66', 'lp85', 'ls20', 'vc33']:
         ORDER BY final_score DESC
         LIMIT 3
     ''', (f'{game_type}%',)).fetchall()
-    
+
     if games:
         print(f"\n  {game_type.upper()}:")
         for g in games:

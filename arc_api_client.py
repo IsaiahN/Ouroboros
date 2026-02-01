@@ -1,20 +1,35 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
 Core ARC-AGI-3 API Client
+
+DEPRECATED: This module uses raw HTTP requests. Use arc_api_adapter.py instead,
+which wraps the official arc_agi SDK for better compatibility and maintenance.
+
+This module is kept for fallback/reference only.
 
 A clean, modular client for interacting with the ARC-AGI-3 API.
 Contains only the essential functionality needed for gameplay.
 No architect, governor, or director-specific code.
 """
 
+import warnings
+
+warnings.warn(
+    "arc_api_client is deprecated. Use arc_api_adapter.py which wraps the official arc_agi SDK.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
 import asyncio
-import aiohttp
 import logging
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import aiohttp
 
 # Load environment variables from .env file
 try:
@@ -66,7 +81,7 @@ class GameState:
         frame = data.get('frame', [])
         while frame and len(frame) == 1 and isinstance(frame[0], list) and len(frame[0]) > 1:
             frame = frame[0]
-        
+
         return cls(
             game_id=data.get('game_id', ''),
             guid=data.get('guid', ''),
@@ -339,11 +354,11 @@ class ARCClient:
             return [response]
         return response
 
-    def generate_tags(self, game_id: Optional[str] = None, session_id: Optional[str] = None, 
+    def generate_tags(self, game_id: Optional[str] = None, session_id: Optional[str] = None,
                      agent_id: Optional[str] = None, agent_mode: Optional[str] = None,
                      mode: Optional[str] = None) -> List[str]:
         """Generate tags for scorecard identification.
-        
+
         Args:
             game_id: Game identifier
             session_id: Session identifier
@@ -351,12 +366,12 @@ class ARCClient:
             agent_mode: Agent operating mode - 'pioneer', 'optimizer', 'generalist' (optional)
             mode: Attempt mode (LIVE/REPLAY_VALIDATION/EVAL)
         """
-        import threading
         import platform
         import subprocess
+        import threading
 
         tags = ["BitterLesson"]
-        
+
         # Add generation number if set (for tracking evolution progress)
         current_generation = getattr(self, '_current_generation', None)
         if current_generation is not None:
@@ -417,23 +432,23 @@ class ARCClient:
 
         # Add system identifier
         tags.append(f"sys_{platform.system().lower()}")
-        
+
         # Add agent information
         if agent_id:
             tags.append("agent")  # General tag indicating this is an agent run
             # Full agent ID for proper identification (was truncated causing "offsprin" bug)
             tags.append(f"agent_{agent_id}")
-        
+
         # Add agent mode (CRITICAL: shows if optimizer/pioneer/generalist)
         if agent_mode:
             tags.append(f"mode_{agent_mode}")
-            
+
             # If optimizer, add target level they're optimizing
             # This will be set by core_gameplay when optimizer starts
             optimizer_level = getattr(self, '_optimizer_target_level', None)
             if agent_mode == 'optimizer' and optimizer_level:
                 tags.append(f"opt_level_{optimizer_level}")
-        
+
         # Add parent agent tracking (for offspring lineage)
         parent_ids = getattr(self, '_parent_agent_ids', None)
         if parent_ids:
@@ -479,7 +494,7 @@ class ARCClient:
         if not self.session:
             logger.warning(f"Session already closed, cannot close scorecard {card_id}")
             return {"status": "session_closed", "card_id": card_id}
-        
+
         if not card_id:
             if not self.current_scorecard_id:
                 raise ValueError("No scorecard ID provided and no current scorecard")
@@ -504,7 +519,7 @@ class ARCClient:
         # Check if session is still active
         if not self.session:
             raise ARCError("Session already closed, cannot reset game")
-        
+
         if not card_id:
             if not self.current_scorecard_id:
                 raise ValueError("No scorecard ID provided and no current scorecard")
@@ -526,22 +541,22 @@ class ARCClient:
     async def reset_level(self, game_id: Optional[str] = None, card_id: Optional[str] = None,
                          guid: Optional[str] = None) -> GameState:
         """Reset the CURRENT LEVEL (not the whole game) to initial frame state.
-        
+
         Per ARC API documentation:
         - With guid provided: Resets current level if actions were taken
         - This allows retrying a level with a fresh initial frame
-        
+
         Args:
             game_id: Game ID. If not provided, uses current game.
             card_id: Scorecard ID. If not provided, uses current scorecard.
             guid: Game GUID. REQUIRED for level reset (must be provided).
-            
+
         Returns:
             GameState: The initial game state of the current level after reset.
         """
         if not self.session:
             raise ARCError("Session already closed, cannot reset level")
-        
+
         # Use current values if not provided
         if not game_id:
             game_id = self.current_game_id
@@ -549,7 +564,7 @@ class ARCClient:
             card_id = self.current_scorecard_id
         if not guid:
             guid = self.current_guid
-            
+
         if not all([game_id, card_id, guid]):
             raise ValueError("reset_level requires game_id, card_id, AND guid to reset current level")
 
@@ -558,7 +573,7 @@ class ARCClient:
             "card_id": card_id,
             "guid": guid  # CRITICAL: With guid = level reset, without guid = new game
         }
-        
+
         logger.info(f"[LEVEL RESET] Resetting level for game {game_id}, guid {guid[:8]}...")
 
         response = await self._make_request("POST", RESET_ENDPOINT, json=payload)
@@ -566,7 +581,7 @@ class ARCClient:
         # Update game state (guid should remain the same for level reset)
         self.current_game_id = response.get("game_id")
         self.current_guid = response.get("guid")
-        
+
         logger.info(f"[LEVEL RESET] Level reset complete. Score: {response.get('score')}, State: {response.get('state')}")
 
         return GameState.from_dict(response)
@@ -598,7 +613,7 @@ class ARCClient:
         # Validate we have real IDs (not placeholder "unknown")
         if not all([game_id, card_id, guid]):
             raise ValueError("Missing required parameters: game_id, card_id, and guid must be provided")
-        
+
         if game_id == "unknown" or game_id.startswith("unknown"):
             raise ValueError(f"Invalid game_id '{game_id}': cannot send actions to unknown game")
 
@@ -632,14 +647,14 @@ class ARCClient:
             logger.info(f"[{game_id[:4]}] Sending {action} to API with coordinates ({x}, {y})")
         else:
             logger.info(f"[{game_id[:4]}] Sending {action} to API")
-        
+
         # Add reasoning for ALL actions (optional JSON blob ≤16 KB)
         if "reasoning" in kwargs and kwargs["reasoning"]:
             payload["reasoning"] = kwargs["reasoning"]
 
         # Make the request
         response = await self._make_request("POST", action_endpoints[action], json=payload)
-        
+
         logger.info(f"[{game_id[:4]}] {action} API response - State: {response.get('state')}, Score: {response.get('score')}")
 
         # Update game state - preserve existing values if API doesn't return them
@@ -647,24 +662,24 @@ class ARCClient:
         # Only update if present in response to prevent losing session state
         response_had_game_id = bool(response.get("game_id"))
         response_had_guid = bool(response.get("guid"))
-        
+
         if response.get("game_id"):
             self.current_game_id = response.get("game_id")
         elif not self.current_game_id:
             logger.error(f"[WARN] CRITICAL: API response missing game_id AND current_game_id is None!")
-            
+
         if response.get("guid"):
             self.current_guid = response.get("guid")
         elif not self.current_guid:
             logger.error(f"[WARN] CRITICAL: API response missing guid AND current_guid is None!")
-            
+
         # Note: card_id is set via open_scorecard() and should persist through actions
         if not self.current_scorecard_id:
             logger.error(f"[WARN] CRITICAL: current_scorecard_id is None!")
 
         # Create GameState from response
         game_state = GameState.from_dict(response)
-        
+
         # CRITICAL: Patch game_state if API didn't include game_id/guid
         # This ensures game_state object always has valid credentials
         patched = False
@@ -674,10 +689,10 @@ class ARCClient:
         if not game_state.guid and self.current_guid:
             game_state.guid = self.current_guid
             patched = True
-            
+
         if patched:
             logger.warning(f"[FIX] Patched GameState with preserved credentials (response had game_id={response_had_game_id}, guid={response_had_guid})")
-        
+
         return game_state
 
     async def create_game(self, game_id: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:

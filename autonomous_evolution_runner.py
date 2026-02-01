@@ -23,9 +23,11 @@ Following Rules 5-7: Real games, real actions only
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import sys
+
 # Force UTF-8 encoding for stdout/stderr to prevent UnicodeEncodeError on Windows
 if sys.platform == 'win32':
     if hasattr(sys.stdout, 'reconfigure'):
@@ -33,15 +35,15 @@ if sys.platform == 'win32':
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8')  # type: ignore[union-attr]
 
+import argparse
 import asyncio
 import json
-from safe_cleanup import SafeDatabaseCleaner  # Primary cleanup routine
-import time
-import argparse
 import signal
-import subprocess
+import time
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
+from safe_cleanup import SafeDatabaseCleaner  # Primary cleanup routine
 
 # Rule 1: Disable pycache
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -53,33 +55,61 @@ try:
 except ImportError:
     pass
 
-from database_logger import setup_database_logging
-from manual_tools.utilities.enhanced_database_interface import EnhancedDatabaseInterface as DatabaseInterface
-from manual_tools.analysis.prestige_parasite_detector import check_for_parasites  # Parasite detection
-from ouroboros_coordinator import OuroborosNetworkSteward
-from agent_factory import AgentFactory
-from manual_tools.analysis.performance_analyzer import PerformanceAnalyzer
-from disk_space_monitor import DiskSpaceMonitor
-from evolutionary_engine import EvolutionaryEngine
-from engines.postgame import FitnessCalculator as ARCRLVRFramework  # Migrated to postgame module
-from arc_api_client import ARCClient
-from core_gameplay import GameplayEngine
 from adaptive_action_limits import AdaptiveActionLimits
-from network_intelligence_engine import NetworkIntelligenceEngine, display_network_intelligence_dashboard
+from agent_factory import AgentFactory
+from arc_api_adapter import ArcadeWrapper
+from automated_assessment_runner import (
+    AutomatedAssessmentRunner,  # Other AI #3: Auto-metrics
+)
+from breakthrough_budget_allocator import (
+    BreakthroughBudgetAllocator,  # Tier 1: Dynamic budgets (+50%)
+)
+from core_gameplay import GameplayEngine
+from database_logger import setup_database_logging
+from disk_space_monitor import DiskSpaceMonitor
+from engines.postgame import (
+    FitnessCalculator as ARCRLVRFramework,  # Migrated to postgame module
+)
+from engines.regulation.regulatory_signal_engine import (
+    RegulatorySignalEngine,  # Phase 4: Distributed Regulation
+)
 from engines.social.prestige_engine import PrestigeEngine, display_prestige_leaderboard
-from engines.social.viral_package_engine import ViralPackageEngine, display_viral_ecosystem_dashboard  # Phase 3
-from evolution_game_scheduler import EvolutionGameScheduler  # NEW: Prevent duplicate game plays
-from engines.regulation.regulatory_signal_engine import RegulatorySignalEngine  # Phase 4: Distributed Regulation
-from manual_tools.analysis.sequence_pruning_system import SequencePruningSystem  # NEW: Automatic bad sequence removal
-from manual_tools.analysis.optimization_threshold_system import OptimizationThresholdSystem  # NEW: Track optimized levels
-from breakthrough_budget_allocator import BreakthroughBudgetAllocator  # Tier 1: Dynamic budgets (+50%)
-from automated_assessment_runner import AutomatedAssessmentRunner  # Other AI #3: Auto-metrics
-from manual_tools.analysis.pariah_validator import PariahValidator, run_pariah_validation  # False pariah detection/cleanup
+from engines.social.viral_package_engine import (  # Phase 3
+    ViralPackageEngine,
+    display_viral_ecosystem_dashboard,
+)
+from evolution_game_scheduler import (
+    EvolutionGameScheduler,  # NEW: Prevent duplicate game plays
+)
+from evolutionary_engine import EvolutionaryEngine
+from manual_tools.analysis.optimization_threshold_system import (
+    OptimizationThresholdSystem,  # NEW: Track optimized levels
+)
+from manual_tools.analysis.pariah_validator import (  # False pariah detection/cleanup
+    run_pariah_validation,
+)
+from manual_tools.analysis.performance_analyzer import PerformanceAnalyzer
+from manual_tools.analysis.prestige_parasite_detector import (
+    check_for_parasites,  # Parasite detection
+)
+from manual_tools.analysis.sequence_pruning_system import (
+    SequencePruningSystem,  # NEW: Automatic bad sequence removal
+)
+from manual_tools.utilities.enhanced_database_interface import (
+    EnhancedDatabaseInterface as DatabaseInterface,
+)
+from network_intelligence_engine import (
+    NetworkIntelligenceEngine,
+    display_network_intelligence_dashboard,
+)
+
+# ouroboros_coordinator removed - was instantiated but never used
+
 # GameDiversityPreserver import removed - prestige-only protection now
 
 # Sequence Miner - retroactive learning from winning sequences
 try:
-    from deprecated.sequence_miner import SequenceMiner
+    from engines.planning.sequence_miner import SequenceMiner
     SEQUENCE_MINER_AVAILABLE = True
 except ImportError:
     SEQUENCE_MINER_AVAILABLE = False
@@ -97,7 +127,10 @@ except ImportError:
 # Note: CODS (Cognitive Operator Discovery System) has been deprecated.
 # All 315 primitives are always available - no unlock ceremony needed.
 try:
-    from engines.social.primitive_suggester import PrimitiveSuggester, get_primitive_suggester
+    from engines.social.primitive_suggester import (
+        PrimitiveSuggester,
+        get_primitive_suggester,
+    )
     PRIMITIVE_SUGGESTER_AVAILABLE = True
 except ImportError:
     PRIMITIVE_SUGGESTER_AVAILABLE = False
@@ -119,11 +152,13 @@ except ImportError:
 
 # Oracle Health Monitor - self-diagnostic and experimentation system
 try:
-    from manual_tools.analysis.oracle_health_monitor import OracleHealthMonitor, HealthStatus
     from manual_tools.analysis.console_metrics_capture import (
-        ConsoleMetricsCapture, get_metrics_capture, reset_metrics_capture,
-        record_game_start, record_game_end, record_cods, record_stuck,
-        get_reasoning_capture, get_reasoning_diagnostics, ReasoningLogCapture
+        ConsoleMetricsCapture,
+        get_reasoning_capture,
+    )
+    from manual_tools.analysis.oracle_health_monitor import (
+        HealthStatus,
+        OracleHealthMonitor,
     )
     ORACLE_HEALTH_AVAILABLE = True
 except ImportError:
@@ -142,7 +177,7 @@ logger = setup_database_logging(level='INFO')
 class AutonomousEvolutionRunner:
     """
     Autonomous runner that manages the entire evolution lifecycle.
-    
+
     This runner orchestrates:
     - Population initialization
     - Game evaluation cycles
@@ -150,7 +185,7 @@ class AutonomousEvolutionRunner:
     - Evolution decisions
     - Continuous improvement loops
     """
-    
+
     def __init__(
         self,
         db_path: str = "core_data.db",
@@ -170,7 +205,7 @@ class AutonomousEvolutionRunner:
     ):
         """
         Initialize autonomous runner.
-        
+
         Args:
             db_path: Database file path
             initial_population_size: Starting number of agents
@@ -184,7 +219,7 @@ class AutonomousEvolutionRunner:
             target_game: Focus all agents on specific game prefix (e.g., "as66")
         """
         self.db = DatabaseInterface(db_path)
-        self.coordinator = OuroborosNetworkSteward(self.db)
+        # OuroborosNetworkSteward removed - was instantiated but never used
         self.analyzer = PerformanceAnalyzer(self.db)
         self.factory = AgentFactory(self.db)
         self.adaptive_limits = AdaptiveActionLimits(self.db)  # Adaptive action limit manager
@@ -199,48 +234,68 @@ class AutonomousEvolutionRunner:
         self.budget_allocator = BreakthroughBudgetAllocator(self.db)  # TIER 1: Dynamic budgets (+50% gain)
         self.assessment_runner = AutomatedAssessmentRunner(self.db.db_path)  # OTHER AI #3: Auto-metrics
         # DIVERSITY PRESERVER DISABLED - prestige-only protection now
-        
+
         # PHASE 5: Horizontal Gene Transfer with Emotional Intelligence
         from horizontal_transfer_engine import HorizontalTransferEngine
         self.transfer_engine = HorizontalTransferEngine(self.db)
-        
+
         # NEW BREAKTHROUGH SYSTEMS (Tier 1-3)
+        from collective_reasoning_engine import CollectiveReasoningEngine
+        from engines.memory.near_miss_analyzer import NearMissAnalyzer
         from engines.planning.subgoal_planner import SubgoalPlanner
         from engines.regulation.frustration_detector import FrustrationDetector
-        from engines.memory.near_miss_analyzer import NearMissAnalyzer
-        from collective_reasoning_engine import CollectiveReasoningEngine
-        from manual_tools.analysis.oracle_stuck_game_diagnostics import OracleStuckGameDiagnostics
-        from deprecated.lessons_learned_engine import LessonsLearnedEngine
-        
+        from manual_tools.analysis.oracle_stuck_game_diagnostics import (
+            OracleStuckGameDiagnostics,
+        )
+
         self.subgoal_planner = SubgoalPlanner(self.db)  # Hierarchical planning
         self.frustration_detector = FrustrationDetector(self.db)  # Frustration tracking
         self.stuck_game_diagnostics = OracleStuckGameDiagnostics(self.db)  # DIAGNOSTIC ONLY - no interventions
         self.near_miss_analyzer = NearMissAnalyzer(self.db)  # Learn from 15-18/20 scores
         self.collective_reasoner = CollectiveReasoningEngine(self.db)  # Multi-agent collaboration
-        self.lessons_engine = LessonsLearnedEngine(self.db)  # Post-game lessons for future games
-        
-        print("[OK] Breakthrough systems initialized (Subgoal Planning, Stuck Game Diagnostics, Near-Miss Analysis, Collective Reasoning, Lessons Learned)")
-        
+
+        # Lessons engine - use new engines/postgame/lessons_learned.py
+        try:
+            from engines.postgame.lessons_learned import LessonsLearnedEngine
+            self.lessons_engine = LessonsLearnedEngine(self.db)
+        except ImportError:
+            self.lessons_engine = None
+            print("[WARN] Lessons engine not available")
+
+        print("[OK] Breakthrough systems initialized (Subgoal Planning, Stuck Game Diagnostics, Near-Miss Analysis, Collective Reasoning)")
+
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
             from meta_learning_curriculum import MetaLearningCurriculum
-            from deprecated.rule_induction_engine import RuleInductionEngine
-            from deprecated.visual_reasoning_engine import VisualReasoningEngine
-            
+
             self.curriculum = MetaLearningCurriculum(self.db)
-            self.rule_engine = RuleInductionEngine(self.db)
-            self.visual_engine = VisualReasoningEngine(self.db)
+
+            # Rule/visual engines - from engines/cognition and engines/perception
+            try:
+                from engines.cognition.rule_induction import RuleInductionEngine
+                self.rule_engine = RuleInductionEngine(self.db)
+            except ImportError:
+                self.rule_engine = None
+                print("[WARN] Rule induction engine not available")
+
+            try:
+                from engines.perception.visual_reasoning import VisualReasoningEngine
+                self.visual_engine = VisualReasoningEngine(self.db)
+            except ImportError:
+                self.visual_engine = None
+                print("[WARN] Visual reasoning engine not available")
+
             print("[*] Meta-learning components initialized")
         else:
             self.curriculum = None
             self.rule_engine = None
             self.visual_engine = None
-        
+
         # SPECIALIST COORDINATOR - DISABLED (replaced by prestige + operating modes)
         # Specialist system removed - prestige provides survival protection (0-80%)
         # Operating modes (pioneer/optimizer/generalist) handle mutation adaptation
         self.specialist_coordinator = None
-        
+
         self.initial_population_size = initial_population_size
         self.games_per_generation = games_per_generation
         self.max_generations = max_generations
@@ -254,19 +309,19 @@ class AutonomousEvolutionRunner:
         self.replay_validation_batch = replay_validation_batch
         self.replay_validation_limit = replay_validation_limit
         self.skip_sequence_retrieval = skip_sequence_retrieval  # Skip sequence replay but capture on win
-        
+
         self.current_generation = 0
         self.total_games_played = 0
         self.start_time = datetime.now()
         self.last_evolution_time = None
-        
+
         self.running = False
         self.paused = False
         self.shutdown_requested = False
         self.shutdown_press_count = 0
         self.shutdown_last_press_time = None
         self._shutdown_listener_task = None
-        
+
         # ORACLE HEALTH MONITOR - self-diagnostic and experimentation system
         if ORACLE_HEALTH_AVAILABLE and OracleHealthMonitor:
             self.oracle_health = OracleHealthMonitor(db=self.db)
@@ -287,26 +342,26 @@ class AutonomousEvolutionRunner:
             self.metrics_capture = None
             self.reasoning_capture = None
         self.current_task = None
-        
+
         # Setup signal handlers for graceful shutdown
         self._setup_signal_handlers()
-    
+
     def _calculate_target_population_from_db(self):
         """
         Calculate target population using dynamic performance-based formula.
-        
+
         Formula (Option C - Dynamic Performance-Based):
             Base: 300 agents (minimum for network diversity and parallel exploration)
             Bonus: +5 agents per unbeaten game (to assign pioneers)
             Max: 500 agents (upper bound for resource management)
-        
+
         Returns:
             int: Target population (80 + unbeaten_games * 5, capped at 200)
         """
         BASE_POPULATION = 80  # Balanced for ~25 games per generation
         BONUS_PER_UNBEATEN = 5  # Extra agents per unbeaten game
         MAX_POPULATION = 200  # Upper bound for resource management
-        
+
         try:
             # Count unbeaten games (games without full game win sequences)
             unbeaten_result = self.db.execute_query("""
@@ -319,27 +374,27 @@ class AutonomousEvolutionRunner:
                     WHERE is_active = 1
                 )
             """)
-            
+
             unbeaten_games = unbeaten_result[0]['unbeaten_types'] if unbeaten_result else 0
-            
+
             # Calculate target: base + bonus for each unbeaten game
             target = BASE_POPULATION + (unbeaten_games * BONUS_PER_UNBEATEN)
             target = min(target, MAX_POPULATION)  # Cap at max
-            
+
             print(f"  [POP] Dynamic population: {BASE_POPULATION} base + ({unbeaten_games} unbeaten * {BONUS_PER_UNBEATEN}) = {target} agents (max {MAX_POPULATION})")
             return target
-            
+
         except Exception as e:
             # Fallback if query fails (e.g., table doesn't exist yet)
             print(f"  [WARN] Population calc failed ({e}), using base {BASE_POPULATION}")
             return BASE_POPULATION
-    
+
     def _setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
         # Handle Ctrl+C (SIGINT) and termination (SIGTERM)
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-        
+
         # On Windows, also handle CTRL_BREAK_EVENT
         if sys.platform == 'win32':
             try:
@@ -354,11 +409,13 @@ class AutonomousEvolutionRunner:
             print("[FATAL] ARC_API_KEY missing - refusing to run simulated games")
             return False
         try:
-            async with ARCClient(api_key=api_key) as client:
-                games = await client.get_available_games()
-                if not games:
-                    print("[FATAL] ARC API returned zero available games - aborting to avoid simulated runs")
-                    return False
+            # Use official arc_api_adapter instead of deprecated ARCClient
+            # operation_mode reads from OPERATION_MODE env var (default: NORMAL)
+            wrapper = ArcadeWrapper(api_key=api_key)
+            games = wrapper.list_games()
+            if not games:
+                print("[FATAL] ARC API returned zero available games - aborting to avoid simulated runs")
+                return False
             return True
         except Exception as e:
             print(f"[FATAL] ARC API connectivity failed: {e}")
@@ -389,40 +446,40 @@ class AutonomousEvolutionRunner:
                 if hasattr(self, '_current_engine') and self._current_engine:
                     self._current_engine.session_manager.is_shutting_down = True
                 break
-    
+
     def _signal_handler(self, signum, frame):
         """
         Handle shutdown signals gracefully.
-        
+
         Uses sys.stderr.write instead of print() to avoid reentrant I/O errors
         on Windows when signal handler is called while another I/O operation
         is in progress.
-        
+
         Args:
             signum: Signal number
             frame: Current stack frame
         """
         import sys
-        
+
         signal_names = {
             signal.SIGINT: 'SIGINT (Ctrl+C)',
             signal.SIGTERM: 'SIGTERM (Termination)',
         }
         if hasattr(signal, 'SIGBREAK'):
             signal_names[signal.SIGBREAK] = 'SIGBREAK (Ctrl+Break)'
-        
+
         signal_name = signal_names.get(signum, f'Signal {signum}')
-        
+
         # Check if press is within time window (2 seconds)
         current_time = time.time()
         if self.shutdown_last_press_time is None or (current_time - self.shutdown_last_press_time) > 2.0:
             # Reset counter if too much time passed
             self.shutdown_press_count = 0
-        
+
         # Increment press count
         self.shutdown_press_count += 1
         self.shutdown_last_press_time = current_time
-        
+
         # Use sys.stderr.write to avoid reentrant print() issues on Windows
         try:
             if self.shutdown_press_count < 3:
@@ -445,12 +502,12 @@ class AutonomousEvolutionRunner:
                 self.running = False
                 self.shutdown_requested = True
                 self.game_scheduler.shutdown()
-                
+
                 # CRITICAL: Also set shutdown flag on current engine if available
                 # This ensures games in progress exit immediately
                 if hasattr(self, '_current_engine') and self._current_engine:
                     self._current_engine.session_manager.is_shutting_down = True
-                
+
                 # Reset counter
                 self.shutdown_press_count = 0
                 self.shutdown_last_press_time = None
@@ -462,11 +519,11 @@ class AutonomousEvolutionRunner:
                 self.game_scheduler.shutdown()
             except Exception:
                 pass
-    
+
     async def _cleanup(self):
         """Perform cleanup operations before shutdown."""
         print("\n[?] Performing cleanup...")
-        
+
         try:
             # Cancel current task if running
             if self.current_task and not self.current_task.done():
@@ -476,26 +533,26 @@ class AutonomousEvolutionRunner:
                     await asyncio.wait_for(self.current_task, timeout=5.0)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
-            
+
             # Force WAL checkpoint to save all pending writes
             print("  - Checkpointing database WAL...")
             if hasattr(self.db, 'checkpoint_wal'):
                 self.db.checkpoint_wal()
-            
+
             # Close database connections
             print("  - Closing database connections...")
             if hasattr(self.db, 'close'):
                 self.db.close()
-            
+
             # Save final state
             print("  - Saving final state...")
             self._save_checkpoint()
-            
+
             print("[OK] Cleanup complete")
-            
+
         except Exception as e:
             print(f"[WARN]  Cleanup error (non-critical): {e}")
-    
+
     def _cleanup_old_logs(self):
         """
         Clean up old system logs to prevent database bloat.
@@ -506,20 +563,20 @@ class AutonomousEvolutionRunner:
             print("    - Checkpointing WAL...")
             if hasattr(self.db, 'checkpoint_wal'):
                 self.db.checkpoint_wal()
-            
+
             # Get current log count
             print("    - Counting system logs...")
             count_result = self.db.execute_query("SELECT COUNT(*) as count FROM system_logs")
             total_logs = count_result[0]['count'] if count_result else 0
             print(f"    - Found {total_logs:,} log entries")
-            
+
             if total_logs > 10000:
                 # Delete old logs using a more efficient approach
                 # First get the cutoff ID, then delete everything below it
                 print("    - Finding cutoff point...")
                 cutoff_result = self.db.execute_query("""
-                    SELECT id FROM system_logs 
-                    ORDER BY timestamp DESC 
+                    SELECT id FROM system_logs
+                    ORDER BY timestamp DESC
                     LIMIT 1 OFFSET 9999
                 """)
                 if cutoff_result:
@@ -528,7 +585,7 @@ class AutonomousEvolutionRunner:
                     self.db.execute_query("""
                         DELETE FROM system_logs WHERE id < ?
                     """, (cutoff_id,))
-                
+
                 # Check disk space before vacuum (requires 2x database size)
                 db_path = getattr(self.db, 'db_path', 'core_data.db')
                 if os.path.exists(db_path):
@@ -545,12 +602,12 @@ class AutonomousEvolutionRunner:
                             print(f"  [SKIP] VACUUM skipped - need {db_size*2/(1024**3):.1f}GB, have {free_space/(1024**3):.1f}GB free")
                     except Exception as e:
                         print(f"  [SKIP] VACUUM skipped - disk check failed: {e}")
-                
+
                 logs_removed = total_logs - 10000
                 print(f"  [DB] Cleaned up {logs_removed:,} old log entries (kept 10K most recent)")
             else:
                 print(f"    - No cleanup needed ({total_logs:,} <= 10,000)")
-                
+
         except Exception as e:
             print(f"[WARN]  Log cleanup failed (non-critical): {e}")
 
@@ -569,14 +626,14 @@ class AutonomousEvolutionRunner:
         if forbidden:
             sample = "; ".join(sorted(forbidden)[:5])
             raise RuntimeError(f"__pycache__ present: {sample}")
-    
+
     def _save_checkpoint(self):
         """Save checkpoint data for resume capability."""
         try:
             # Checkpoint WAL first to ensure data is persisted
             if hasattr(self.db, 'checkpoint_wal'):
                 self.db.checkpoint_wal()
-            
+
             checkpoint = {
                 'current_generation': self.current_generation,
                 'total_games_played': self.total_games_played,
@@ -584,7 +641,7 @@ class AutonomousEvolutionRunner:
                 'shutdown_time': datetime.now().isoformat(),
                 'shutdown_reason': 'graceful' if not self.shutdown_requested else 'forced'
             }
-            
+
             # Store in database
             import json
             self.db.execute_query(
@@ -592,11 +649,11 @@ class AutonomousEvolutionRunner:
                 "VALUES (?, ?, ?)",
                 ('evolution_checkpoint', self.current_generation, json.dumps(checkpoint))
             )
-            
+
         except Exception as e:
             # Non-critical, just log
             pass
-    
+
     def _load_checkpoint(self) -> Optional[Dict[str, Any]]:
         """Load checkpoint data if available."""
         try:
@@ -605,18 +662,18 @@ class AutonomousEvolutionRunner:
                 "WHERE counter_name = ?",
                 ('evolution_checkpoint',)
             )
-            
+
             if result:
                 import json
                 checkpoint = json.loads(result[0]['description'])
                 self.current_generation = checkpoint.get('current_generation', 0)
                 self.total_games_played = checkpoint.get('total_games_played', 0)  # NEW: Load game counter
-                
+
                 last_evo = checkpoint.get('last_evolution_time')
                 if last_evo:
                     from dateutil import parser
                     self.last_evolution_time = parser.parse(last_evo)
-                
+
                 # ADDITIVE MAX GENERATIONS: If resuming from checkpoint, add configured generations to current
                 # This makes --quick mean "5 MORE generations" instead of "max 5 total"
                 if self.current_generation > 0:
@@ -624,14 +681,14 @@ class AutonomousEvolutionRunner:
                     self.max_generations = self.current_generation + self.max_generations
                     print(f"[CHECKPOINT] Resuming from Generation {self.current_generation}")
                     print(f"[CHECKPOINT] Adjusted max_generations: {original_max} → {self.max_generations} (current + {original_max})")
-                
+
                 return checkpoint
-            
+
         except Exception:
             pass
-        
+
         return None
-    
+
     def print_banner(self):
         """Print startup banner."""
         print("\n" + "="*80)
@@ -643,7 +700,7 @@ class AutonomousEvolutionRunner:
         print(f"Max Generations: {self.max_generations}")
         print(f"Evolution Interval: {self.evolution_interval.total_seconds()/60:.0f} minutes")
         print()
-        
+
         # Specialist Mode indicator (NEW)
         if self.specialist_mode:
             print("[>] SPECIALIST MODE: ENABLED")
@@ -652,7 +709,7 @@ class AutonomousEvolutionRunner:
             print("   Fitness: 100% performance on assigned games")
             print("   Goal: Achieve high scores (2.0-3.0+) through focused training")
             print()
-        
+
         # Diversity Mode indicator
         elif self.agi_mode:
             print("[?] DIVERSITY MODE: ENABLED")
@@ -666,19 +723,19 @@ class AutonomousEvolutionRunner:
             print("   Curriculum: 4-stage progression (specialization [?] generalization)")
             print("   Fitness: 30% standard + 40% diversity + 30% meta-learning")
             print()
-        
+
         print("[>] Adaptive Action Limits: ENABLED")
         print(f"   Adjusts per-level and total actions based on generation performance")
         print(f"   Hard floor: {self.adaptive_limits.MIN_ACTIONS_PER_LEVEL} actions/level")
         print(f"   Range: {self.adaptive_limits.MIN_TOTAL_ACTIONS}-{self.adaptive_limits.MAX_TOTAL_ACTIONS} total actions")
         print("="*80 + "\n")
-    
-    def print_status(self, generation: int, games_played: int, win_rate: float, 
+
+    def print_status(self, generation: int, games_played: int, win_rate: float,
                     avg_score: float, population_size: int):
         """Print current status."""
         runtime = datetime.now() - self.start_time
         hours = runtime.total_seconds() / 3600
-        
+
         print(f"\n{'='*80}")
         print(f"[CHART] STATUS UPDATE - Generation {generation}")
         print(f"{'='*80}")
@@ -689,26 +746,26 @@ class AutonomousEvolutionRunner:
         print(f"Avg Score: {avg_score:.2f}")
         print(f"Games/Hour: {games_played/max(hours, 0.01):.1f}")
         print(f"{'='*80}\n")
-    
+
     async def initialize_population(self) -> bool:
         """
         Initialize population if needed.
         Rule 3: Clean integration - using existing AgentFactory
-        
+
         Returns:
             True if initialization successful or not needed
         """
         agent_count = self.db.get_active_agent_count()
-        
+
         if agent_count > 0:
             print(f"[OK] Found {agent_count} existing agents, skipping initialization")
             return True
-        
+
         print(f"\n[DNA] Creating initial population ({self.initial_population_size} agents)...")
-        
+
         try:
             import random
-            
+
             # Define agent types to create
             agent_types = [
                 'pattern_specialist',
@@ -716,13 +773,13 @@ class AutonomousEvolutionRunner:
                 'exploration_agent',
                 'win_focused_agent'
             ]
-            
+
             agents_created = []
-            
+
             for i in range(self.initial_population_size):
                 # Cycle through agent types
                 agent_type = agent_types[i % len(agent_types)]
-                
+
                 # Generate random genome for initial population
                 genome = {
                     'agent_id': f"gen0_agent_{i}",
@@ -743,26 +800,26 @@ class AutonomousEvolutionRunner:
                         'ACTION7': random.uniform(0.1, 1.0),
                     }
                 }
-                
+
                 agent = self.factory.create_agent(agent_type, genome)
                 agents_created.append(agent)
-                
+
                 print(f"  Agent {i+1}/{self.initial_population_size}: {agent.agent_type} - {agent.agent_id}")
-            
+
             print(f"[OK] Created {len(agents_created)} agents")
-            
+
             # NOTE: Specialist assignments disabled - prestige + operating modes handle selection
             # Prestige system provides earned survival protection (0-80%)
             # Operating modes (pioneer/optimizer/generalist) guide mutation rates
-            
+
             return True
-            
+
         except Exception as e:
             print(f"[?] Failed to create population: {e}")
             import traceback
             traceback.print_exc()
             return False
-    
+
     def _assign_agent_to_optimal_task(
         self,
         agent_id: str,
@@ -772,52 +829,52 @@ class AutonomousEvolutionRunner:
     ) -> list:
         """
         Smart agent-to-task assignment based on operating mode and WIN state.
-        
+
         This addresses user concerns #1 and #2:
         - Knowledge distribution: Agents use community sequences automatically
         - Continuous optimization: Optimizers focus on reducing action counts
-        
+
         Strategy (Win-state driven, not hardcoded thresholds):
         - Pioneer agents (10%): Games WITHOUT win state (frontier discovery)
           * Use best sequences until hitting unbeaten level, then explore
           * Prioritize games with partial progress (70%) over completely new (30%)
-          
+
         - Optimizer agents (60%): ALL games, prioritize games with beaten levels
           * Focus on reducing action counts for ALREADY-BEATEN levels
           * Prioritize: max_level (more beaten levels) × avg_actions (more improvement room)
           * Will also work on unbeaten games, optimizing whatever levels exist
-          
+
         - Generalist agents (30%): Balanced 50/50 split
           * 50% unbeaten games (frontier)
           * 50% beaten games (optimization)
-        
+
         Once assigned, core_gameplay.py handles sequence selection automatically:
         - Queries best sequences by reliability → efficiency → actions
         - Uses community validation and Bayesian reputation
         - Pattern learning and sequence replay unchanged
-        
+
         Args:
             agent_id: Agent identifier
             agent_mode: Operating mode ('pioneer', 'optimizer', 'generalist')
             available_games: List of available game objects
             games_per_agent: Number of games this agent should play
-        
+
         Returns:
             List of game IDs assigned to this agent
         """
         import random
-        
+
         # Get all game IDs
         all_game_ids = [g.get('id', g.get('game_id')) for g in available_games]
-        
+
         if not all_game_ids:
             return []
-        
+
         # Query community knowledge about each game
         game_stats = {}
         for game_id in all_game_ids:
             stats = self.db.execute_query("""
-                SELECT 
+                SELECT
                     MAX(level_progressions) as max_level,
                     COUNT(*) as attempts,
                     AVG(total_actions) as avg_actions,
@@ -825,7 +882,7 @@ class AutonomousEvolutionRunner:
                 FROM agent_arc_performance
                 WHERE game_id = ?
             """, (game_id,))
-            
+
             if stats and stats[0]:
                 game_stats[game_id] = {
                     'max_level': stats[0]['max_level'] or 0,
@@ -840,24 +897,24 @@ class AutonomousEvolutionRunner:
                     'avg_actions': 0,
                     'has_win': False
                 }
-        
+
         # Also check winning_sequences table for known sequences
         sequences_by_game = {}
         for game_id in all_game_ids:
             sequences = self.db.execute_query("""
-                SELECT 
+                SELECT
                     COUNT(*) as sequence_count,
                     AVG(total_actions) as avg_sequence_actions
                 FROM winning_sequences
                 WHERE game_id = ?
             """, (game_id,))
-            
+
             if sequences and sequences[0] and sequences[0]['sequence_count']:
                 sequences_by_game[game_id] = {
                     'count': sequences[0]['sequence_count'],
                     'avg_actions': sequences[0]['avg_sequence_actions']
                 }
-        
+
         # PIONEER MODE: Focus on games WITHOUT WIN state (frontier discovery)
         if agent_mode == 'pioneer':
             # Find games where community hasn't won yet
@@ -865,88 +922,88 @@ class AutonomousEvolutionRunner:
                 game_id for game_id, stats in game_stats.items()
                 if not stats['has_win']
             ]
-            
+
             if unbeaten_games:
                 # Prioritize games with some progress over completely untried games
                 # This helps pioneers build on partial knowledge
                 tried_unbeaten = [g for g in unbeaten_games if game_stats[g]['attempts'] > 0]
                 untried_unbeaten = [g for g in unbeaten_games if game_stats[g]['attempts'] == 0]
-                
+
                 # 70% tried (with partial knowledge), 30% completely new
                 num_tried = int(games_per_agent * 0.7)
                 num_untried = games_per_agent - num_tried
-                
+
                 selected = []
                 if tried_unbeaten:
                     selected.extend(random.sample(tried_unbeaten, min(num_tried, len(tried_unbeaten))))
                 if untried_unbeaten and len(selected) < games_per_agent:
                     selected.extend(random.sample(untried_unbeaten, min(num_untried, len(untried_unbeaten))))
-                
+
                 # Fill remaining with any unbeaten games
                 while len(selected) < games_per_agent and unbeaten_games:
                     game = random.choice(unbeaten_games)
                     if game not in selected:
                         selected.append(game)
-                
+
                 if len(selected) >= games_per_agent:
                     return selected[:games_per_agent]
-            
+
             # Fallback: if all games are beaten, work on optimization
             # (pioneers become temporary optimizers when frontier is exhausted)
             games_with_wins = [g for g, s in game_stats.items() if s['has_win']]
             if games_with_wins:
                 return random.sample(games_with_wins, min(games_per_agent, len(games_with_wins)))
-            
+
             # Ultimate fallback: random games
             return random.sample(all_game_ids, min(games_per_agent, len(all_game_ids)))
-        
+
         # OPTIMIZER MODE: Focus on BEATEN games/levels ONLY - reduce action counts
         elif agent_mode == 'optimizer':
             # CRITICAL: Optimizers REQUIRE sequences to optimize
             # Without sequences, there's nothing to improve - skip the agent
-            
+
             # Get games where community has proven sequences
             games_with_sequences = [
                 game_id for game_id in all_game_ids
                 if game_id in sequences_by_game and sequences_by_game[game_id]['count'] > 0
             ]
-            
+
             if not games_with_sequences:
                 # No sequences available - optimizer cannot operate
                 print(f"  [OPTIMIZER] No games with sequences available, skipping agent")
                 return []
-            
+
             # Use optimization threshold system for games with sequences
             optimization_targets = self.optimization_tracker.get_optimization_targets(
                 agent_mode='optimizer',
                 limit=games_per_agent * 2  # Get extra targets for filtering
             )
-            
+
             # Filter targets to ONLY games with sequences
-            sequence_targets = [t for t in optimization_targets 
+            sequence_targets = [t for t in optimization_targets
                               if t['game_id'] in games_with_sequences and t['priority_class'] != 'unbeaten']
-            
+
             # Extract game IDs from sequence targets
             target_games = list(set(t['game_id'] for t in sequence_targets))
-            
+
             # Prioritize unoptimized games with sequences
             unoptimized_targets = [t['game_id'] for t in sequence_targets if t['priority_class'] == 'unoptimized']
-            
+
             selected = []
-            
+
             # Priority: Unoptimized games with sequences (can still improve)
             if unoptimized_targets:
                 selected.extend(random.sample(unoptimized_targets, min(games_per_agent, len(unoptimized_targets))))
-            
+
             # If we have enough targets, return them
             if len(selected) >= games_per_agent:
                 return selected[:games_per_agent]
-            
+
             # Fallback: If optimization tracker has no targets, use games with sequences
             # (this happens on first generation before tracking is populated)
             if len(selected) < games_per_agent:
                 print(f"  [OPTIMIZER] Using fallback assignment - games with sequences only")
-                
+
                 # Prioritize games with more sequences (more data to optimize from)
                 sequence_priority = [
                     {
@@ -956,10 +1013,10 @@ class AutonomousEvolutionRunner:
                     }
                     for game_id in games_with_sequences
                 ]
-                
+
                 # Sort by sequence count
                 sequence_priority.sort(key=lambda x: x['sequence_count'], reverse=True)
-                
+
                 # Fill remaining slots
                 remaining = games_per_agent - len(selected)
                 for item in sequence_priority:
@@ -968,16 +1025,16 @@ class AutonomousEvolutionRunner:
                         remaining -= 1
                         if remaining <= 0:
                             break
-            
+
             if selected:
                 print(f"  [OPTIMIZER] Assigned {len(selected)} games with sequences to optimize")
                 return selected
-            
+
             # Ultimate fallback: no viable games
             print(f"  [OPTIMIZER] No viable optimization targets, skipping agent")
             return []
-        
-        
+
+
         # EXPLOITER MODE: ONLY games with proven sequences (harvest wins efficiently)
         elif agent_mode == 'exploiter':
             # Exploiters REQUIRE proven sequences - filter to games with sequences only
@@ -985,13 +1042,13 @@ class AutonomousEvolutionRunner:
                 game_id for game_id in all_game_ids
                 if game_id in sequences_by_game and sequences_by_game[game_id]['count'] > 0
             ]
-            
+
             if not games_with_sequences:
                 # No sequences available - exploiter cannot operate
                 # Return empty list to skip this agent (better than 0-action waste)
                 print(f"  [EXPLOITER] No games with sequences available, skipping agent")
                 return []
-            
+
             # Prioritize games with MORE sequences (more proven = more reliable)
             sequence_priority = [
                 {
@@ -1001,42 +1058,42 @@ class AutonomousEvolutionRunner:
                 }
                 for game_id in games_with_sequences
             ]
-            
+
             # Sort by sequence count (more sequences = more reliable)
             sequence_priority.sort(key=lambda x: x['sequence_count'], reverse=True)
-            
+
             # Select top games with most sequences
             selected = [g['game_id'] for g in sequence_priority[:games_per_agent]]
-            
+
             print(f"  [EXPLOITER] Assigned {len(selected)} games with proven sequences (avg {sum(g['sequence_count'] for g in sequence_priority[:len(selected)]) / max(len(selected), 1):.1f} sequences/game)")
-            
+
             return selected
-        
+
         # GENERALIST MODE: Balanced mix of unbeaten and optimization targets
         else:
             # 50% unbeaten games (frontier), 50% beaten games (optimization)
             unbeaten_games = [g for g, s in game_stats.items() if not s['has_win']]
             beaten_games = [g for g, s in game_stats.items() if s['has_win']]
-            
+
             num_frontier = int(games_per_agent * 0.5)
             num_optimize = games_per_agent - num_frontier
-            
+
             selected = []
-            
+
             # Add frontier games (unbeaten)
             if unbeaten_games:
                 selected.extend(random.sample(unbeaten_games, min(num_frontier, len(unbeaten_games))))
-            
+
             # Add optimization targets (beaten games)
             if beaten_games:
                 selected.extend(random.sample(beaten_games, min(num_optimize, len(beaten_games))))
-            
+
             # Fill remaining with random games if we don't have enough
             while len(selected) < games_per_agent:
                 game = random.choice(all_game_ids)
                 if game not in selected:
                     selected.append(game)
-            
+
             return selected[:games_per_agent]
 
     async def run_replay_validation_batch(self, limit: Optional[int] = None) -> Dict[str, Any]:
@@ -1301,65 +1358,65 @@ class AutonomousEvolutionRunner:
             'violations': violations,
             'attention_missing': attention_missing,
         }
-    
+
     async def run_evaluation_games(self, num_games: int) -> Dict[str, Any]:
         """
         Run evaluation games with current population.
         Rule 6 & 7: Real ARC games only, real actions
-        
+
         Args:
             num_games: Number of games to run
-            
+
         Returns:
             Dictionary with game results summary
         """
         print(f"\n[?] Running {num_games} evaluation games...")
-        
+
         # Get adaptive action limits for current generation
         actions_per_level, total_actions = self.adaptive_limits.adjust_limits(self.current_generation)
         self.adaptive_limits.print_status()
-        
+
         try:
             import random
-            
+
             api_key = os.getenv('ARC_API_KEY')
             if not api_key:
                 print("[?] ARC_API_KEY not found in environment")
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
-            
+
             # Get active agents
             agents = self.db.get_active_agents()
             if not agents:
                 print("[?] No active agents found")
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
-            
+
             # DYNAMIC ROLE ASSIGNMENT: Assign operating modes for this generation
             # ADAPTIVE POPULATION: Distribution changes based on whether games have been beaten
             # EXPLORATION: 40% PIONEER, 40% OPTIMIZER, 20% GENERALIST (no full wins yet)
             # OPTIMIZATION: 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST (at least one full win)
             from agent_operating_mode_system import AgentOperatingModeSystem
             mode_system = AgentOperatingModeSystem(self.db)
-            
+
             # Check if we should transition phases (exploration → optimization)
             phase_changed = mode_system.check_and_update_phase()
             if phase_changed:
                 print(f"[PHASE] Transitioned to {mode_system.phase} phase!")
-            
+
             agent_ids = [a['agent_id'] for a in agents]
             mode_assignments = mode_system.assign_population_modes(self.current_generation, agent_ids)
             distribution = mode_system.get_population_mode_distribution(self.current_generation)
             print(f"[MODE] {mode_system.phase} phase - Dynamic roles: {distribution['pioneer']} pioneers, {distribution['optimizer']} optimizers, {distribution['generalist']} generalists, {distribution['exploiter']} exploiters")
-            
+
             # CRITICAL FIX: Distribute games_per_generation ACROSS all agents, not per agent
             # Old logic: games_per_agent = num_games // len(agents) meant 419 agents × 1 game = 419 games (70+ hours!)
             # New logic: Select subset of agents to play the total num_games
             # This ensures evolution completes in reasonable time (30-60 min)
-            
+
             # YOUTH BONUS: Newer agents get more opportunities to prove themselves
             # Philosophy: Network gets stronger each generation, so newer agents have better DNA
             # This is OPPORTUNITY (more chances), not unearned PRESTIGE (credibility)
             from evolutionary_engine import calculate_youth_bonus
-            
+
             if len(agents) > num_games:
                 # More agents than games: weighted sampling favoring younger agents
                 # Calculate youth-weighted selection probabilities
@@ -1368,20 +1425,21 @@ class AutonomousEvolutionRunner:
                     agent_gen = agent.get('generation', 0)
                     youth_bonus = calculate_youth_bonus(agent_gen, self.current_generation)
                     weights.append(youth_bonus)
-                
+
                 # Normalize weights to probabilities
                 total_weight = sum(weights)
                 probabilities = [w / total_weight for w in weights]
-                
+
                 # Weighted sampling without replacement
                 import random
+
                 import numpy as np
                 try:
                     # Use numpy for efficient weighted sampling without replacement
                     indices = np.random.choice(
-                        len(agents), 
-                        size=num_games, 
-                        replace=False, 
+                        len(agents),
+                        size=num_games,
+                        replace=False,
                         p=probabilities
                     )
                     selected_agents = [agents[i] for i in indices]
@@ -1401,9 +1459,9 @@ class AutonomousEvolutionRunner:
                                 selected_agents.append(agent)
                                 remaining.pop(i)
                                 break
-                
+
                 games_per_agent = 1  # Each selected agent plays 1 game
-                
+
                 # Log youth bonus effect
                 avg_bonus = sum(weights) / len(weights) if weights else 1.0
                 young_count = sum(1 for a in selected_agents if self.current_generation - a.get('generation', 0) <= 2)
@@ -1413,37 +1471,37 @@ class AutonomousEvolutionRunner:
                 selected_agents = agents
                 games_per_agent = max(1, num_games // len(agents))
                 print(f"  [NETWORK] All {len(agents)} agents playing {games_per_agent} games each")
-            
+
             async with GameplayEngine(api_key, db_path=self.db.db_path) as engine:
-                
+
                 # Store engine reference for shutdown handler access
                 self._current_engine = engine
-                
+
                 # If shutdown was requested before entering this context, set flag immediately
                 if self.shutdown_requested:
                     engine.session_manager.is_shutting_down = True
                     print("[PAUSE]  Shutdown requested before generation started, exiting")
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
-                
+
                 # Get available games
                 available_games = await engine.session_manager.get_available_games()
-                
+
                 if not available_games:
                     print("[?] No games available from API")
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
-                
+
                 # FOCUSED GAME MASTERY: Filter to target game if specified
                 if self.target_game:
                     original_count = len(available_games)
                     available_games = [
-                        g for g in available_games 
+                        g for g in available_games
                         if (g.get('id', g.get('game_id', '')) or '').startswith(self.target_game)
                     ]
                     if not available_games:
                         print(f"[!] No games matching '{self.target_game}' found (had {original_count} games)")
                         return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
                     print(f"[TARGET] Focused on {len(available_games)} game(s) matching '{self.target_game}'")
-                
+
                 # ADAPTIVE SCALING: Extract unique game types from available games
                 # Dynamically determine game types instead of hardcoding
                 game_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
@@ -1451,16 +1509,16 @@ class AutonomousEvolutionRunner:
                 for game_id in game_ids:
                     if game_id and len(game_id) >= 4:
                         game_type_prefixes.add(game_id[:4])
-                
+
                 game_types = sorted(list(game_type_prefixes))  # Sort for consistency
-                
+
                 # DYNAMIC PERFORMANCE-BASED POPULATION (Option C)
                 # Formula: Base 60 + 5 per unbeaten game, capped at 150
                 # This scales with difficulty while keeping generation time ~1 hour
                 BASE_POPULATION = 60
                 BONUS_PER_UNBEATEN = 5
                 MAX_POPULATION = 150
-                
+
                 # Count unbeaten game types (no full game win sequence)
                 try:
                     beaten_types = set()
@@ -1471,24 +1529,24 @@ class AutonomousEvolutionRunner:
                     """)
                     if beaten_result:
                         beaten_types = {r['game_type'] for r in beaten_result if r.get('game_type')}
-                    
+
                     unbeaten_types = [gt for gt in game_types if gt not in beaten_types]
                     unbeaten_count = len(unbeaten_types)
                 except Exception:
                     unbeaten_count = len(game_types)  # Assume all unbeaten if query fails
-                
+
                 ADAPTIVE_TARGET_POPULATION = min(
                     BASE_POPULATION + (unbeaten_count * BONUS_PER_UNBEATEN),
                     MAX_POPULATION
                 )
                 print(f"  [POP] {len(game_types)} game types, {unbeaten_count} unbeaten → Target: {ADAPTIVE_TARGET_POPULATION} agents (base {BASE_POPULATION} + {unbeaten_count}*{BONUS_PER_UNBEATEN}, max {MAX_POPULATION})")
-                
+
                 # Store for pruning logic later
                 self._current_target_population = ADAPTIVE_TARGET_POPULATION
                 self._current_game_types = game_types  # Store game types for specialist protection
-                
+
                 # NOTE: Specialist mode disabled - prestige + operating modes handle game selection
-                
+
                 results = []
                 total_wins = 0
                 total_score = 0
@@ -1779,7 +1837,7 @@ class AutonomousEvolutionRunner:
                                         )
                                     except Exception:
                                         pass
-                                
+
                                 # Lessons engine pattern tracking (simplified from CODS)
                                 if self.lessons_engine and self.total_games_played % 10 == 0:
                                     try:
@@ -1787,11 +1845,11 @@ class AutonomousEvolutionRunner:
                                         if patterns:
                                             death_patterns = [p for p in patterns if p.get('caused_death')]
                                             high_conf_patterns = [p for p in patterns if p.get('confidence', 0) >= 0.7]
-                                            
+
                                             if death_patterns or high_conf_patterns:
                                                 print(f"  [LESSONS] Found {len(death_patterns)} death patterns, "
                                                       f"{len(high_conf_patterns)} high-confidence patterns for {game_type}")
-                                                
+
                                                 # Mark as reported (CODS will process these)
                                                 lesson_ids = [p['lesson_id'] for p in patterns[:10]]
                                                 self.lessons_engine.mark_reported_to_cods(lesson_ids)
@@ -1809,12 +1867,14 @@ class AutonomousEvolutionRunner:
 
                                 # Viral package usage tracking
                                 try:
-                                    from engines.social.viral_package_engine import ViralPackageEngine
+                                    from engines.social.viral_package_engine import (
+                                        ViralPackageEngine,
+                                    )
                                     viral_engine = ViralPackageEngine(self.db)
                                     infections = self.db.execute_query(
                                         """
-                                        SELECT package_id 
-                                        FROM agent_viral_infections 
+                                        SELECT package_id
+                                        FROM agent_viral_infections
                                         WHERE agent_id = ? AND is_active = TRUE
                                         """,
                                         (agent_id,),
@@ -1889,26 +1949,26 @@ class AutonomousEvolutionRunner:
                         total_wins += 1
                     total_score += final_score
                     results.append(slot_res)
-                
+
                 self.total_games_played += len(results)
-                
+
                 # Update curriculum progress for this agent if meta-learning enabled
                 if self.curriculum:
                     try:
                         self.curriculum.update_stage_progress(agent_id)
                     except Exception as e:
                         print(f"  [WARN]  Failed to update curriculum: {e}")
-                
+
                 # Auto-cleanup logs every 50 games to prevent database bloat
                 if self.total_games_played % 50 == 0:
                     print(f"\n[?]  Auto-cleanup triggered (every 50 games)...")
                     self._cleanup_old_logs()
-                
+
                 # CRITICAL: Sync agent performance from agent_arc_performance to agents table
                 # This updates total_games_played, total_games_won, avg_score_per_game, score_efficiency
                 agents_updated = self.db.sync_agent_performance_to_agents_table()
                 print(f"[OK] Synced performance for {agents_updated} agents")
-                
+
                 # Calculate summary stats
                 summary = {
                     'games_played': len(results),
@@ -1917,22 +1977,22 @@ class AutonomousEvolutionRunner:
                     'avg_score': total_score / max(len(results), 1),
                     'timestamp': datetime.now()
                 }
-                
+
                 print(f"[OK] Completed {len(results)} games")
                 print(f"  Wins: {total_wins}/{len(results)} ({summary['win_rate']:.1%})")
                 print(f"  Avg Score: {summary['avg_score']:.2f}")
-                
+
                 # Clear engine reference on normal exit
                 self._current_engine = None
-                
+
                 return summary
-            
+
         except asyncio.CancelledError:
             # Task was cancelled during shutdown - this is expected
             self._current_engine = None  # Clear reference
             print("[PAUSE]  Evaluation cancelled during shutdown")
             raise  # Re-raise to propagate cancellation
-            
+
         except Exception as e:
             if self.shutdown_requested:
                 # Errors during shutdown are expected, just log briefly
@@ -1944,42 +2004,42 @@ class AutonomousEvolutionRunner:
                 import traceback
                 traceback.print_exc()
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
-    
+
     async def analyze_and_evolve(self) -> bool:
         """
         Analyze population performance and evolve new generation.
         Rule 4: Claude Code analyzes and makes evolution decisions
         Uses comprehensive success rate (game wins + level completions + score achievements)
-        
+
         Returns:
             True if evolution successful
         """
         print(f"\n[?] Analyzing population performance...")
-        
+
         try:
             # Analyze current population
             analysis = self.analyzer.analyze_population_performance()
-            
+
             pop_stats = analysis.get('population_stats', {})
-            
+
             # Use comprehensive success rate (not just game wins)
             avg_success_rate = pop_stats.get('average_comprehensive_success', 0)
             avg_win_rate = pop_stats.get('average_win_rate', 0)
             population_size = pop_stats.get('population_size', 0)
-            
+
             print(f"  Population: {population_size} agents")
             print(f"  Comprehensive Success Rate: {avg_success_rate:.2%} (wins + levels + scores)")
             print(f"  Game Win Rate: {avg_win_rate:.2%} (wins only)")
             print(f"  Best Win Rate: {pop_stats.get('best_win_rate', 0):.2%}")
-            
+
             # Check if we should evolve
             if self.current_generation >= self.max_generations:
                 print(f"[WARN]  Reached max generations ({self.max_generations})")
                 return False
-            
+
             # Evolve new generation using EvolutionaryEngine
             print(f"\n[DNA] Evolving Generation {self.current_generation + 1}...")
-            
+
             # Check for prestige parasites before breeding
             try:
                 parasites_sunset = check_for_parasites(self.current_generation, self.db.db_path)
@@ -1987,16 +2047,16 @@ class AutonomousEvolutionRunner:
                     print(f"  [PARASITE] Sunset {parasites_sunset} prestige parasites before breeding")
             except Exception as e:
                 print(f"  [WARN] Parasite detection failed (non-critical): {e}")
-            
+
             evolution_engine = EvolutionaryEngine(self.db)
-            
+
             # Get top performers for breeding
             top_performers = analysis.get('top_performers', [])[:5]
-            
+
             if not top_performers:
                 print("[WARN]  No agents with performance data, cannot evolve")
                 return False
-            
+
             # Determine evolution strategy based on comprehensive success
             if avg_success_rate < 0.1:
                 strategy_focus = 'exploration'
@@ -2004,18 +2064,18 @@ class AutonomousEvolutionRunner:
                 strategy_focus = 'diversification'
             else:
                 strategy_focus = 'exploitation'
-            
+
             print(f"  Strategy: {strategy_focus} (based on {avg_success_rate:.1%} success rate)")
-            
+
             # ADAPTIVE OFFSPRING: Scale with target population
             # Create enough offspring to maintain target population
             TARGET_POPULATION = getattr(self, '_current_target_population', None)
             if TARGET_POPULATION is None:
                 TARGET_POPULATION = self._calculate_target_population_from_db()
             adaptive_offspring_size = max(5, TARGET_POPULATION // 10)  # At least 5, scales with target
-            
+
             print(f"  Adaptive offspring: {adaptive_offspring_size} (based on target population {TARGET_POPULATION})")
-            
+
             # Create evolution strategy dict with diversity mode flag
             evolution_strategy = {
                 'focus': strategy_focus,
@@ -2028,31 +2088,31 @@ class AutonomousEvolutionRunner:
                 'elite_size': 2,
                 'offspring_size': adaptive_offspring_size  # ADAPTIVE: was hardcoded to 5
             }
-            
+
             # Use EvolutionaryEngine's evolve_population for proper fitness calculation
             # This applies meta-learning fitness (30/40/30 split) when diversity_mode=True
             print(f"\n[DNA] Calling evolve_population with diversity_mode={self.agi_mode}...")
             evolution_engine = EvolutionaryEngine(self.db)
-            
+
             try:
                 new_population = evolution_engine.evolve_population(evolution_strategy)
                 new_agents_created = len(new_population)
-                
+
                 print(f"[OK] Evolution cycle complete")
                 print(f"  New population size: {new_agents_created}")
                 if self.agi_mode:
                     print(f"  Fitness calculation: 30% standard + 40% diversity + 30% meta-learning")
-                
+
             except Exception as e:
                 print(f"[WARN]  Evolution failed: {e}")
                 print(f"  Falling back to previous generation")
                 return False
-            
+
             self.current_generation += 1
             self.last_evolution_time = datetime.now()
-            
+
             print(f"[OK] Evolution complete - Created {new_agents_created} new agents")
-            
+
             # DISK SPACE CHECK: Monitor disk space before continuing
             print(f"\n[DISK SPACE] Checking disk space...")
             try:
@@ -2066,7 +2126,7 @@ class AutonomousEvolutionRunner:
                     print(f"[OK] {message}")
             except Exception as e:
                 print(f"[WARN] Disk space check failed: {e}")
-            
+
             # SEQUENCE PRUNING: Remove bad sequences after each generation
             print(f"\n[SEQUENCE PRUNING] Cleaning up failed sequences for generation {self.current_generation}...")
             try:
@@ -2074,7 +2134,7 @@ class AutonomousEvolutionRunner:
                     self.current_generation,
                     dry_run=False
                 )
-                
+
                 if pruning_results['total_pruned'] > 0:
                     print(f"[OK] Pruned {pruning_results['total_pruned']} bad sequences:")
                     print(f"  - Excessive actions (>10K): {pruning_results['excessive_actions']}")
@@ -2083,77 +2143,77 @@ class AutonomousEvolutionRunner:
                     print(f"  - Kept: {pruning_results['total_kept']} good sequences")
                 else:
                     print(f"[OK] No sequences needed pruning - {pruning_results['total_kept']} sequences active")
-                    
+
             except Exception as e:
                 print(f"[WARN] Sequence pruning failed: {e}")
                 import traceback
                 traceback.print_exc()
-            
+
             # PARIAH VALIDATION: Detect and remove false pariahs
             # False pariahs are as dangerous as prestige parasites - they block essential actions
             print(f"\n[PARIAH VALIDATION] Checking for false pariahs in generation {self.current_generation}...")
             try:
                 pariah_results = run_pariah_validation(self.db, self.current_generation)
-                
+
                 if pariah_results['pariahs_deactivated'] > 0:
                     print(f"[OK] Deactivated {pariah_results['pariahs_deactivated']} false pariahs")
                 if pariah_results['stale_pariahs_decayed'] > 0:
                     print(f"[OK] Decayed {pariah_results['stale_pariahs_decayed']} stale pariahs")
                 if pariah_results['awareness_cleaned'] > 0:
                     print(f"[OK] Cleaned {pariah_results['awareness_cleaned']} stale awareness records")
-                if (pariah_results['pariahs_deactivated'] == 0 and 
+                if (pariah_results['pariahs_deactivated'] == 0 and
                     pariah_results['stale_pariahs_decayed'] == 0):
                     print(f"[OK] All {pariah_results['pariahs_checked']} pariahs validated - no false positives")
-                    
+
             except Exception as e:
                 print(f"[WARN] Pariah validation failed: {e}")
                 import traceback
                 traceback.print_exc()
-            
+
             # NOTE: OPERATOR LIFECYCLE removed - CODS operator system deprecated
             # All 315 seed primitives are always available, no operators to promote/kill
             # Primitive effectiveness tracked via PrimitiveSuggester RLVR feedback tables
-            
+
             # OPTIMIZATION TRACKING: Update which levels are optimized vs need work
             print(f"\n[OPTIMIZATION] Updating level optimization status for generation {self.current_generation}...")
             try:
                 opt_summary = self.optimization_tracker.update_optimization_status(self.current_generation)
-                
+
                 if opt_summary['newly_optimized'] > 0:
                     print(f"[OK] {opt_summary['newly_optimized']} levels newly optimized!")
-                
+
                 print(f"[OK] Optimization status: {opt_summary['optimized']} optimized, "
                       f"{opt_summary['still_optimizing']} still need work")
                 print(f"     → Optimizers will use best sequences for optimized levels")
                 print(f"     → Optimizers will focus on unoptimized/unbeaten levels")
-                
+
             except Exception as e:
                 print(f"[WARN] Optimization tracking failed: {e}")
                 import traceback
                 traceback.print_exc()
-            
+
             # PHASE 0: CAPTURE NETWORK INTELLIGENCE SNAPSHOT
             print(f"\n[NETWORK] Capturing ecosystem snapshot for generation {self.current_generation}...")
             try:
                 snapshot = self.network_intelligence.capture_ecosystem_snapshot(self.current_generation)
                 print(f"[OK] Network snapshot captured: {snapshot['health_status']} (score: {snapshot['health_score']:.3f})")
-                
+
                 # Display network intelligence dashboard
                 print()
                 display_network_intelligence_dashboard(self.current_generation)
-                
+
             except Exception as e:
                 print(f"[WARN]  Network snapshot failed: {e}")
                 import traceback
                 traceback.print_exc()
-            
+
             # PHASE 0.5: AUTOPOIESIS HEALTH CHECK (system self-regulation)
             print(f"\n[AUTOPOIESIS] Checking system health for generation {self.current_generation}...")
             try:
                 if AUTOPOIESIS_AVAILABLE and AutopoiesisMonitor:
                     autopoiesis = AutopoiesisMonitor(self.db)
                     health = autopoiesis.get_system_health(self.current_generation)
-                    
+
                     print(f"[OK] System Health: {health['status']} (score: {health['overall_health']:.2f})")
                     print(f"     Emergence Gain: {health['emergence_gain']:.2f} "
                           f"({'network > individuals' if health['emergence_gain'] > 1.0 else 'needs improvement'})")
@@ -2163,65 +2223,65 @@ class AutonomousEvolutionRunner:
                           f"({'calibrated' if abs(health['control_error']) < 0.2 else 'needs tuning'})")
                     print(f"     Loop Detection: {health['loop_detection_score']:.2f} "
                           f"({'no loops' if health['loop_detection_score'] < 0.3 else 'oscillation detected'})")
-                    
+
                     # Display warnings if any
                     if health.get('warnings'):
                         for warning in health['warnings']:
                             print(f"[WARN] {warning}")
                 else:
                     print(f"[INFO] Autopoiesis monitor not available")
-                    
+
             except Exception as e:
                 print(f"[WARN] Autopoiesis health check failed: {e}")
                 import traceback
                 traceback.print_exc()
-            
+
             # PHASE 1: UPDATE PRESTIGE & STATUS BENEFITS
             print(f"\n[PRESTIGE] Calculating network contribution prestige for generation {self.current_generation}...")
             try:
                 benefits_map = self.prestige_engine.update_all_agent_prestige(self.current_generation)
                 print(f"[OK] Updated prestige for {len(benefits_map)} agents")
-                
+
                 # Display top 5 prestige leaders
                 print()
                 display_prestige_leaderboard(self.db, limit=5)
-                
+
             except Exception as e:
                 print(f"[WARN]  Prestige calculation failed: {e}")
                 import traceback
                 traceback.print_exc()
-            
+
             # PHASE 3: VIRAL ECOSYSTEM STATUS
             print(f"\n[VIRAL] Checking viral packages & pariahs...")
             try:
                 # Check for obsolete packages/pariahs
                 self.viral_engine.check_package_obsolescence(self.current_generation, threshold_generations=20)
                 self.viral_engine.check_pariah_obsolescence(self.current_generation, threshold_generations=30)
-                
+
                 # Display viral ecosystem dashboard
                 print()
                 display_viral_ecosystem_dashboard(self.db, self.current_generation)
-                
+
             except Exception as e:
                 print(f"[WARN]  Viral ecosystem check failed: {e}")
                 import traceback
                 traceback.print_exc()
-            
+
             # PHASE 4: DISTRIBUTED REGULATION (Network Homeostasis)
             print(f"\n[ REGULATION] Processing distributed network signals...")
             try:
                 # Step 1: Agent signal emission (quorum sensing)
                 signals_emitted = self.regulatory_engine.emit_agent_signals(self.current_generation)
                 print(f"[OK] {len(signals_emitted)} regulatory signals emitted")
-                
+
                 # Step 2: Process signal responses and calculate net adjustments
                 net_adjustments = self.regulatory_engine.process_signal_responses(self.current_generation)
                 print(f"[OK] Processed signal responses, {len(net_adjustments)} parameter adjustments calculated")
-                
+
                 # Step 3: Apply network regulation (emergent homeostasis)
                 if net_adjustments:
                     applied_changes = self.regulatory_engine.apply_network_regulation(self.current_generation, net_adjustments)
-                    
+
                     if applied_changes:
                         print(f"[HOMEOSTASIS] Applied {len(applied_changes)} parameter adjustments:")
                         for param, (old_val, new_val) in applied_changes.items():
@@ -2232,44 +2292,44 @@ class AutonomousEvolutionRunner:
                         print("[INFO] No significant parameter changes needed")
                 else:
                     print("[INFO] No regulatory signals strong enough for parameter adjustments")
-                
+
                 # Step 4: Cleanup expired signals
                 self.regulatory_engine.cleanup_expired_signals(self.current_generation)
-                
+
                 # Step 5: Display regulation summary
                 regulation_summary = self.regulatory_engine.get_regulation_summary(self.current_generation)
                 active_signals = regulation_summary.get('active_signals', {})
                 recent_regulations = regulation_summary.get('recent_regulations', {})
-                
+
                 if active_signals:
                     print(f"[SIGNALS] Active regulatory signals:")
                     for signal_type, data in active_signals.items():
                         print(f"   {signal_type}: {data['count']} signals (avg strength: {data['strength']:.2f})")
-                
+
                 if recent_regulations:
                     print(f"[HISTORY] Recent parameter adjustments:")
                     for param, data in recent_regulations.items():
                         print(f"    {param}: {data['changes']} changes (avg: {data['avg_change']:+.3f})")
-                
+
             except Exception as e:
                 print(f"[WARN]  Distributed regulation failed: {e}")
                 import traceback
                 traceback.print_exc()
-            
+
             # PHASE 4.5: ORACLE STUCK GAME DIAGNOSTICS (Health Monitoring)
             # Diagnostic only - identifies WHICH TIER is broken, does NOT intervene
             # Philosophy: If games stuck, fix the SYSTEM. Let network intelligence emerge.
             print(f"\n[ORACLE] Running stuck game diagnostics...")
             try:
                 stuck_games = self.stuck_game_diagnostics.check_stuck_games(self.current_generation)
-                
+
                 if stuck_games:
                     print(f"[!] {len(stuck_games)} games with high failure rates detected")
                     for game_type in stuck_games:
                         diagnosis = self.stuck_game_diagnostics.diagnose_stuck_game(
                             game_type, self.current_generation
                         )
-                        
+
                         if diagnosis.broken_tier:
                             print(f"    {game_type}: {diagnosis.broken_tier} - {diagnosis.diagnosis}")
                             print(f"        FIX: {diagnosis.suggested_fix[:80]}...")
@@ -2277,20 +2337,20 @@ class AutonomousEvolutionRunner:
                             print(f"    {game_type}: All tiers healthy (game may be difficult)")
                 else:
                     print("[OK] No stuck games detected - network is learning")
-                    
+
             except Exception as e:
                 print(f"[WARN] Stuck game diagnostics failed: {e}")
-            
+
             # ISSUE 3 FIX: Aggressive pruning to maintain target population
             # ADAPTIVE: Scale target with available game count (game_types * 10)
             TARGET_POPULATION = getattr(self, '_current_target_population', None)
             if TARGET_POPULATION is None:
                 TARGET_POPULATION = self._calculate_target_population_from_db()
-            
+
             if population_size > TARGET_POPULATION:
                 print(f"\n[] Population too large ({population_size}), pruning to {TARGET_POPULATION}...")
                 print(f"      (Adaptive target based on {TARGET_POPULATION // 10} available game types)")
-                
+
                 # STEP 1: PRESTIGE-BASED PROTECTION ONLY (specialist system disabled)
                 # Get survival_protection for all agents (0-80% protection based on prestige)
                 agents_with_prestige = self.db.execute_query("""
@@ -2298,24 +2358,24 @@ class AutonomousEvolutionRunner:
                     FROM agents
                     WHERE is_active = TRUE
                 """)
-                
+
                 # Build protection map: agent_id -> survival_protection (0.0 to 0.8)
                 protection_map = {
                     agent['agent_id']: agent.get('survival_protection', 0.0) or 0.0
                     for agent in agents_with_prestige
                 }
-                
+
                 print(f"  [] Using prestige-based protection (0-80% survival chance)")
-                
+
                 # STEP 2: Identify top 10 performers for each game type (ABSOLUTE PROTECTION)
                 # Get available game types from earlier in generation
                 game_types = getattr(self, '_current_game_types', ['sp80', 'ls20', 'lp85', 'ft09', 'as66', 'vc33'])
-                
+
                 top_performers_by_game = set()
                 for game_type in game_types:
                     # Get top 10 agents for this game type based on their performance
                     top_agents = self.db.execute_query("""
-                        SELECT DISTINCT aap.agent_id, 
+                        SELECT DISTINCT aap.agent_id,
                                AVG(aap.final_score) as avg_score,
                                COUNT(*) as games_played
                         FROM agent_arc_performance aap
@@ -2326,12 +2386,12 @@ class AutonomousEvolutionRunner:
                         ORDER BY avg_score DESC, games_played DESC
                         LIMIT 10
                     """, (f"{game_type}-%",))
-                    
+
                     for agent in top_agents:
                         top_performers_by_game.add(agent['agent_id'])
-                
+
                 print(f"  [] Protected top 10 performers per game type: {len(top_performers_by_game)} specialists")
-                
+
                 # CRITICAL FIX: Get ALL agents sorted by performance (worst first)
                 # Don't use top_performers list which is limited to top 5!
                 all_agents_sorted = self.db.execute_query("""
@@ -2340,12 +2400,12 @@ class AutonomousEvolutionRunner:
                     WHERE is_active = TRUE
                     ORDER BY avg_score_per_game ASC, total_games_won ASC, score_efficiency ASC
                 """)
-                
+
                 pruned_count = 0
                 protected_by_prestige = 0
                 protected_by_specialist = 0
                 target_pruned = population_size - TARGET_POPULATION  # Prune down to target
-                
+
                 # ADAPTIVE PRESTIGE DAMPENING
                 # Scale down prestige protection when population is way over target
                 overpopulation_ratio = population_size / TARGET_POPULATION
@@ -2361,19 +2421,19 @@ class AutonomousEvolutionRunner:
                 else:
                     # Normal or slight overpopulation: full prestige effectiveness
                     prestige_dampening = 1.0
-                
+
                 print(f"  [TARGET] Attempting to prune {target_pruned} worst performers from {len(all_agents_sorted)} active agents...")
                 print(f"  [DAMPEN] Population ratio: {overpopulation_ratio:.1f}x target, prestige dampening: {prestige_dampening:.0%}")
-                
+
                 import random
                 for agent in all_agents_sorted:
                     agent_id = agent['agent_id']
-                    
+
                     # ABSOLUTE PROTECTION: Top 10 performers per game type
                     if agent_id in top_performers_by_game:
                         protected_by_specialist += 1
                         continue
-                    
+
                     # Check prestige protection (probabilistic with adaptive dampening)
                     base_protection = protection_map.get(agent_id, 0.0)
                     effective_protection = base_protection * prestige_dampening
@@ -2381,7 +2441,7 @@ class AutonomousEvolutionRunner:
                         # Agent protected by prestige - skip pruning
                         protected_by_prestige += 1
                         continue
-                    
+
                     # Deactivate agent (not deleted - just marked inactive)
                     # Agent data preserved in database for analysis
                     self.db.execute_query(
@@ -2389,11 +2449,11 @@ class AutonomousEvolutionRunner:
                         (agent_id,)
                     )
                     pruned_count += 1
-                    
+
                     # Stop after reaching target
                     if pruned_count >= target_pruned:
                         break
-                
+
                 if pruned_count == 0:
                     print(f"  [WARN] No agents pruned - all protected!")
                     print(f"        Protected by specialist status: {protected_by_specialist} agents")
@@ -2404,20 +2464,20 @@ class AutonomousEvolutionRunner:
                     print(f"       Protected specialists (top 10/game): {protected_by_specialist} agents")
                     print(f"       Protected by prestige: {protected_by_prestige} agents")
                     print(f"       New population size: {population_size - pruned_count}")
-            
+
             # CLEANUP: Historical data garbage collection (prevent database bloat)
             print(f"\n[CLEANUP] Running historical data garbage collection...")
-            
+
             # Agent lifecycle management (Net Navi philosophy: good players live on)
             try:
                 from agent_lifecycle_manager import AgentLifecycleManager
                 lifecycle_mgr = AgentLifecycleManager(self.db)
-                
+
                 # Only run cleanup every 10 generations (not every generation)
                 if self.current_generation % 10 == 0:
                     print(f"\n[DNA AGENTS] Cleaning up ancient inactive agents...")
                     agent_cleanup = lifecycle_mgr.cleanup_ancient_inactive_agents(self.current_generation, dry_run=False)
-                    
+
                     if agent_cleanup['total_deleted'] > 0:
                         print(f"  [OK] Permanently deleted {agent_cleanup['total_deleted']} ancient agents")
                         print(f"       Zero-score (50+ gen): {agent_cleanup['zero_score_deleted']}")
@@ -2428,7 +2488,7 @@ class AutonomousEvolutionRunner:
                         print(f"  [INFO] No agents old enough for deletion")
                 else:
                     print(f"  [SKIP] Agent cleanup (only runs every 10 generations)")
-                    
+
             except NameError as ne:
                 # NameError typically means a variable/module is not defined
                 print(f"  [WARN] Agent lifecycle cleanup NameError: {ne}")
@@ -2436,17 +2496,17 @@ class AutonomousEvolutionRunner:
                 traceback.print_exc()
             except Exception as e:
                 print(f"  [WARN] Agent lifecycle cleanup failed: {type(e).__name__}: {e}")
-            
+
             # Phase 1: Agent Revival System (Biome Theory)
             # Check if any agents should be revived based on triggers
             if self.current_generation % 5 == 0:  # Check every 5 generations
                 try:
                     from manual_tools.utilities.revive_agents import AgentRevivalSystem
                     revival_system = AgentRevivalSystem()
-                    
+
                     triggers = revival_system.detect_revival_triggers(self.current_generation)
                     revived_count = 0
-                    
+
                     for trigger in triggers:
                         if trigger.get('candidates'):
                             # Try to revive the best candidate
@@ -2459,17 +2519,17 @@ class AutonomousEvolutionRunner:
                             if revived:
                                 revived_count += 1
                                 print(f"  [REVIVAL] Revived agent due to {trigger['trigger']}: {revived[:12]}")
-                    
+
                     if revived_count > 0:
                         print(f"  [OK] Revival system resurrected {revived_count} agents")
                     else:
                         print(f"  [SKIP] No revival triggers detected")
-                        
+
                 except ImportError:
                     print(f"  [SKIP] Revival system not available (revive_agents.py not found)")
                 except Exception as e:
                     print(f"  [WARN] Revival system failed: {e}")
-            
+
             # Frontier package cleanup (remove temp packages when sequences exist)
             try:
                 from engines.social.viral_package_engine import ViralPackageEngine
@@ -2477,19 +2537,19 @@ class AutonomousEvolutionRunner:
                 cleaned = viral_engine.cleanup_obsolete_frontier_packages(min_sequences_to_cleanup=3)
                 if cleaned > 0:
                     print(f"  [OK] Cleaned {cleaned} obsolete frontier packages (sequences now exist)")
-                
+
                 # Also cleanup obsolete pariahs (soft retirement)
                 pariah_retired = viral_engine.cleanup_obsolete_pariahs(self.current_generation)
                 if pariah_retired > 0:
                     print(f"  [OK] Soft-retired {pariah_retired} obsolete pariahs")
             except Exception as e:
                 print(f"  [WARN] Frontier package cleanup failed: {e}")
-            
+
             # Safe database cleanup (comprehensive - replaces HistoricalDataCleaner)
             try:
                 cleaner = SafeDatabaseCleaner()
                 cleanup_results = cleaner.cleanup(dry_run=False, verbose=False)
-                
+
                 total_deleted = cleanup_results['total_deleted']
                 if total_deleted > 0:
                     print(f"  [OK] Safe cleanup deleted {total_deleted:,} rows:")
@@ -2498,34 +2558,34 @@ class AutonomousEvolutionRunner:
                             print(f"       - {table}: {stats['deleted']:,}")
                 else:
                     print(f"  [SKIP] No cleanup needed (all tables within limits)")
-                
+
             except Exception as e:
                 print(f"  [WARN] Safe cleanup failed: {e}")
-            
+
             # ===============================================================
             # REPRESENTATION LEARNER TRAINING (Every generation)
             # ===============================================================
             # Train the Self-Supervised Dynamics model on recent action traces.
-            # This creates learned representations that enable implicit 
+            # This creates learned representations that enable implicit
             # generalization across games - finding structurally similar
             # situations even when pixel patterns differ.
             # ===============================================================
             try:
                 from representation_learner import RepresentationLearner
-                
+
                 rep_learner = RepresentationLearner()
-                
+
                 # Train on recent games (last 10000 traces)
                 metrics = rep_learner.train_on_recent_games(
                     max_traces=10000,
                     epochs=3,
                     batch_size=64
                 )
-                
+
                 if metrics and metrics.get('final_loss'):
                     print(f"  [REP] Dynamics model trained: loss={metrics['final_loss']:.4f}, "
                           f"traces={metrics.get('traces_used', 0):,}")
-                    
+
                     # Compute embeddings for recent traces (for similarity search)
                     embeddings_created = rep_learner.compute_embeddings_for_recent_traces(
                         max_traces=5000
@@ -2533,36 +2593,36 @@ class AutonomousEvolutionRunner:
                     print(f"  [REP] Created {embeddings_created:,} frame embeddings")
                 else:
                     print(f"  [REP] Training skipped (insufficient data)")
-                    
+
             except ImportError:
                 # torch not installed - skip silently
                 pass
             except Exception as e:
                 print(f"  [WARN] Representation learning failed: {e}")
-            
+
             return True
-            
+
         except Exception as e:
             print(f"[?] Evolution failed: {e}")
             import traceback
             traceback.print_exc()
             return False
-    
+
     def check_system_health(self) -> Dict[str, Any]:
         """
         Check system health metrics.
-        
+
         Returns:
             Health status dictionary
         """
         try:
             db_stats = self.db.get_database_stats()
             agent_count = self.db.get_active_agent_count()
-            
+
             # Check database size
             import os
             db_size_mb = os.path.getsize(self.db.db_path) / (1024 * 1024)
-            
+
             health = {
                 'healthy': True,
                 'agent_count': agent_count,
@@ -2571,30 +2631,30 @@ class AutonomousEvolutionRunner:
                 'log_count': db_stats.get('system_logs_count', 0),
                 'warnings': []
             }
-            
+
             # Health checks
             if agent_count == 0:
                 health['healthy'] = False
                 health['warnings'].append('No active agents')
-            
+
             if db_size_mb > 1000:  # > 1 GB
                 health['warnings'].append(f'Database large: {db_size_mb:.0f} MB')
-            
+
             if db_stats.get('system_logs_count', 0) > 200000:
                 health['warnings'].append('High log count - cleanup may be needed')
-            
+
             return health
-            
+
         except Exception as e:
             return {
                 'healthy': False,
                 'warnings': [f'Health check failed: {e}']
             }
-    
+
     async def run_cycle(self) -> bool:
         """
         Run one complete evolution cycle.
-        
+
         Returns:
             True if should continue, False if should stop
         """
@@ -2602,37 +2662,42 @@ class AutonomousEvolutionRunner:
         if self.shutdown_requested:
             print("[?] Shutdown requested - skipping cycle")
             return False
-        
+
         # ORACLE METRICS: Reset for new generation
         if self.metrics_capture:
             self.metrics_capture.reset(self.current_generation)
-        
+
         # Health check
         health = self.check_system_health()
         if not health['healthy']:
             print(f"\n[WARN]  System Health Issues:")
             for warning in health['warnings']:
                 print(f"  - {warning}")
-            
+
             if health['agent_count'] == 0:
                 print("  Attempting to reinitialize population...")
                 if not await self.initialize_population():
                     return False
-        
+
         # SEQUENCE MINING: Backfill learning data from winning sequences
         # Runs once per cycle to extract any missing knowledge from existing sequences
         if SEQUENCE_MINER_AVAILABLE:
             try:
-                miner = SequenceMiner(self.db.db_path)
+                miner = SequenceMiner(self.db)
                 mining_result = miner.mine_all_sequences()
-                if mining_result.get('total_changes', 0) > 0:
-                    print(f"[MINER] Backfilled: {mining_result.get('breakpoints_updated', 0)} breakpoints, "
-                          f"{mining_result.get('triggers_inserted', 0)} triggers, "
-                          f"{mining_result.get('outcomes_inserted', 0)} outcomes")
-                miner.close()
+                total_changes = (
+                    mining_result.get('level_breakpoints', {}).get('updated', 0) +
+                    mining_result.get('interaction_triggers', {}).get('inserted', 0) +
+                    mining_result.get('cods_level_outcomes', {}).get('recorded', 0) +
+                    mining_result.get('action_effectiveness', {}).get('updated', 0)
+                )
+                if total_changes > 0:
+                    print(f"[MINER] Backfilled: {mining_result.get('level_breakpoints', {}).get('updated', 0)} breakpoints, "
+                          f"{mining_result.get('interaction_triggers', {}).get('inserted', 0)} triggers, "
+                          f"{mining_result.get('cods_level_outcomes', {}).get('recorded', 0)} outcomes")
             except Exception as e:
                 print(f"[WARN] Sequence mining failed: {e}")
-        
+
         # Run evaluation games
         # ADAPTIVE SCALING: games_per_generation = active_agents * 0.25
         # Rationale: 75 games for 300 agents (25% play rate per generation)
@@ -2641,20 +2706,20 @@ class AutonomousEvolutionRunner:
         GAMES_PER_AGENT_RATIO = 0.25  # 25% of agents play each generation
         MIN_GAMES = 10  # Never go below 10 games
         MAX_GAMES = 200  # Cap to prevent extremely long generations
-        
+
         adaptive_games = int(active_agent_count * GAMES_PER_AGENT_RATIO)
         adaptive_games = max(MIN_GAMES, min(MAX_GAMES, adaptive_games))
-        
+
         print(f"  [ADAPTIVE] Running {adaptive_games} games ({active_agent_count} agents * {GAMES_PER_AGENT_RATIO:.0%} = {int(active_agent_count * GAMES_PER_AGENT_RATIO)}, clamped to [{MIN_GAMES}, {MAX_GAMES}])")
         eval_results = await self.run_evaluation_games(adaptive_games)
-        
+
         # CRITICAL: Force WAL checkpoint after every generation to prevent data loss
         try:
             self.db.checkpoint_wal()
             print(f"[?] WAL checkpoint after generation {self.current_generation}")
         except Exception as e:
             print(f"[WARN] Failed to checkpoint WAL: {e}")
-        
+
         # AUTOMATED ASSESSMENT: Run metrics tracking (Other AI #3)
         try:
             assessment = self.assessment_runner.run_post_generation_assessment(
@@ -2665,7 +2730,7 @@ class AutonomousEvolutionRunner:
             print(f"[ASSESSMENT] Completion: {assessment['level_completion']['completion_rate']:.1f}%, "
                   f"Breakthroughs: {assessment['breakthrough_momentum']['breakthrough_detections']}, "
                   f"Status: {assessment['level_completion']['status']}")
-            
+
             # Print recommendations if any
             if assessment['recommendations']:
                 print(f"[ASSESSMENT] Recommendations:")
@@ -2673,7 +2738,7 @@ class AutonomousEvolutionRunner:
                     print(f"  - {rec}")
         except Exception as e:
             print(f"[WARN] Automated assessment failed: {e}")
-        
+
         # ================================================================
         # MASTERY SYSTEM: Update mastery scores for all game-levels
         # ================================================================
@@ -2684,45 +2749,45 @@ class AutonomousEvolutionRunner:
         try:
             from mastery_system import get_mastery_system
             mastery_system = get_mastery_system(self.db)
-            
+
             if mastery_system:
                 updated = mastery_system.update_all_mastery(self.current_generation)
-                
+
                 if updated > 0:
                     # Get tier distribution for reporting
                     report = mastery_system.get_mastery_report()
                     tier_dist = report.get('tier_distribution', {})
-                    
+
                     # Format distribution string
                     tier_str = ", ".join(
-                        f"{tier[0].upper()}:{count}" 
-                        for tier, count in sorted(tier_dist.items(), 
+                        f"{tier[0].upper()}:{count}"
+                        for tier, count in sorted(tier_dist.items(),
                             key=lambda x: ['master', 'expert', 'practitioner', 'apprentice', 'novice'].index(x[0]) if x[0] in ['master', 'expert', 'practitioner', 'apprentice', 'novice'] else 5)
                     )
-                    
+
                     print(f"[MASTERY] Updated {updated} game-levels: {tier_str}")
         except ImportError:
             pass  # Mastery system not available yet
         except Exception as e:
             print(f"[WARN] Mastery update failed: {e}")
-        
+
         # PRIMITIVE SUGGESTER: Update primitive effectiveness tracking (post-generation)
         # Note: CODS unlock system deprecated - all 315 primitives are always available
         if PRIMITIVE_SUGGESTER_AVAILABLE and get_primitive_suggester:
             try:
                 suggester = get_primitive_suggester(self.db.db_path)
-                
+
                 # Show primitive effectiveness stats
                 stats = suggester.get_effectiveness_stats()
                 if stats.get('total_tracked', 0) > 0:
                     print(f"[PRIMITIVES] Tracking {stats['total_tracked']} primitive-action pairs")
-                    
+
                     # Show top performing primitives
                     top_primitives = stats.get('top_performing', [])
                     if top_primitives:
                         top_str = ", ".join(f"{p['primitive']}({p['score']:.2f})" for p in top_primitives[:3])
                         print(f"[PRIMITIVES] Top performers: {top_str}")
-                    
+
                     # Show primitives needing more data
                     underexplored = stats.get('underexplored', [])
                     if underexplored:
@@ -2730,7 +2795,7 @@ class AutonomousEvolutionRunner:
                         print(f"[PRIMITIVES] Need more data: {under_str}")
             except Exception as e:
                 print(f"[PRIMITIVES] Stats skipped: {e}")
-        
+
         # Print status
         self.print_status(
             generation=self.current_generation,
@@ -2739,18 +2804,18 @@ class AutonomousEvolutionRunner:
             avg_score=eval_results['avg_score'],
             population_size=health['agent_count']
         )
-        
+
         # Check if we should evolve
         should_evolve = False
-        
+
         if self.last_evolution_time is None:
             should_evolve = True  # First evolution
         elif datetime.now() - self.last_evolution_time >= self.evolution_interval:
             should_evolve = True  # Time for next evolution
-        
+
         if should_evolve:
             success = await self.analyze_and_evolve()
-            
+
             # Phase 5: Horizontal Gene Transfer with Emotional Intelligence
             try:
                 transfer_count = self.transfer_engine.execute_generation_transfers(
@@ -2762,7 +2827,7 @@ class AutonomousEvolutionRunner:
                     print(f"[PHASE 5] [DNA] No compatible transfers found this generation")
             except Exception as e:
                 print(f"[PHASE 5]  Horizontal transfer error: {e}")
-            
+
             # ================================================================
             # ORACLE HEALTH MONITOR: Self-diagnostic and experimentation
             # ================================================================
@@ -2771,13 +2836,13 @@ class AutonomousEvolutionRunner:
                 try:
                     # Get metrics from console capture
                     console_metrics = self.metrics_capture.get_generation_summary()
-                    
+
                     # Run health check
                     health_report = self.oracle_health.check_generation_health(
                         generation=self.current_generation,
                         console_metrics=console_metrics
                     )
-                    
+
                     # Report status
                     if health_report.status == HealthStatus.HEALTHY:
                         print(f"[ORACLE] [OK] System healthy - {health_report.diagnosis}")
@@ -2789,10 +2854,10 @@ class AutonomousEvolutionRunner:
                         print(f"[ORACLE] [X] CRITICAL: {health_report.diagnosis}")
                         for pathology in health_report.pathologies[:2]:
                             print(f"  - [{pathology['severity']}] {pathology['type']}")
-                        
+
                         # Check for active experiment
                         active_exp = self.oracle_health.get_active_experiment()
-                        
+
                         if active_exp:
                             # Experiment in progress - check if time to evaluate
                             if self.oracle_health.should_evaluate_experiment(
@@ -2804,8 +2869,8 @@ class AutonomousEvolutionRunner:
                                 print(f"[ORACLE-EXP] Experiment {result['verdict']}: "
                                       f"{result['improvement']:+.1%} improvement")
                             else:
-                                gens_remaining = (active_exp['started_generation'] + 
-                                                  active_exp['duration_generations'] - 
+                                gens_remaining = (active_exp['started_generation'] +
+                                                  active_exp['duration_generations'] -
                                                   self.current_generation)
                                 print(f"[ORACLE-EXP] Experiment in progress ({gens_remaining} gens remaining)")
                         else:
@@ -2816,10 +2881,10 @@ class AutonomousEvolutionRunner:
                             )
                             if experiment:
                                 self.oracle_health.start_experiment(experiment)
-                    
+
                     # Print metrics summary
                     self.metrics_capture.print_summary()
-                    
+
                     # Print reasoning diagnostics summary (for automated bug detection)
                     if get_reasoning_capture:
                         try:
@@ -2828,31 +2893,31 @@ class AutonomousEvolutionRunner:
                                 reasoning_capture.print_diagnostics_report()
                         except Exception as e:
                             print(f"[REASONING-DIAG] Report failed: {e}")
-                    
+
                     # Reset metrics for next generation
                     self.metrics_capture.reset(self.current_generation + 1)
-                    
+
                     # Reset reasoning capture for next generation
                     if get_reasoning_capture:
                         try:
                             get_reasoning_capture(self.current_generation + 1)
                         except Exception:
                             pass
-                    
+
                 except Exception as e:
                     print(f"[ORACLE] Health check failed: {e}")
                     import traceback
                     traceback.print_exc()
-            
+
             if not success:
                 # Check if we hit max generations
                 if self.current_generation >= self.max_generations:
                     print(f"\n[?]  Max generations reached")
                     return False
-        
+
         # Continue running
         return True
-    
+
     async def run(self):
         """Main autonomous evolution loop with graceful shutdown support."""
         self.running = True
@@ -2860,7 +2925,7 @@ class AutonomousEvolutionRunner:
 
         # Start keyboard listener: type F12 then Enter to request shutdown
         self._shutdown_listener_task = asyncio.create_task(self._shutdown_listener())
-        
+
         # Try to load previous checkpoint
         checkpoint = self._load_checkpoint()
         if checkpoint:
@@ -2868,9 +2933,9 @@ class AutonomousEvolutionRunner:
             print(f"   Generation: {checkpoint.get('current_generation', 0)}")
             print(f"   Games Played: {checkpoint.get('total_games_played', 0)}")
             print(f"   Last shutdown: {checkpoint.get('shutdown_time', 'unknown')}")
-        
+
         self.print_banner()
-        
+
         # Cleanup old logs on startup to prevent bloat from previous runs
         # Skip in test mode for faster startup
         # TEMPORARILY DISABLED - causing issues with external drive
@@ -2880,7 +2945,7 @@ class AutonomousEvolutionRunner:
         #     print("\n[?]  Performing startup database cleanup...")
         #     self._cleanup_old_logs()
         print("\n[SKIP] Startup cleanup temporarily disabled")
-        
+
         # Sync schema file with actual database (catches tables created by other modules)
         if SCHEMA_MAINTENANCE_AVAILABLE and SchemaAutoMaintenance:
             try:
@@ -2912,41 +2977,41 @@ class AutonomousEvolutionRunner:
             finally:
                 await self._cleanup()
             return
-        
+
         try:
             # Initialize population
             if not await self.initialize_population():
                 print("[?] Failed to initialize - exiting")
                 return
-            
+
             print("\n[>>] Starting autonomous evolution...")
             print("Press F12 + Enter (or Ctrl+C) for graceful shutdown\n")
-            
+
             cycle_count = 0
-            
+
             while self.running and not self.shutdown_requested:
                 cycle_count += 1
                 print(f"\n{'='*80}")
                 print(f"[CYCLE] EVOLUTION CYCLE #{cycle_count}")
                 print(f"{'='*80}")
-                
+
                 # Check for shutdown request before starting cycle
                 if self.shutdown_requested:
                     print("\n[?] Shutdown requested before cycle start")
                     break
-                
+
                 # Run cycle with task tracking for cancellation
                 try:
                     self.current_task = asyncio.create_task(self.run_cycle())
                     should_continue = await self.current_task
-                    
+
                     if not should_continue:
                         break
-                    
+
                 except asyncio.CancelledError:
                     print("\n[WARN]  Current cycle cancelled - shutting down gracefully")
                     break
-                
+
                 except Exception as e:
                     if self.shutdown_requested:
                         # Ignore errors during shutdown - they're expected
@@ -2961,44 +3026,44 @@ class AutonomousEvolutionRunner:
                         if not self.shutdown_requested:
                             continue
                         break
-                
+
                 # Check shutdown between cycles
                 if self.shutdown_requested:
                     print("\n[?] Shutdown requested between cycles")
                     break
-                
+
                 # Brief pause between cycles (check for shutdown during pause)
                 for _ in range(5):
                     if self.shutdown_requested:
                         break
                     await asyncio.sleep(1)
-            
+
             # Cleanup before exit
             await self._cleanup()
-            
+
             # Final summary
             self.print_final_summary()
-            
+
         except KeyboardInterrupt:
             # Should be caught by signal handler, but just in case
             print("\n\n[PAUSE]  Keyboard interrupt received")
             await self._cleanup()
             self.print_final_summary()
-        
+
         except Exception as e:
             print(f"\n\n[?] Fatal error: {e}")
             import traceback
             traceback.print_exc()
-            
+
             # Still try to cleanup
             try:
                 await self._cleanup()
             except:
                 pass
-        
+
         finally:
             self.running = False
-            
+
             # Ensure database connections are closed
             try:
                 if hasattr(self.db, 'close'):
@@ -3009,16 +3074,16 @@ class AutonomousEvolutionRunner:
             # Cancel keyboard listener if still running
             if self._shutdown_listener_task and not self._shutdown_listener_task.done():
                 self._shutdown_listener_task.cancel()
-    
+
     def print_final_summary(self):
         """Print final summary statistics."""
         runtime = datetime.now() - self.start_time
         hours = runtime.total_seconds() / 3600
-        
+
         print("\n" + "="*80)
         print("[?] FINAL SUMMARY")
         print("="*80)
-        
+
         # Shutdown reason
         if self.shutdown_requested:
             print("Shutdown Reason: User requested (graceful)")
@@ -3026,28 +3091,28 @@ class AutonomousEvolutionRunner:
             print("Shutdown Reason: Target reached or max generations")
         else:
             print("Shutdown Reason: Normal completion")
-        
+
         print(f"Total Runtime: {hours:.2f} hours ({runtime})")
         print(f"Total Games: {self.total_games_played}")
         print(f"Final Generation: {self.current_generation}")
         print(f"Games/Hour: {self.total_games_played/max(hours, 0.01):.1f}")
-        
+
         # Get final stats
         try:
             # CRITICAL: Sync agent performance before final analysis
             agents_updated = self.db.sync_agent_performance_to_agents_table()
             print(f"\n[SYNC] Synced performance for {agents_updated} agents before final analysis")
-            
+
             analysis = self.analyzer.analyze_population_performance()
             pop_stats = analysis.get('population_stats', {})
-            
+
             print(f"\nFinal Performance:")
             print(f"  Comprehensive Success: {pop_stats.get('average_comprehensive_success', 0):.2%} (wins + levels + scores)")
             print(f"  Game Win Rate: {pop_stats.get('average_win_rate', 0):.2%} (wins only)")
             print(f"  Best Win Rate: {pop_stats.get('best_win_rate', 0):.2%}")
             print(f"  Avg Score: {pop_stats.get('average_score', 0):.2f}")
             print(f"  Population: {pop_stats.get('population_size', 0)} agents")
-            
+
             # Top performers
             top = analysis.get('top_performers', [])[:3]
             if top:
@@ -3059,34 +3124,34 @@ class AutonomousEvolutionRunner:
                     total_games = agent.get('total_games_played', 0)
                     total_wins = agent.get('total_games_won', 0)
                     score_efficiency = agent.get('score_efficiency', 0)
-                    
+
                     print(f"  {i}. {agent_id}:")
                     print(f"     Win Rate: {win_rate:.2%} ({total_wins}/{total_games} games)")
                     print(f"     Avg Score: {avg_score:.2f}, Efficiency: {score_efficiency:.4f}")
-        
+
         except Exception as e:
             print(f"  (Could not load final stats: {e})")
             import traceback
             traceback.print_exc()
-        
+
         # ======================================================================
         # DETAILED GAMEPLAY METRICS (Run automatically when all games finish)
         # ======================================================================
         print("\n" + "-"*80)
         print("[METRICS] DETAILED GAMEPLAY ANALYSIS")
         print("-"*80)
-        
+
         try:
             import sqlite3
             conn = sqlite3.connect(self.db.db_path, timeout=30.0)
             conn.execute("PRAGMA busy_timeout=5000")  # Wait for locks
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
+
             # 1. Recent game results (last 3 hours or this session)
             # Note: game_type is extracted from game_id prefix, agent_id from session_id
             cursor.execute("""
-                SELECT 
+                SELECT
                     gr.game_id,
                     SUBSTR(gr.game_id, 1, INSTR(gr.game_id, '-') - 1) as game_type,
                     gr.final_score,
@@ -3100,25 +3165,25 @@ class AutonomousEvolutionRunner:
                 LIMIT 25
             """)
             recent_games = cursor.fetchall()
-            
+
             if recent_games:
                 print(f"\nRecent Games (last 3 hours): {len(recent_games)}")
-                
+
                 # Calculate stats
                 scores = [g['final_score'] or 0 for g in recent_games]
                 levels = [g['level_completions'] or 0 for g in recent_games]
                 actions = [g['total_actions'] or 0 for g in recent_games]
-                
+
                 positive_scores = sum(1 for s in scores if s > 0)
                 level_wins = sum(1 for l in levels if l > 0)
-                
+
                 print(f"  Positive Scores: {positive_scores}/{len(recent_games)} ({100*positive_scores/len(recent_games):.1f}%)")
                 print(f"  Level Completions: {level_wins}/{len(recent_games)} ({100*level_wins/len(recent_games):.1f}%)")
                 print(f"  Avg Score: {sum(scores)/len(scores):.2f}")
                 print(f"  Avg Levels: {sum(levels)/len(levels):.2f}")
                 print(f"  Avg Actions: {sum(actions)/len(actions):.1f}")
                 print(f"  Best Score: {max(scores):.1f}, Best Levels: {max(levels)}")
-                
+
                 # Game type distribution
                 game_types = {}
                 for g in recent_games:
@@ -3128,34 +3193,34 @@ class AutonomousEvolutionRunner:
                     game_types[gt]['count'] += 1
                     game_types[gt]['total_score'] += g['final_score'] or 0
                     game_types[gt]['total_levels'] += g['level_completions'] or 0
-                
+
                 print(f"\n  By Game Type:")
                 for gt, stats in sorted(game_types.items(), key=lambda x: -x[1]['count']):
                     avg_score = stats['total_score'] / stats['count']
                     avg_levels = stats['total_levels'] / stats['count']
                     print(f"    {gt}: {stats['count']} games, avg score {avg_score:.2f}, avg levels {avg_levels:.2f}")
-            
+
             # 2. Winning sequences status
             cursor.execute("""
                 SELECT COUNT(*) as total FROM winning_sequences WHERE is_active = 1
             """)
             seq_count = cursor.fetchone()['total']
-            
+
             cursor.execute("""
                 SELECT COUNT(DISTINCT game_id) as games FROM winning_sequences WHERE is_active = 1
             """)
             seq_games = cursor.fetchone()['games']
-            
+
             cursor.execute("""
-                SELECT COUNT(*) as new_seqs FROM winning_sequences 
+                SELECT COUNT(*) as new_seqs FROM winning_sequences
                 WHERE is_active = 1 AND discovered_at >= datetime('now', '-3 hours')
             """)
             new_seqs = cursor.fetchone()['new_seqs']
-            
+
             print(f"\nWinning Sequences:")
             print(f"  Total Active: {seq_count} sequences across {seq_games} games")
             print(f"  New (last 3h): {new_seqs}")
-            
+
             # 3. CODS Status (if available)
             if CODS_AVAILABLE:
                 try:
@@ -3163,19 +3228,19 @@ class AutonomousEvolutionRunner:
                         SELECT status, COUNT(*) as cnt FROM primitive_status GROUP BY status
                     """)
                     prim_status = cursor.fetchall()
-                    
+
                     if prim_status:
                         print(f"\nCODS Primitives:")
                         for row in prim_status:
                             print(f"  {row['status']}: {row['cnt']}")
-                    
+
                     cursor.execute("""
                         SELECT COUNT(*) as cnt FROM composed_operators WHERE status != 'pruned'
                     """)
                     comp_ops = cursor.fetchone()
                     if comp_ops:
                         print(f"  Composed Operators: {comp_ops['cnt']}")
-                    
+
                     cursor.execute("""
                         SELECT COUNT(*) as cnt FROM oracle_decisions WHERE verdict = 'approved'
                     """)
@@ -3184,18 +3249,18 @@ class AutonomousEvolutionRunner:
                         print(f"  Oracle Unlocks: {unlocks['cnt']}")
                 except Exception as e:
                     print(f"  (CODS stats unavailable: {e})")
-            
+
             conn.close()
-            
+
         except Exception as e:
             print(f"  (Could not load detailed metrics: {e})")
-        
+
         print("-"*80)
-        
+
         print("="*80)
         print("\n[OK] Autonomous evolution runner stopped")
         print(f"Database: {self.db.db_path}")
-        
+
         if self.shutdown_requested or not self.running:
             print("\n[SAVE] Checkpoint saved - progress preserved")
             print("To resume from this point:")
@@ -3203,7 +3268,7 @@ class AutonomousEvolutionRunner:
             print("  python run_evolution.py")
         else:
             print("\nEvolution complete!")
-        
+
         print("="*80 + "\n")
 
 
@@ -3212,63 +3277,63 @@ async def main():
     parser = argparse.ArgumentParser(
         description='Autonomous Evolution Runner for ARC AGI 3'
     )
-    
+
     parser.add_argument(
         '--population', '-p',
         type=int,
         default=10,
         help='Initial population size (default: 10)'
     )
-    
+
     parser.add_argument(
         '--games-per-gen', '-g',
         type=int,
         default=20,
         help='Games to run per generation (default: 20)'
     )
-    
+
     parser.add_argument(
         '--max-generations', '-m',
         type=int,
         default=50,
         help='Maximum generations to evolve (default: 50)'
     )
-    
+
     parser.add_argument(
         '--target-win-rate', '-t',
         type=float,
         default=0.50,
         help='Target win rate to achieve (default: 0.50)'
     )
-    
+
     parser.add_argument(
         '--evolution-interval', '-i',
         type=int,
         default=60,
         help='Minutes between evolution cycles (default: 60)'
     )
-    
+
     parser.add_argument(
         '--db-path',
         type=str,
         default='core_data.db',
         help='Database file path (default: core_data.db)'
     )
-    
+
     parser.add_argument(
         '--diversity-mode',
         action='store_true',
         help='Enable diversity-focused evolution (diverse games, anti-overfitting, novel game priority)'
     )
-    
+
     args = parser.parse_args()
-    
+
     # Validate API key
     api_key = os.getenv('ARC_API_KEY')
     if not api_key or api_key == 'your_api_key_here':
         print("ERROR: Need valid ARC_API_KEY in .env file")
         return
-    
+
     # Create and run autonomous runner
     runner = AutonomousEvolutionRunner(
         db_path=args.db_path,
@@ -3278,7 +3343,7 @@ async def main():
         evolution_interval_minutes=args.evolution_interval,
         agi_mode=args.diversity_mode  # NEW: Pass diversity mode flag
     )
-    
+
     await runner.run()
 
 

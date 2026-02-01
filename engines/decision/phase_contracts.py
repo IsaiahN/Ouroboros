@@ -18,12 +18,13 @@ Naming Convention:
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Set, Optional, Any
-from enum import Enum
 import logging
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 class PhaseError(Exception):
     """
     Raised when a phase fails. NEVER silently swallowed.
-    
+
     Attributes:
         phase: Which phase failed (e.g., "ORIENT", "GROUND_TRUTH")
         reason: Human-readable explanation
@@ -56,7 +57,7 @@ class PhaseError(Exception):
 class GameState:
     """
     Current game state passed to all phases.
-    
+
     This is the "what's happening now" snapshot.
     """
     game_id: str
@@ -69,7 +70,7 @@ class GameState:
     position: Optional[tuple] = None  # Agent position if known
     previous_action: Optional[str] = None
     previous_frame: Optional[List[List[int]]] = None
-    
+
     @property
     def budget_used_percent(self) -> float:
         """Fraction of action budget consumed."""
@@ -82,9 +83,9 @@ class GameState:
 class AgentContext:
     """
     Agent-specific context passed to all phases.
-    
+
     This is "who am I and what's my state".
-    
+
     Naming note:
     - wA/wB are shorthand for "Stream A/B weights" from consciousness theory
     - In simple terms: wA = trust in agent's own experience, wB = trust in network
@@ -98,13 +99,13 @@ class AgentContext:
     is_frontier: bool  # Working on unknown level?
     prestige: float = 0.0
     social_rule_adherence: float = 1.0  # 0.0 = sociopathic, 1.0 = fully social
-    
+
     # Backwards compatibility alias
     @property
     def mortality_pressure(self) -> float:
         """Alias for urgency (backwards compatibility)."""
         return self.urgency
-    
+
     def validate(self) -> None:
         """Raise PhaseError if context is invalid."""
         if not 0 <= self.wA <= 1:
@@ -123,12 +124,12 @@ class AgentContext:
 class DecisionContext:
     """
     Accumulating context that flows through all phases.
-    
+
     This wrapper solves the phase coupling problem:
     - Phases access what they need via ctx.orient, ctx.ground_truth, etc.
     - Adding a field to ReasonContext doesn't change phase signatures
     - Phases still declare dependencies explicitly in their code
-    
+
     Usage:
         ctx = DecisionContext(game_state, agent_context)
         ctx.orient = phase1.execute(ctx)
@@ -137,7 +138,7 @@ class DecisionContext:
     """
     game_state: GameState
     agent: AgentContext
-    
+
     # Phase outputs (populated as phases execute)
     orient: Optional['OrientContext'] = None
     ground_truth: Optional['GroundTruthContext'] = None
@@ -145,7 +146,7 @@ class DecisionContext:
     pattern: Optional['PatternContext'] = None
     proposal: Optional['ProposalContext'] = None
     filtered: Optional['FilteredContext'] = None
-    
+
     # Metadata
     emergency_triggered: bool = False
     start_time: float = 0.0
@@ -159,7 +160,7 @@ class DecisionContext:
 class OrientContext:
     """
     Output of Phase 1: Orient - "What world am I in?"
-    
+
     Contains spatial understanding, discovery state, and blocking questions.
     NO action suggestions - only context building.
     """
@@ -172,12 +173,12 @@ class OrientContext:
     urgency: float  # 0.0-1.0 (higher = closer to cull, aka "mortality pressure")
     detected_objects: List[Dict[str, Any]] = field(default_factory=list)
     frame_changed: bool = True  # Did frame change from previous?
-    
+
     # Backwards compatibility
     @property
     def mortality_pressure(self) -> float:
         return self.urgency
-    
+
     def validate(self) -> None:
         """Raise PhaseError if contract violated."""
         if not 0 <= self.coverage_percent <= 1:
@@ -196,7 +197,7 @@ class OrientContext:
 class GroundTruthContext:
     """
     Output of Phase 2: Ground Truth - "What do I empirically know?"
-    
+
     Contains network-validated facts, safety assessments, and beliefs.
     This is what the DATABASE says, not what the agent guesses.
     """
@@ -208,7 +209,7 @@ class GroundTruthContext:
     death_risk_by_position: Dict[tuple, float]  # (x,y) -> death probability
     network_sequence_available: bool = False  # Is there a proven sequence?
     network_sequence: Optional[List[str]] = None  # The sequence if available
-    
+
     def validate(self) -> None:
         """Raise PhaseError if contract violated."""
         for action, weight in self.action_safety_weights.items():
@@ -227,15 +228,15 @@ class GroundTruthContext:
 class ReasonContext:
     """
     Output of Phase 3: Reason - "What should I believe?"
-    
+
     Integrates agent heuristics (Stream A) vs network heuristics (Stream B).
-    
+
     SYNTHESIS CLARIFICATION:
     When streams conflict and weights are close (within 0.1):
     - "synthesis" means weighted selection, NOT true merging
     - Currently: pick the one with higher empirical success rate
     - Future TODO: Implement true synthesis (e.g., perpendicular action)
-    
+
     The "competing personas" concept from theory docs is aspirational.
     Current implementation is simply: max(wA * score_A, wB * score_B)
     """
@@ -248,22 +249,22 @@ class ReasonContext:
     invalidated_beliefs: List[str]  # Beliefs that cascaded/failed
     confidence_in_theory: float  # 0.0-1.0
     working_theory: Optional[Dict[str, Any]] = None  # Current theory details
-    
+
     # Backwards compatibility aliases
     @property
     def stream_a_proposal(self) -> Optional[str]:
         return self.agent_proposal
-    
+
     @property
     def stream_b_proposal(self) -> Optional[str]:
         return self.network_proposal
-    
+
     @property
     def winning_stream(self) -> str:
         """Map new names to old for backwards compatibility."""
         mapping = {"agent": "A", "network": "B", "weighted_selection": "synthesis", "none": "none"}
         return mapping.get(self.winning_source, self.winning_source)
-    
+
     def validate(self) -> None:
         """Raise PhaseError if contract violated."""
         valid_states = ("exploring", "speculating", "testing", "proven", "contradicted")
@@ -292,7 +293,7 @@ class PatternMatch:
 class PatternContext:
     """
     Output of Phase 4: Pattern Match - "Have I seen this before?"
-    
+
     Contains all pattern-based suggestions from various engines.
     """
     pattern_suggestions: List[PatternMatch]  # Ranked by confidence
@@ -301,7 +302,7 @@ class PatternContext:
     abstraction_template: Optional[Dict[str, Any]]  # Applicable template
     resonance_score: float  # 0.0-1.0 cross-domain signal strength
     trigger_chains: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     def validate(self) -> None:
         """Raise PhaseError if contract violated."""
         if not 0 <= self.resonance_score <= 1:
@@ -328,14 +329,14 @@ class Proposal:
 class ProposalContext:
     """
     Output of Phase 5: Propose - "What's my best move?"
-    
+
     Contains ranked action proposals from all sources.
     """
     ranked_proposals: List[Proposal]  # Sorted by weighted confidence
     discovery_override: Optional[str]  # If in discovery phase, this takes priority
     subgoal_active: bool  # Working toward a subgoal?
     current_subgoal: Optional[str] = None  # The subgoal if active
-    
+
     def validate(self) -> None:
         """Raise PhaseError if contract violated."""
         for p in self.ranked_proposals:
@@ -351,13 +352,13 @@ class ProposalContext:
 class FilteredContext:
     """
     Output of Phase 6: Filter - "Remove bad options"
-    
+
     Contains proposals that survived all safety filters.
     """
     filtered_proposals: List[Proposal]  # After all filters
     removed_actions: Dict[str, str]  # action -> removal reason
     safety_multipliers: Dict[str, float]  # Per-action safety factor
-    
+
     def validate(self) -> None:
         """Raise PhaseError if contract violated."""
         for action, mult in self.safety_multipliers.items():
@@ -373,7 +374,7 @@ class FilteredContext:
 class FinalDecision:
     """
     Output of Phase 7: Select - The final decision.
-    
+
     This is the ONLY place where an action is chosen.
     Contains full audit trail for debugging.
     """
@@ -384,7 +385,7 @@ class FinalDecision:
     gut_instinct: str  # What Phase 5 top proposal was
     deliberation_changed: bool  # Did reasoning change the answer?
     selection_method: str = "unknown"  # "max_confidence"|"weighted_random"|"fallback"
-    
+
     def validate(self) -> None:
         """Raise PhaseError if contract violated."""
         if not self.action:

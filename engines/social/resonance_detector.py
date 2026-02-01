@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
@@ -9,8 +10,8 @@ Implements the Resonance Discovery Principle from harmonies theory:
 "Truth amplifies itself through cross-domain resonance, not random search."
 
 In our context, "cross-domain" means cross-ROLE:
-- When Pioneers (blind exploration), Generalists (network-guided), and 
-  Exploiters (micro-optimization) ALL independently converge on the same 
+- When Pioneers (blind exploration), Generalists (network-guided), and
+  Exploiters (micro-optimization) ALL independently converge on the same
   abstract pattern, that's RESONANCE - evidence of objective truth.
 
 Key Features:
@@ -26,8 +27,8 @@ Theoretical Basis:
 - If all three converge despite radically different biases = objective truth
 """
 
-import sys
 import os
+import sys
 
 # Disable pycache (Rule 1)
 sys.dont_write_bytecode = True
@@ -38,8 +39,8 @@ import json
 import logging
 import random
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from database_interface import DatabaseInterface
 
@@ -49,7 +50,7 @@ logger = logging.getLogger(__name__)
 def _notify_concept_from_resonance(pattern: Dict[str, Any], beliefs: Dict[str, Any]) -> None:
     """
     Notify ConceptDiscoveryEngine when high resonance is detected.
-    
+
     This closes the Unification -> Generalization gap:
     When agents with different roles converge on the same pattern,
     that commonality IS a concept candidate for cross-game generalization.
@@ -58,14 +59,14 @@ def _notify_concept_from_resonance(pattern: Dict[str, Any], beliefs: Dict[str, A
         from concept_discovery_engine import ConceptDiscoveryEngine
         db = DatabaseInterface()
         concept_engine = ConceptDiscoveryEngine(db)
-        
+
         # High resonance means multiple roles agree - this is concept-worthy
         theory = beliefs.get('working_theory_required', '')
         control = beliefs.get('self_model_required', '')
-        
+
         # Create a pattern description from resonance
         pattern_description = f"resonance:{theory}:{control}"
-        
+
         # Track across all game types where resonance was found
         for game_type in pattern.get('game_types', []):
             concept_engine.track_successful_operator_pattern(
@@ -73,7 +74,7 @@ def _notify_concept_from_resonance(pattern: Dict[str, Any], beliefs: Dict[str, A
                 game_id=game_type,
                 sub_patterns=[pattern_description, theory, control]
             )
-        
+
         logger.debug(
             f"[RESONANCE->CONCEPT] High resonance pattern fed to concept engine: "
             f"score={pattern.get('resonance_score', 0):.2f}, roles={pattern.get('role_diversity', 0)}"
@@ -104,16 +105,16 @@ PIONEER_NOVELTY_BOOST_THRESHOLD = 0.20  # 20% when novelty > 0.7
 class ResonanceDetector:
     """
     Detects patterns that resonate across different agent roles.
-    
+
     Resonance = same abstract pattern discovered by >=2 different role types
     independently. This is evidence of objective truth because agents with
     radically different information access and biases converged on the same answer.
     """
-    
+
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self._ensure_tables_exist()
-    
+
     def _ensure_tables_exist(self):
         """Create resonance tracking tables if they don't exist."""
         try:
@@ -121,87 +122,87 @@ class ResonanceDetector:
             self.db.execute_query("""
                 CREATE TABLE IF NOT EXISTS resonance_patterns (
                     pattern_hash TEXT PRIMARY KEY,
-                    
+
                     -- Resonance metrics
                     role_diversity INTEGER DEFAULT 1,
                     roles_found TEXT,  -- JSON list of roles that found this
                     independent_discoverers INTEGER DEFAULT 1,
                     resonance_score REAL DEFAULT 0.0,
-                    
+
                     -- Pattern content (abstract)
                     theory_type TEXT,
                     control_type TEXT,
                     strategy_type TEXT,
                     canonical_beliefs TEXT,  -- JSON of canonicalized beliefs
-                    
+
                     -- Example sequences using this pattern
                     example_sequences TEXT,  -- JSON list of sequence_ids
                     game_types TEXT,  -- JSON list of game types
-                    
+
                     -- Tracking
                     first_detected DATETIME DEFAULT CURRENT_TIMESTAMP,
                     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
                     times_validated INTEGER DEFAULT 0
                 )
             """)
-            
+
             # Index for fast resonance lookups
             self.db.execute_query("""
-                CREATE INDEX IF NOT EXISTS idx_resonance_score 
+                CREATE INDEX IF NOT EXISTS idx_resonance_score
                 ON resonance_patterns(resonance_score DESC)
             """)
-            
+
             logger.debug("[RESONANCE] Tables initialized")
-            
+
         except Exception as e:
             logger.debug(f"Resonance table creation (may already exist): {e}")
-    
+
     # =========================================================================
     # PATTERN HASHING - Abstract fingerprints from beliefs
     # =========================================================================
-    
+
     def compute_belief_hash(self, beliefs: Dict[str, Any]) -> str:
         """
         Compute abstract fingerprint from belief structure.
-        
+
         Ignores game-specific details, keeps cognitive structure.
         Two sequences with the same belief hash represent the same
         "way of thinking" even if the raw actions differ.
-        
+
         Args:
             beliefs: Inferred beliefs dict from _extract_inferred_beliefs_from_sequence
-            
+
         Returns:
             16-character hex hash representing abstract pattern
         """
         # Extract and classify theory type
         theory_type = self._classify_theory(beliefs.get('working_theory_required', ''))
-        
+
         # Extract and classify control type
         control_type = self._classify_control(beliefs.get('self_model_required', ''))
-        
+
         # Extract strategy from Q4 inference
         inferences = beliefs.get('inferences', {})
         strategy_type = self._classify_strategy(inferences.get('Q4_strategy', ''))
-        
+
         # Canonical structure (order-independent)
         canonical = {
             'theory': theory_type,
             'control': control_type,
             'strategy': strategy_type
         }
-        
+
         # Hash the canonical structure
         canonical_json = json.dumps(canonical, sort_keys=True)
         return hashlib.md5(canonical_json.encode()).hexdigest()[:16]
-    
+
     def _classify_theory(self, theory: str) -> str:
         """Classify theory into abstract type."""
         if not theory or 'NULL' in theory:
             return 'unknown'
-        
+
         theory_lower = theory.lower()
-        
+
         if 'click' in theory_lower or 'tap' in theory_lower:
             return 'click_puzzle'
         elif 'movement' in theory_lower or 'move' in theory_lower or 'control' in theory_lower:
@@ -212,14 +213,14 @@ class ResonanceDetector:
             return 'pattern_puzzle'
         else:
             return 'general'
-    
+
     def _classify_control(self, control: str) -> str:
         """Classify control type into abstract type."""
         if not control or 'NULL' in control:
             return 'unknown'
-        
+
         control_lower = control.lower()
-        
+
         if 'single' in control_lower or 'one' in control_lower:
             return 'single_object'
         elif 'multiple' in control_lower or 'group' in control_lower:
@@ -228,14 +229,14 @@ class ResonanceDetector:
             return 'cursor_control'
         else:
             return 'general'
-    
+
     def _classify_strategy(self, strategy: str) -> str:
         """Classify strategy into abstract type."""
         if not strategy or 'NULL' in strategy:
             return 'unknown'
-        
+
         strategy_lower = strategy.lower()
-        
+
         if 'single action' in strategy_lower:
             return 'specialized'
         elif 'limited' in strategy_lower or 'focused' in strategy_lower:
@@ -244,22 +245,22 @@ class ResonanceDetector:
             return 'adaptive'
         else:
             return 'general'
-    
+
     # =========================================================================
     # RESONANCE DETECTION - Find patterns with cross-role agreement
     # =========================================================================
-    
+
     def detect_resonance(self, generation: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Detect resonant patterns: same abstract beliefs, different roles.
-        
+
         This is the core resonance detection algorithm. It finds patterns
         where agents with different roles (and thus different biases)
         independently converged on the same solution.
-        
+
         Args:
             generation: Optional generation filter for recent patterns
-            
+
         Returns:
             List of resonant patterns with scores
         """
@@ -268,7 +269,7 @@ class ResonanceDetector:
             # Joins inferred_beliefs with winning_sequences and agents
             # FIX 2026-01-16: Use ws.agent_id instead of ws.discovered_by (column doesn't exist)
             query = """
-                SELECT 
+                SELECT
                     ib.working_theory_required,
                     ib.self_model_required,
                     ib.inferences,
@@ -287,28 +288,28 @@ class ResonanceDetector:
                 ORDER BY role_diversity DESC, independent_discoverers DESC
                 LIMIT 50
             """
-            
+
             results = self.db.execute_query(query)
-            
+
             resonant_patterns = []
             for row in results:
                 # Compute resonance score
                 role_diversity = row['role_diversity']
                 discoverers = row['independent_discoverers']
-                
+
                 # Resonance formula: role_diversity * log(discoverers + 1)
                 import math
                 resonance_score = role_diversity * math.log(discoverers + 1)
-                
+
                 # Build beliefs dict for hashing
                 beliefs = {
                     'working_theory_required': row['working_theory_required'],
                     'self_model_required': row['self_model_required'],
                     'inferences': json.loads(row['inferences']) if row['inferences'] else {}
                 }
-                
+
                 pattern_hash = self.compute_belief_hash(beliefs)
-                
+
                 pattern = {
                     'pattern_hash': pattern_hash,
                     'resonance_score': resonance_score,
@@ -320,29 +321,29 @@ class ResonanceDetector:
                     'theory_type': self._classify_theory(row['working_theory_required']),
                     'control_type': self._classify_control(row['self_model_required'])
                 }
-                
+
                 resonant_patterns.append(pattern)
-                
+
                 # Store/update in resonance_patterns table
                 self._store_resonance_pattern(pattern, beliefs)
-            
+
             logger.info(f"[RESONANCE] Detected {len(resonant_patterns)} resonant patterns")
             return resonant_patterns
-            
+
         except Exception as e:
             logger.error(f"Resonance detection failed: {e}")
             return []
-    
+
     def _store_resonance_pattern(self, pattern: Dict[str, Any], beliefs: Dict[str, Any]):
         """Store or update a resonance pattern in the database."""
         try:
             pattern_hash = pattern['pattern_hash']
-            
+
             existing = self.db.execute_query("""
                 SELECT pattern_hash, times_validated FROM resonance_patterns
                 WHERE pattern_hash = ?
             """, (pattern_hash,))
-            
+
             if existing:
                 # Update existing
                 self.db.execute_query("""
@@ -386,7 +387,7 @@ class ResonanceDetector:
                     json.dumps(pattern['sequence_ids']),
                     json.dumps(pattern['game_types'])
                 ))
-                
+
                 # =============================================================
                 # COGNITIVE INTEGRATION: Resonance -> Concept Discovery
                 # =============================================================
@@ -395,14 +396,14 @@ class ResonanceDetector:
                 # =============================================================
                 if pattern['resonance_score'] >= 2.0 and pattern['role_diversity'] >= 2:
                     _notify_concept_from_resonance(pattern, beliefs)
-                
+
         except Exception as e:
             logger.debug(f"Storing resonance pattern failed: {e}")
-    
+
     # =========================================================================
     # RESONANCE QUERIES - Role-specific pattern lookups
     # =========================================================================
-    
+
     def get_resonant_patterns(
         self,
         min_score: float = 1.0,
@@ -410,11 +411,11 @@ class ResonanceDetector:
     ) -> List[Dict[str, Any]]:
         """
         Get high-resonance patterns for network-wide prioritization.
-        
+
         Args:
             min_score: Minimum resonance score threshold
             limit: Maximum patterns to return
-            
+
         Returns:
             List of resonant patterns ordered by score
         """
@@ -427,7 +428,7 @@ class ResonanceDetector:
                 ORDER BY resonance_score DESC
                 LIMIT ?
             """, (min_score, limit))
-            
+
             patterns = []
             for row in results:
                 patterns.append({
@@ -439,36 +440,36 @@ class ResonanceDetector:
                     'control_type': row['control_type'],
                     'game_types': json.loads(row['game_types']) if row['game_types'] else []
                 })
-            
+
             return patterns
-            
+
         except Exception as e:
             logger.debug(f"Getting resonant patterns failed: {e}")
             return []
-    
+
     def get_pattern_resonance(self, beliefs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Get resonance information for a specific belief pattern.
-        
+
         Use this to check if the current pattern has been validated
         by multiple roles (i.e., is likely objective truth).
-        
+
         Args:
             beliefs: Inferred beliefs dict
-            
+
         Returns:
             Resonance info if pattern exists, None otherwise
         """
         try:
             pattern_hash = self.compute_belief_hash(beliefs)
-            
+
             results = self.db.execute_query("""
                 SELECT resonance_score, role_diversity, roles_found,
                        independent_discoverers, theory_type
                 FROM resonance_patterns
                 WHERE pattern_hash = ?
             """, (pattern_hash,))
-            
+
             if results:
                 row = results[0]
                 return {
@@ -479,17 +480,17 @@ class ResonanceDetector:
                     'independent_discoverers': row['independent_discoverers'],
                     'is_resonant': row['role_diversity'] >= 2
                 }
-            
+
             return None
-            
+
         except Exception as e:
             logger.debug(f"Pattern resonance lookup failed: {e}")
             return None
-    
+
     # =========================================================================
     # PROBABILITY GATES - Role-specific query frequencies
     # =========================================================================
-    
+
     def should_query_resonance(
         self,
         agent_role: str,
@@ -498,44 +499,44 @@ class ResonanceDetector:
     ) -> bool:
         """
         Determine if agent should query for cross-role resonance this action.
-        
+
         Implements role-specific frequency gates from harmonies theory:
         - Pioneer: 1% base, boosted to 20% on high-novelty patterns
         - Optimizer: 10% base, boosted when stuck
         - Generalist: 30% (consistency checks)
         - Exploiter: 5% (occasional sanity checks)
-        
+
         Args:
             agent_role: Role of the agent (pioneer, optimizer, generalist, exploiter)
             pattern_novelty: 0.0-1.0 novelty score of current pattern
             is_stuck: Whether agent is currently stuck
-            
+
         Returns:
             True if agent should query resonance this action
         """
         base_threshold = RESONANCE_QUERY_THRESHOLDS.get(agent_role.lower(), 0.10)
-        
+
         # Pioneer boost on high-novelty patterns
         if agent_role.lower() == 'pioneer' and pattern_novelty > 0.7:
             base_threshold = PIONEER_NOVELTY_BOOST_THRESHOLD
             logger.debug(f"[RESONANCE] Pioneer novelty boost: {base_threshold}")
-        
+
         # Optimizer boost when stuck
         if agent_role.lower() == 'optimizer' and is_stuck:
             base_threshold = min(0.30, base_threshold * 2.0)
             logger.debug(f"[RESONANCE] Optimizer stuck boost: {base_threshold}")
-        
+
         should_query = random.random() < base_threshold
-        
+
         if should_query:
             logger.debug(f"[RESONANCE] {agent_role} triggered resonance query (threshold: {base_threshold})")
-        
+
         return should_query
-    
+
     # =========================================================================
     # RESONANCE SCORING - Calculate pattern resonance
     # =========================================================================
-    
+
     def calculate_resonance_score(
         self,
         role_diversity: int,
@@ -544,40 +545,40 @@ class ResonanceDetector:
     ) -> float:
         """
         Calculate resonance score for a pattern.
-        
+
         Formula: role_diversity * log(discoverers + 1) * (1 + game_diversity * 0.1)
-        
+
         Higher scores indicate:
         - More role types agree (strongest signal)
         - More independent agents found it
         - Pattern works across more game types
-        
+
         Args:
             role_diversity: Number of different roles that found pattern
             independent_discoverers: Number of independent agents
             game_type_diversity: Number of different game types
-            
+
         Returns:
             Resonance score (0.0 = no resonance, higher = stronger)
         """
         import math
-        
+
         if role_diversity < 2:
             return 0.0  # No resonance with single role
-        
+
         base_score = role_diversity * math.log(independent_discoverers + 1)
         game_bonus = 1.0 + (game_type_diversity - 1) * 0.1
-        
+
         return base_score * game_bonus
-    
+
     # =========================================================================
     # NETWORK INTEGRATION - For regulatory engine
     # =========================================================================
-    
+
     def get_resonance_summary(self) -> Dict[str, Any]:
         """
         Get summary of resonance state for regulatory engine.
-        
+
         Returns:
             Summary dict with resonance health metrics
         """
@@ -589,7 +590,7 @@ class ResonanceDetector:
                 FROM resonance_patterns
                 WHERE role_diversity >= 2
             """)
-            
+
             # Get role coverage
             role_coverage = self.db.execute_query("""
                 SELECT roles_found, COUNT(*) as pattern_count
@@ -599,7 +600,7 @@ class ResonanceDetector:
                 ORDER BY pattern_count DESC
                 LIMIT 5
             """)
-            
+
             if total and total[0]:
                 return {
                     'total_resonant_patterns': total[0]['count'] or 0,
@@ -610,26 +611,26 @@ class ResonanceDetector:
                         for r in role_coverage
                     ] if role_coverage else []
                 }
-            
+
             return {
                 'total_resonant_patterns': 0,
                 'average_resonance_score': 0.0,
                 'max_resonance_score': 0.0,
                 'top_role_combinations': []
             }
-            
+
         except Exception as e:
             logger.debug(f"Resonance summary failed: {e}")
             return {'error': str(e)}
-    
+
     def update_pattern_effectiveness(self, pattern: Dict[str, Any], was_positive: bool) -> None:
         """
         Update pattern effectiveness based on outcome feedback.
-        
+
         This is called by experience_outcome() when a resonance-matched action
         produces a result. Updates the pattern's resonance score based on whether
         it led to positive or negative outcomes.
-        
+
         Args:
             pattern: Pattern dict with 'pattern_hash' or similar identifier
             was_positive: Whether the action using this pattern was successful
@@ -638,32 +639,32 @@ class ResonanceDetector:
             pattern_hash = pattern.get('pattern_hash')
             if not pattern_hash:
                 return
-            
+
             # Get current validation count
             result = self.db.execute_query("""
                 SELECT times_validated, times_succeeded, resonance_score
                 FROM resonance_patterns
                 WHERE pattern_hash = ?
             """, (pattern_hash,))
-            
+
             if not result:
                 return
-            
+
             row = result[0]
             times_validated = (row.get('times_validated') or 0) + 1
             times_succeeded = (row.get('times_succeeded') or 0) + (1 if was_positive else 0)
-            
+
             # Update resonance score based on success rate
             # Higher success rate = higher resonance confidence
             success_rate = times_succeeded / max(times_validated, 1)
             current_score = row.get('resonance_score') or 1.0
-            
+
             # Adjust score: successful uses increase it, failures decrease it
             if was_positive:
                 new_score = current_score * 1.05  # 5% boost
             else:
                 new_score = current_score * 0.95  # 5% penalty
-            
+
             self.db.execute_query("""
                 UPDATE resonance_patterns SET
                     times_validated = ?,
@@ -672,12 +673,12 @@ class ResonanceDetector:
                     last_updated = CURRENT_TIMESTAMP
                 WHERE pattern_hash = ?
             """, (times_validated, times_succeeded, new_score, pattern_hash))
-            
+
             logger.debug(
                 f"[RESONANCE] Pattern {pattern_hash[:8]} effectiveness updated: "
                 f"success_rate={success_rate:.2f}, score={current_score:.2f}->{new_score:.2f}"
             )
-            
+
         except Exception as e:
             logger.debug(f"Pattern effectiveness update failed: {e}")
 
@@ -689,21 +690,21 @@ class ResonanceDetector:
 def should_query_resonance(agent_role: str, pattern_novelty: float = 0.0, is_stuck: bool = False) -> bool:
     """
     Module-level convenience function for role-based resonance query gate.
-    
+
     Can be imported directly without instantiating ResonanceDetector.
     """
     # FIX (2025-01-08): Always query resonance when stuck (GAP 3)
     # Stuck agents desperately need network wisdom - don't block them
     if is_stuck:
         return True
-    
+
     base_threshold = RESONANCE_QUERY_THRESHOLDS.get(agent_role.lower(), 0.10)
-    
+
     if agent_role.lower() == 'pioneer' and pattern_novelty > 0.7:
         base_threshold = PIONEER_NOVELTY_BOOST_THRESHOLD
-    
+
     if agent_role.lower() == 'optimizer':
         # Optimizers should query more often to find proven patterns
         base_threshold = min(0.40, base_threshold * 2.0)
-    
+
     return random.random() < base_threshold

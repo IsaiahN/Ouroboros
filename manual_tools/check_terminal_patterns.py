@@ -5,6 +5,7 @@ All death tracking now uses position_death_patterns (fuzzy position-bucket match
 """
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database_interface import DatabaseInterface
@@ -16,7 +17,7 @@ try:
     r = db.execute_query("""
         SELECT game_type, level_number, bucket_x, bucket_y, bucket_size,
                fatal_action, death_count, danger_score, is_active
-        FROM position_death_patterns 
+        FROM position_death_patterns
         WHERE game_type = 'as66' AND level_number = 5
         ORDER BY death_count DESC
         LIMIT 20

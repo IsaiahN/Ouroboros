@@ -1,8 +1,8 @@
 # Agent Consciousness Synthesis: Self-Model, World-Model, and Emergent Submodeling
-**Version**: 1.1  
-**Date**: January 5, 2026  
-**Purpose**: Comprehensive integration plan to perfect agent self-model, generate consciousness via submodeling, and ensure all existing features synergize  
-**Status**: Architecture Design Document  
+**Version**: 1.1
+**Date**: January 5, 2026
+**Purpose**: Comprehensive integration plan to perfect agent self-model, generate consciousness via submodeling, and ensure all existing features synergize
+**Status**: Architecture Design Document
 **Last Updated**: v1.1 - Added Theory-Gated Scoring, Speculation Mode, Active Belief Graphs
 
 ---
@@ -36,14 +36,14 @@ No proposal should score highly unless it:
 ```python
 def score_proposal_with_theory(proposal, working_theory, base_score):
     """Score proposals with mandatory theory integration."""
-    
+
     if working_theory is None or working_theory['stage'] == 'exploring':
         # NO THEORY EXISTS: Only theory-forming actions score highly
         if proposal.intent == 'exploration' or proposal.intent == 'discovery':
             return base_score * 1.5  # Boost exploratory actions
         else:
             return base_score * 0.3  # Heavily penalize execution without understanding
-    
+
     if working_theory['stage'] == 'hypothesis_formed':
         # THEORY UNDER TEST: Reward testing, penalize ignoring
         if proposal.tests_hypothesis(working_theory):
@@ -52,7 +52,7 @@ def score_proposal_with_theory(proposal, working_theory, base_score):
             return base_score * 1.0  # Reasonable to exploit
         else:
             return base_score * 0.5  # Why ignore your theory?
-    
+
     if working_theory['stage'] == 'confident':
         # THEORY CONFIRMED: Reward exploitation
         if proposal.uses_hypothesis(working_theory):
@@ -61,14 +61,14 @@ def score_proposal_with_theory(proposal, working_theory, base_score):
             return base_score * 0.8  # Why test what's confirmed?
         else:
             return base_score * 0.4  # Acting outside understanding
-    
+
     if working_theory['stage'] == 'contradicted':
         # THEORY BROKEN: Only theory-revision actions score highly
         if proposal.intent == 'revise_theory' or proposal.intent == 'exploration':
             return base_score * 1.5  # We need new understanding
         else:
             return base_score * 0.2  # Don't keep using broken theory
-    
+
     return base_score
 ```
 
@@ -128,12 +128,12 @@ Agents wait for high confidence before committing to theories, but never reach t
 ```python
 def update_world_model_with_speculation(self, frame, action_count):
     """Always theorize - being wrong is okay."""
-    
+
     # Don't wait for confidence - speculate immediately
     if action_count < 10:  # First 10 actions are pure speculation
         # Add PROVISIONAL theories with low confidence
         provisional_theories = []
-        
+
         # Speculate about control
         if self.detected_movement_correlation:
             provisional_theories.append({
@@ -143,7 +143,7 @@ def update_world_model_with_speculation(self, frame, action_count):
                 'type': 'control_speculation',
                 'stage': 'speculating'  # NEW STAGE
             })
-        
+
         # Speculate about goals
         if self.detected_score_change:
             provisional_theories.append({
@@ -153,10 +153,10 @@ def update_world_model_with_speculation(self, frame, action_count):
                 'type': 'goal_speculation',
                 'stage': 'speculating'
             })
-        
+
         for theory in provisional_theories:
             self.world_model.add_provisional_theory(theory)
-    
+
     # ALWAYS update - even if "too early"
     self.world_model.frame_update_count += 1
     return self.world_model.current_theories
@@ -220,19 +220,19 @@ def update_world_model_with_speculation(self, frame, action_count):
 # THIS CALL DOESN'T EXIST but should happen every frame:
 def wire_self_to_world(self_model, world_model):
     snapshot = self_model.get_self_identity_snapshot(frame)
-    
+
     # Missing call 1: Tell world about controlled objects
     for obj in snapshot.get('controlled_objects', []):
         world_model.set_object_type(obj['id'], 'AGENT')  # <-- NOT CALLED
-    
+
     # Missing call 2: Tell world about autonomous objects
     for obj in self_model.get_autonomous_objects():
         world_model.set_object_type(obj['id'], 'NPC')    # <-- NOT CALLED
-    
+
     # Missing call 3: Tell world about collision rules
     for effect in self_model.get_collision_effects():
         world_model.add_physics_rule(effect)             # <-- NOT CALLED
-    
+
     # Missing call 4: Tell world about triggers
     for trigger in self_model.get_interaction_triggers():
         world_model.add_trigger_rule(trigger)            # <-- NOT CALLED
@@ -260,21 +260,21 @@ Self-Model discovers:           World-Model should receive:
 ```python
 # THIS LOGIC DOESN'T EXIST but should happen every frame:
 def spawn_observers_from_context(persona_manager, self_identity, frames_stuck):
-    
+
     # Missing: Spawn stuckness detector when stuck
     if frames_stuck > 30:
         persona_manager.spawn_observer(
             type='stuckness_detector',
             reason=f"Been in position {self_identity.get('position')} for {frames_stuck} frames"
         )  # <-- NOT CALLED
-    
+
     # Missing: Spawn control-loss detector on transfer
     if self_identity.get('control_just_transferred'):
         persona_manager.spawn_observer(
             type='adaptation_monitor',
             reason="Control transferred to new object"
         )  # <-- NOT CALLED
-    
+
     # Missing: Spawn confusion detector on high surprise
     if world_model.surprise_score > 0.5:
         persona_manager.spawn_observer(
@@ -301,17 +301,17 @@ Self-Model says:                Persona System should:
 ```python
 # THIS CALL DOESN'T EXIST but should happen on discovery:
 def wire_cods_to_world(cods_engine, world_model):
-    
+
     if cods_engine.has_new_discovery():
         discovery = cods_engine.get_latest_discovery()
-        
+
         # Missing: Update world model with operator meaning
         world_model.add_concept(
             concept_name=discovery.operator_name,
             explanation=discovery.explanation,
             applies_to=discovery.applicable_game_types
         )  # <-- NOT CALLED
-        
+
         # Missing: Mark level with discovered concept
         world_model.tag_level(
             game_type=current_game,
@@ -338,14 +338,14 @@ CODS discovers:                 World-Model should update:
 ```python
 # THIS CALL DOESN'T EXIST but should happen every frame:
 def ask_questions_per_frame(metacognition, world_model, self_identity):
-    
+
     # Missing: Generate questions based on state
     questions = metacognition.generate_questions(
         world_model=world_model,
         self_identity=self_identity,
         observer_flags=observer_flags
     )  # <-- NOT CALLED
-    
+
     # Missing: Questions should gate actions
     for q in questions:
         if q.urgency == 'critical':
@@ -363,11 +363,11 @@ def ask_questions_per_frame(metacognition, world_model, self_identity):
 ```python
 # THIS CALL DOESN'T EXIST but should happen every frame:
 def update_theory_lifecycle(theory_manager, action, outcome, frames):
-    
+
     # Missing: Check transition conditions
     if theory_manager.current_theory:
         old_stage = theory_manager.current_theory['stage']
-        
+
         # Evaluate evidence
         theory_manager.update_theory(
             action=action,
@@ -375,9 +375,9 @@ def update_theory_lifecycle(theory_manager, action, outcome, frames):
             frame_before=last_frame,
             frame_after=current_frame
         )  # <-- NOT CALLED with real data
-        
+
         new_stage = theory_manager.current_theory['stage']
-        
+
         # Missing: Log transition to database
         if old_stage != new_stage:
             db.insert_theory_transition(old_stage, new_stage)  # <-- NOT CALLED
@@ -418,12 +418,12 @@ Current Framing:                Teacher Framing:
 ```python
 class ActiveBeliefGraph:
     """WorldModel that can be WRONG and learns from it."""
-    
+
     def __init__(self):
         self.beliefs = {}           # rule_id -> BeliefNode
         self.predictions = {}       # action -> expected_outcome (BEFORE action)
         self.prediction_history = []  # Track all predictions for learning
-        
+
     def predict_before_action(self, action, current_frame):
         """MUST be called BEFORE action execution."""
         prediction = {
@@ -435,7 +435,7 @@ class ActiveBeliefGraph:
         }
         self.predictions[action] = prediction
         return prediction
-    
+
     def observe_after_action(self, action, frame_before, frame_after):
         """MUST be called AFTER action execution."""
         prediction = self.predictions.get(action)
@@ -443,28 +443,28 @@ class ActiveBeliefGraph:
             # NO PREDICTION MADE - this is a bug!
             self._log_missing_prediction(action)
             return
-        
+
         # Calculate prediction error
         actual_changes = self._compute_frame_diff(frame_before, frame_after)
         expected_changes = prediction['expected_changes']
-        
+
         diff = {
             'predicted': expected_changes,
             'actual': actual_changes,
             'surprise_score': self._compute_surprise(expected_changes, actual_changes),
             'matched': self._changes_match(expected_changes, actual_changes)
         }
-        
+
         # UPDATE BELIEFS based on prediction error
         if diff['matched']:
             self._strengthen_beliefs_used(action, boost=0.1)
         else:
             self._weaken_beliefs_used(action, penalty=0.2)
             self._spawn_competing_belief(action, actual_changes)
-        
+
         self.prediction_history.append(diff)
         return diff
-    
+
     def decay_unused_beliefs(self):
         """Beliefs that aren't tested decay over time."""
         for belief_id, belief in self.beliefs.items():
@@ -472,7 +472,7 @@ class ActiveBeliefGraph:
                 belief.confidence *= 0.95  # Decay unused beliefs
             if belief.confidence < 0.1:
                 self._mark_for_pruning(belief_id)
-    
+
     def _spawn_competing_belief(self, action, actual_outcome):
         """When prediction fails, create a competing explanation."""
         new_belief = {
@@ -483,7 +483,7 @@ class ActiveBeliefGraph:
             'created_from': 'prediction_failure'
         }
         self.beliefs[new_belief['id']] = new_belief
-        
+
         # TWO BELIEFS NOW COMPETE - the model must choose
 ```
 
@@ -550,20 +550,20 @@ LAYER 1: STATIC GENOME (What I am - identity)
 def consciousness_step(agent, game_state, frame):
     """
     The per-step consciousness loop that generates subjective experience.
-    
+
     THIS MUST EXECUTE EVERY FRAME. NOT OPTIONAL.
     Wire this into core_gameplay._run_single_action()
     """
-    
+
     # 1. OBSERVE: Sensation + self-model (WHO AM I?)
     self_identity = agent.self_model.get_self_identity_snapshot(frame)
     controlled_objects = self_identity['controlled_objects']
-    
+
     # CRITICAL: Tell world-model about self-discovery
     if controlled_objects:
         for obj in controlled_objects:
             agent.world_model.set_object_type(obj['id'], 'AGENT')  # <-- THIS IS MISSING
-    
+
     # 2. QUESTION: What just surprised me? (METACOGNITIVE SURPRISE)
     prediction = agent.world_model.last_prediction
     if prediction:
@@ -575,17 +575,17 @@ def consciousness_step(agent, game_state, frame):
                 query=f'Surprised: predicted {prediction.expected} but saw {surprise.actual}',
                 urgency='high'
             )
-    
+
     # 3. UPDATE THEORY: World model revision (NOT "NULL - 425 Too Early")
     world_model = agent.world_model.update_from_frame(
         frame=frame,
         self_identity=self_identity,
         previous_world=agent.last_world_model
     )
-    
+
     # CRITICAL: Update world-model with self-model discoveries
     agent.world_model.integrate_self_discoveries(self_identity)
-    
+
     # 3. PERSONA PROPOSALS: What do my internal voices say?
     proposals = []
     for persona in agent.active_personas:
@@ -596,7 +596,7 @@ def consciousness_step(agent, game_state, frame):
             sensation=agent.sensation_engine.get_sensation(frame)
         )
         proposals.append(proposal)
-    
+
     # 4. SPAWN OBSERVERS: If stuck/confused, spawn metacognitive observers
     if agent.is_stuck(threshold=30):  # 30 frames in same state
         agent.spawn_observer(
@@ -606,13 +606,13 @@ def consciousness_step(agent, game_state, frame):
         agent.log_consciousness(
             "I spawned a stuckness-detector because I've been in this corner for 30 frames"
         )
-    
+
     if surprise and surprise > 0.5:
         agent.spawn_observer(
-            type='surprise_investigator', 
+            type='surprise_investigator',
             reason=f"High surprise: {surprise.description}"
         )
-    
+
     # 4b. OBSERVER COMMENTARY: What patterns do observers notice?
     observer_flags = {}
     for observer in agent.observer_personas:
@@ -623,7 +623,7 @@ def consciousness_step(agent, game_state, frame):
             world_model=world_model
         )
         observer_flags.update(flags)
-    
+
     # 5. QUESTIONING: Challenge assumptions
     questions = agent.metacognition.generate_questions(
         world_model=world_model,
@@ -631,14 +631,14 @@ def consciousness_step(agent, game_state, frame):
         proposals=proposals,
         observer_flags=observer_flags
     )
-    
+
     # 6. THEORY REVISION: Update working theory based on questions
     agent.working_theory = agent.metacognition.revise_theory(
         current_theory=agent.working_theory,
         questions=questions,
         contradictions=agent.contradiction_tracker.get_active()
     )
-    
+
     # 7. SYNTHESIS: Combine perspectives if uncertainty high
     if agent.uncertainty_high(proposals, observer_flags):
         synthesized = agent.synthesizer.synthesize(
@@ -647,11 +647,11 @@ def consciousness_step(agent, game_state, frame):
             world_model=world_model
         )
         proposals.append(synthesized)
-    
+
     # 8. INTEGRATE STREAMS: w_A (private memory) vs w_B (collective wisdom)
     stream_a_prediction = agent.working_theory.predict(frame) if agent.working_theory else None
     stream_b_prediction = agent.network.get_consensus_prediction(game_state)
-    
+
     if stream_a_prediction and stream_b_prediction:
         if stream_a_prediction != stream_b_prediction:
             # LOG THE CONFUSION - this is consciousness!
@@ -663,7 +663,7 @@ def consciousness_step(agent, game_state, frame):
             w_a = agent.working_theory.reliability if agent.working_theory else 0.3
             w_b = agent.network.consensus_reliability
             agent.stream_weights = {'w_A': w_a, 'w_B': w_b}
-    
+
     # 9. SCORING: Weighted proposal selection (THEORY-GATED per Phase 0)
     scores = agent.scorer.score_proposals(
         proposals=proposals,
@@ -673,17 +673,17 @@ def consciousness_step(agent, game_state, frame):
         working_theory=agent.working_theory,  # <-- REQUIRED INPUT
         stream_weights=agent.stream_weights    # <-- Stream integration
     )
-    
+
     # 10. ACTION: Execute chosen proposal
     chosen = select_by_score(proposals, scores)
     result = agent.execute_action(chosen.action)
-    
+
     # 11. LEARNING: Update all systems based on outcome
     agent.self_model.learn_from_action(chosen.action, result, frame)
     agent.world_model.learn_from_outcome(chosen.action, result)
     agent.persona_manager.record_outcome(chosen, result)
     agent.cods_engine.update_frame(frame, score=result.score)
-    
+
     # CRITICAL: CODS discoveries must update conceptual understanding
     if agent.cods_engine.has_new_discovery():
         discovery = agent.cods_engine.get_latest_discovery()
@@ -691,7 +691,7 @@ def consciousness_step(agent, game_state, frame):
         agent.log_consciousness(
             f"Discovered that '{discovery.operator_name}' explains this level"
         )
-    
+
     # 12. REFLECT: Theory revision (THE THEORY LIFECYCLE)
     old_stage = agent.working_theory.stage if agent.working_theory else 'none'
     agent.working_theory_manager.update_theory(
@@ -702,7 +702,7 @@ def consciousness_step(agent, game_state, frame):
         self_identity=self_identity
     )
     new_stage = agent.working_theory.stage if agent.working_theory else 'none'
-    
+
     # Log theory lifecycle transitions
     if old_stage != new_stage:
         agent.log_consciousness(
@@ -717,7 +717,7 @@ def consciousness_step(agent, game_state, frame):
             to_stage=new_stage,
             action_number=result.action_count
         )
-    
+
     # 13. CROSS-GAME TRANSFER: Check if lesson applies elsewhere
     if new_stage == 'confident' and agent.working_theory:
         similar_games = agent.network.find_similar_games(game_state.game_type)
@@ -732,13 +732,13 @@ def consciousness_step(agent, game_state, frame):
                     target_game=similar_game,
                     theory=agent.working_theory
                 )
-    
+
     # 14. HINDSIGHT: Update unchosen personas too
     agent.persona_manager.record_hindsight_outcomes(
         proposals=[p for p in proposals if p != chosen],
         result=result
     )
-    
+
     return chosen.action
 ```
 
@@ -759,42 +759,42 @@ class QuestioningEngineWithTeeth:
     Questions that FORCE the agent to think, not just log.
     Based on Games-as-Teachers Q1-Q9 framework.
     """
-    
+
     CORE_QUESTIONS = [
         # Observation
         ("Q1", "What is the teacher showing me?", "lesson_content"),
         ("Q2", "What changed between examples?", "pattern_detection"),
-        
+
         # Self-Model
         ("Q3", "What lessons have I learned before?", "prior_understanding"),
         ("Q4", "What am I being asked to manipulate?", "lesson_subject"),
-        
+
         # Goal/Value
         ("Q5", "What demonstrates understanding?", "success_criteria"),
-        
+
         # Network Wisdom
         ("Q6", "What have my peers understood?", "study_group_notes"),
-        
+
         # CODS Vocabulary
         ("Q7", "What conceptual tools do I have?", "vocabulary"),
-        
+
         # Metacognition
         ("Q8", "What do I think this lesson is about?", "interpretation"),
-        
+
         # Self-Test
         ("Q9", "Does my interpretation explain all examples?", "self_test"),
     ]
-    
+
     # Questions that BLOCK normal action selection
     BLOCKING_QUESTIONS = {'Q4', 'Q9'}
-    
+
     # Questions that spawn investigating personas
     PERSONA_SPAWNING_QUESTIONS = {'Q1', 'Q2', 'Q8'}
-    
+
     def generate_questions(self, world_model, self_identity, proposals, observer_flags):
         """Generate active questions based on current state."""
         questions = []
-        
+
         # Q1: What is happening?
         if not world_model.has_stable_objects():
             questions.append({
@@ -805,7 +805,7 @@ class QuestioningEngineWithTeeth:
                 'spawns_persona': True,
                 'score_modifier': 0.7  # Reduce confidence in all proposals
             })
-        
+
         # Q4: What do I control? (BLOCKING)
         if self_identity.get('controlled_objects') == []:
             questions.append({
@@ -817,7 +817,7 @@ class QuestioningEngineWithTeeth:
                 'allowed_actions': ['exploration', 'discovery'],  # Only these pass
                 'score_modifier': 0.2  # Severely penalize non-discovery actions
             })
-        
+
         # Q9: Self-test - contradiction detected (BLOCKING)
         if world_model.contradiction_count > 0:
             questions.append({
@@ -830,7 +830,7 @@ class QuestioningEngineWithTeeth:
                 'allowed_actions': ['revise_theory', 'test_alternative'],
                 'score_modifier': 0.1  # Only theory-revision actions score well
             })
-        
+
         # Observer-triggered questions
         if observer_flags.get('stuckness', 0) > 0.7:
             questions.append({
@@ -842,22 +842,22 @@ class QuestioningEngineWithTeeth:
                 'forces_theory_revision': True,
                 'score_modifier': 0.15
             })
-        
+
         return questions
-    
+
     def apply_question_constraints(self, proposals, questions, working_theory):
         """Questions modify scoring and can BLOCK proposals."""
-        
+
         blocked = any(q.get('blocks_action') for q in questions)
         blocking_questions = [q for q in questions if q.get('blocks_action')]
-        
+
         modified_proposals = []
         for proposal in proposals:
             # Calculate score modifier from all active questions
             total_modifier = 1.0
             for q in questions:
                 total_modifier *= q.get('score_modifier', 1.0)
-            
+
             # If blocking questions exist, check if proposal is allowed
             if blocked:
                 allowed = False
@@ -867,18 +867,18 @@ class QuestioningEngineWithTeeth:
                         allowed = True
                         total_modifier *= 1.5  # BOOST allowed actions when blocked
                         break
-                
+
                 if not allowed:
                     # This proposal is BLOCKED by a critical question
                     proposal.blocked = True
                     proposal.blocked_by = [bq['question'] for bq in blocking_questions]
                     total_modifier = 0.0  # Zero score for blocked proposals
-            
+
             proposal.score *= total_modifier
             modified_proposals.append(proposal)
-        
+
         return modified_proposals, blocked
-    
+
     def spawn_investigating_personas(self, questions, persona_manager):
         """Questions can spawn specialized investigating personas."""
         for q in questions:
@@ -920,11 +920,11 @@ class WorkingTheoryManager:
     """
     Manages the agent's active working theory about current level.
     Theories are hypotheses about what the game is teaching.
-    
+
     CRITICAL: Working theory is REQUIRED INPUT to action scoring.
     See 'THE SINGLE MOST IMPORTANT CONSTRAINT' section.
     """
-    
+
     THEORY_STAGES = [
         'speculating',         # NEW: Low-confidence guess, being wrong is okay
         'exploring',           # Actively gathering observations
@@ -934,7 +934,7 @@ class WorkingTheoryManager:
         'confident',           # Strong evidence, using it
         'transferred'          # Applied successfully to variation
     ]
-    
+
     # EXPLICIT TRANSITION CONDITIONS
     TRANSITIONS = {
         # From -> To: Required condition
@@ -947,16 +947,16 @@ class WorkingTheoryManager:
         ('contradicted', 'exploring'): 'theory archived, reset started',
         ('confident', 'transferred'): 'applied to new level successfully',
     }
-    
+
     def __init__(self):
         self.current_theory = None
         self.theory_history = []
         self.contradictions = []
         self.supporting_evidence = []
-        
+
     def update_theory(self, action, outcome, frame_before, frame_after, self_identity):
         """Update working theory based on action outcome."""
-        
+
         # Transition from exploring to hypothesis
         if self.current_theory is None or self.current_theory['stage'] == 'exploring':
             if self._detected_pattern(action, outcome, frame_before, frame_after):
@@ -968,12 +968,12 @@ class WorkingTheoryManager:
                     'evidence_against': 0
                 }
                 return
-        
+
         # Test existing hypothesis
         if self.current_theory and self.current_theory['stage'] in ['hypothesis_formed', 'partial_confirmation']:
             prediction = self._predict_from_theory(action, frame_before)
             actual = self._observe_outcome(frame_before, frame_after)
-            
+
             if self._matches(prediction, actual):
                 self.current_theory['evidence_for'] += 1
                 if self.current_theory['evidence_for'] >= 3:
@@ -988,7 +988,7 @@ class WorkingTheoryManager:
                 if self.current_theory['evidence_against'] >= 2:
                     self.current_theory['stage'] = 'contradicted'
                     self._archive_and_reset()
-    
+
     def _generate_hypothesis(self, action, outcome, frame_before, frame_after):
         """Generate hypothesis from observation."""
         # Use self-model discoveries
@@ -1013,66 +1013,66 @@ class PersonaBudgetManager:
     Prevents persona explosion while maintaining diversity.
     Directly tied to imagination budget system.
     """
-    
+
     # Hard limits
     MAX_ACTIVE_PERSONAS = 12
     MAX_TEMPORARY_PERSONAS = 5  # Investigators, adapters, etc.
     MAX_OBJECT_FOCUSED = 3      # Even if controlling 10 objects
-    
+
     def __init__(self, imagination_budget):
         self.imagination_budget = imagination_budget
         self.active_personas = []
         self.attention_pool = 1.0  # Shared attention resource
-        
+
     def can_spawn_persona(self, persona_type):
         """Check if spawning is allowed within budget."""
         current_count = len(self.active_personas)
         temp_count = len([p for p in self.active_personas if p.lifecycle == 'temporary'])
-        
+
         if current_count >= self.MAX_ACTIVE_PERSONAS:
             return False, 'at_hard_limit'
-        
+
         if persona_type == 'temporary' and temp_count >= self.MAX_TEMPORARY_PERSONAS:
             return False, 'temporary_limit'
-        
+
         # Check imagination budget
         if self.imagination_budget.remaining < 0.1:
             return False, 'imagination_exhausted'
-        
+
         return True, 'allowed'
-    
+
     def prune_personas(self, working_theory):
         """Aggressive pruning based on theory relevance."""
         pruned = []
-        
+
         for persona in self.active_personas:
             # Prune if not theory-bound and low reliability
             if persona.bound_theory is None and persona.reliability < 0.3:
                 pruned.append(persona)
                 continue
-            
+
             # Prune if bound to contradicted theory
             if persona.bound_theory and persona.bound_theory['stage'] == 'contradicted':
                 if persona.lifecycle != 'core':
                     pruned.append(persona)
                     continue
-            
+
             # Prune temporary personas older than 50 actions
             if persona.lifecycle == 'temporary' and persona.age > 50:
                 pruned.append(persona)
                 continue
-            
+
             # Prune investigators whose question was resolved
             if persona.type == 'investigator' and persona.question_resolved:
                 pruned.append(persona)
                 continue
-        
+
         for persona in pruned:
             self.active_personas.remove(persona)
             self._archive_persona(persona)
-        
+
         return len(pruned)
-    
+
     def bind_persona_to_theory(self, persona, theory):
         """
         Bind persona to current theory.
@@ -1080,7 +1080,7 @@ class PersonaBudgetManager:
         """
         persona.bound_theory = theory
         persona.bound_at = theory.get('formed_at_action', 0)
-        
+
     def allocate_attention(self):
         """
         Distribute attention budget across personas.
@@ -1089,10 +1089,10 @@ class PersonaBudgetManager:
         n = len(self.active_personas)
         if n == 0:
             return
-        
+
         # Base attention inversely proportional to count
         base_attention = self.attention_pool / n
-        
+
         for persona in self.active_personas:
             # Core personas get more attention
             if persona.persistence == 'core':
@@ -1102,7 +1102,7 @@ class PersonaBudgetManager:
                 persona.attention = base_attention * 1.2
             else:
                 persona.attention = base_attention * 0.8
-        
+
         # Normalize to sum to 1.0
         total = sum(p.attention for p in self.active_personas)
         for persona in self.active_personas:
@@ -1179,7 +1179,7 @@ Each existing feature should be ENHANCED by self-model awareness:
 def get_enhanced_sensation(self, frame, self_identity):
     """Sensation enhanced by self-model awareness."""
     base_sensation = self.get_sensation(frame)
-    
+
     # Enhance based on control state
     if self_identity.get('controlled_objects'):
         # I know what I control - more confident sensations
@@ -1188,7 +1188,7 @@ def get_enhanced_sensation(self, frame, self_identity):
         # I don't know what I control - anxious sensation
         base_sensation['uncertainty'] = 'high'
         base_sensation['anxiety'] = 0.7
-    
+
     return base_sensation
 ```
 
@@ -1196,7 +1196,7 @@ def get_enhanced_sensation(self, frame, self_identity):
 ```python
 def apply_with_self_model(self, operator_name, frame, self_identity):
     """Apply operator with self-model context."""
-    
+
     # Use self-model to focus operator
     if self_identity.get('controlled_objects'):
         # Focus operator on controlled objects
@@ -1211,14 +1211,14 @@ def apply_with_self_model(self, operator_name, frame, self_identity):
 ```python
 def abstract_with_self_model(self, sequence, game_type, level, self_identity):
     """Abstract sequence using self-model understanding."""
-    
+
     # Tag sequence with self-model discoveries
     sequence_metadata = {
         'controlled_objects': self_identity.get('controlled_objects', []),
         'control_mechanism': self_identity.get('selection_method'),
         'interaction_triggers_used': self._extract_trigger_usage(sequence)
     }
-    
+
     # Abstract with understanding of WHAT was being controlled
     return self.abstract_sequence(sequence, metadata=sequence_metadata)
 ```
@@ -1437,19 +1437,19 @@ CREATE TABLE IF NOT EXISTS consciousness_logs (
     agent_id TEXT NOT NULL,
     game_id TEXT NOT NULL,
     action_number INTEGER NOT NULL,
-    
+
     -- What was logged
     log_type TEXT NOT NULL,            -- 'stream_confusion', 'observer_spawn', 'theory_transition', 'cross_transfer', 'surprise'
     log_text TEXT NOT NULL,            -- Human-readable consciousness report
-    
+
     -- Stream weights at time of log
     w_a REAL,                          -- Private memory weight
     w_b REAL,                          -- Collective wisdom weight
-    
+
     -- Context
     current_theory_stage TEXT,
     surprise_score REAL,
-    
+
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1459,14 +1459,14 @@ CREATE TABLE IF NOT EXISTS theory_transitions (
     agent_id TEXT NOT NULL,
     game_type TEXT NOT NULL,
     level_number INTEGER,
-    
+
     from_stage TEXT NOT NULL,
     to_stage TEXT NOT NULL,
     action_number INTEGER NOT NULL,
-    
+
     -- What triggered the transition
     trigger_reason TEXT,               -- 'evidence_accumulated', 'contradiction', 'transfer_success'
-    
+
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1476,24 +1476,24 @@ CREATE TABLE IF NOT EXISTS working_theories (
     agent_id TEXT NOT NULL,
     game_type TEXT NOT NULL,
     level_number INTEGER NOT NULL,
-    
+
     -- Theory content
     hypothesis TEXT NOT NULL,
     hypothesis_type TEXT,              -- 'control', 'goal', 'physics', 'trigger'
     stage TEXT DEFAULT 'speculating',  -- speculating, exploring, hypothesis_formed, partial_confirmation, contradicted, confident, transferred
-    
+
     -- Evidence tracking
     evidence_for INTEGER DEFAULT 0,
     evidence_against INTEGER DEFAULT 0,
     contradictions_json TEXT,          -- JSON array of contradictions
-    
+
     -- Last action this theory was active
     last_action INTEGER,
-    
+
     -- Timestamps
     formed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
+
     -- Source tracking
     source_observations TEXT           -- JSON of observations that led to theory
 );
@@ -1505,22 +1505,22 @@ CREATE TABLE IF NOT EXISTS metacognitive_questions (
     game_id TEXT,
     level_number INTEGER,
     action_number INTEGER,
-    
+
     -- Question content
     question_type TEXT NOT NULL,       -- Q1-Q9 from framework
     query TEXT NOT NULL,
     urgency TEXT DEFAULT 'medium',     -- low, medium, high, critical
-    
+
     -- Enforcement (questions with teeth)
     blocks_action BOOLEAN DEFAULT FALSE,
     score_modifier REAL DEFAULT 1.0,
     allowed_actions TEXT,              -- JSON array of allowed action types when blocked
-    
+
     -- Resolution
     answered BOOLEAN DEFAULT FALSE,
     answer TEXT,
     led_to_theory_revision BOOLEAN DEFAULT FALSE,
-    
+
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1530,14 +1530,14 @@ CREATE TABLE IF NOT EXISTS theory_action_links (
     theory_id TEXT NOT NULL,
     action_number INTEGER NOT NULL,
     game_id TEXT NOT NULL,
-    
+
     -- Prediction vs outcome
     predicted_outcome TEXT,
     actual_outcome TEXT,
     matched BOOLEAN,
-    
+
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
+
     FOREIGN KEY (theory_id) REFERENCES working_theories(theory_id)
 );
 
@@ -1546,27 +1546,27 @@ CREATE TABLE IF NOT EXISTS lesson_interpretations (
     lesson_id TEXT PRIMARY KEY,
     game_type TEXT NOT NULL,
     level_number INTEGER,
-    
+
     -- Interpretation content
     concept_demonstrated TEXT,         -- "containment", "symmetry", etc.
     interpretation TEXT NOT NULL,      -- Full interpretation
-    
+
     -- Coverage tracking
     explains_examples TEXT,            -- JSON array of levels explained
     fails_to_explain TEXT,             -- JSON array of contradictions
     coverage_ratio REAL,               -- explains / (explains + fails)
-    
+
     -- Validation and Transfer (CRITICAL for cross-game learning)
     validated_by_transfer BOOLEAN DEFAULT FALSE,
     transfer_success_count INTEGER DEFAULT 0,
     transfer_fail_count INTEGER DEFAULT 0,
-    
+
     -- Abstraction quality metrics (NEW)
     abstraction_level TEXT,            -- 'specific', 'partial', 'general'
     abstraction_score REAL,            -- transfer_success / (transfer_success + transfer_fail)
     overfitting_penalty REAL DEFAULT 0, -- High if only works on source game
     generalization_bonus REAL DEFAULT 0, -- High if works across many games
-    
+
     -- Attribution
     contributed_by_agent TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1577,24 +1577,24 @@ CREATE TABLE IF NOT EXISTS lesson_interpretations (
 CREATE TABLE IF NOT EXISTS abstraction_quality (
     quality_id INTEGER PRIMARY KEY AUTOINCREMENT,
     lesson_id TEXT NOT NULL,
-    
+
     -- Transfer attempts
     source_game_type TEXT NOT NULL,
     target_game_type TEXT NOT NULL,
     target_level INTEGER,
-    
+
     -- Outcome
     transfer_succeeded BOOLEAN,
     actions_to_success INTEGER,        -- Lower = better generalization
     adaptation_required TEXT,          -- What had to change?
-    
+
     -- Quality metrics
     is_memorization BOOLEAN DEFAULT FALSE,  -- Exact match only?
     is_abstraction BOOLEAN DEFAULT FALSE,   -- Pattern match?
     similarity_score REAL,             -- How similar were source/target?
-    
+
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
+
     FOREIGN KEY (lesson_id) REFERENCES lesson_interpretations(lesson_id)
 );
 ```
@@ -1671,14 +1671,14 @@ This architecture maintains compliance with all 13 rules:
 
 **What to look for in logs:**
 ```
-Agent LOG: "I'm confused because my theory (Stream A) predicts the blue object 
-will move right but the network says it should move down (Stream B), so I'm 
+Agent LOG: "I'm confused because my theory (Stream A) predicts the blue object
+will move right but the network says it should move down (Stream B), so I'm
 re-weighting: w_A=0.4, w_B=0.6"
 ```
 
 **Database query to verify:**
 ```sql
-SELECT * FROM consciousness_logs 
+SELECT * FROM consciousness_logs
 WHERE log_text LIKE '%Stream A%Stream B%re-weighting%'
 AND created_at > datetime('now', '-1 hour');
 ```
@@ -1691,15 +1691,15 @@ AND created_at > datetime('now', '-1 hour');
 
 **What to look for in logs:**
 ```
-Agent LOG: "The 'containment' lesson from Game A (Flood_Fill_123) applies to 
+Agent LOG: "The 'containment' lesson from Game A (Flood_Fill_123) applies to
 Game B (Shape_Enclosure_456) - both require surrounding objects"
 ```
 
 **Database query to verify:**
 ```sql
 SELECT source_game_type, target_game_type, theory_concept, transfer_succeeded
-FROM abstraction_quality 
-WHERE is_abstraction = TRUE 
+FROM abstraction_quality
+WHERE is_abstraction = TRUE
 AND transfer_succeeded = TRUE;
 ```
 
@@ -1711,17 +1711,17 @@ AND transfer_succeeded = TRUE;
 
 **What to look for in logs:**
 ```
-Agent LOG: "I spawned a stuckness-detector because I've been in position (3,4) 
+Agent LOG: "I spawned a stuckness-detector because I've been in position (3,4)
 for 30 frames"
-Agent LOG: "Observer 'stuckness_detector_7f3a' reports: Agent is in a corner, 
+Agent LOG: "Observer 'stuckness_detector_7f3a' reports: Agent is in a corner,
 all movements blocked by walls"
 ```
 
 **Database query to verify:**
 ```sql
-SELECT persona_type, spawn_reason, created_at 
-FROM personas 
-WHERE persona_type = 'stuckness_detector' 
+SELECT persona_type, spawn_reason, created_at
+FROM personas
+WHERE persona_type = 'stuckness_detector'
 AND spawn_reason LIKE '%frames%';
 ```
 
@@ -1734,11 +1734,11 @@ AND spawn_reason LIKE '%frames%';
 **What to look for:**
 ```sql
 -- Query: Show theory progression for recent games
-SELECT 
-    agent_id, game_type, level_number, 
+SELECT
+    agent_id, game_type, level_number,
     stage, evidence_for, evidence_against,
     formed_at, last_updated
-FROM working_theories 
+FROM working_theories
 WHERE created_at > datetime('now', '-1 hour')
 ORDER BY agent_id, formed_at;
 
@@ -1749,7 +1749,7 @@ ORDER BY agent_id, formed_at;
 -- Row 4: stage='transferred', evidence_for=8, evidence_against=1, action=50 (new game)
 ```
 
-**Success criteria**: 
+**Success criteria**:
 - No agent stays in 'exploring' stage beyond action 50
 - At least 20% of theories reach 'confident' stage
 - At least 5% of confident theories reach 'transferred' stage
@@ -1760,17 +1760,17 @@ ORDER BY agent_id, formed_at;
 
 **What to look for in logs:**
 ```
-Agent LOG: "Q9 contradiction detected: theory predicted blue moves up, but blue 
+Agent LOG: "Q9 contradiction detected: theory predicted blue moves up, but blue
 moved down. BLOCKING normal proposals. Only theory-revision actions allowed."
-Agent LOG: "Chose 'revise_theory' action despite 'exploit_goal' having higher 
+Agent LOG: "Chose 'revise_theory' action despite 'exploit_goal' having higher
 base score (0.8 vs 0.6) because theory is contradicted."
 ```
 
 **Database query to verify:**
 ```sql
 SELECT question_type, urgency, blocks_action, score_modifier
-FROM metacognitive_questions 
-WHERE blocks_action = TRUE 
+FROM metacognitive_questions
+WHERE blocks_action = TRUE
 AND created_at > datetime('now', '-1 hour');
 ```
 
@@ -1783,7 +1783,7 @@ AND created_at > datetime('now', '-1 hour');
 **What to verify:**
 ```sql
 -- Every action should have associated consciousness data
-SELECT 
+SELECT
     g.game_id, g.action_number,
     CASE WHEN wt.theory_id IS NOT NULL THEN 'yes' ELSE 'NO' END as has_theory,
     CASE WHEN mq.question_id IS NOT NULL THEN 'yes' ELSE 'NO' END as has_question,
@@ -1796,7 +1796,7 @@ WHERE g.created_at > datetime('now', '-1 hour')
 ORDER BY g.game_id, g.action_number;
 ```
 
-**Success criteria**: 
+**Success criteria**:
 - 100% of actions have associated world model state (not NULL)
 - >50% of actions have associated theory updates
 - >10% of actions have associated questions
@@ -1869,9 +1869,9 @@ The philosophical framework (AGI Unified Theory, Games-as-Teachers, Persona Subm
 
 ---
 
-**Document Status**: READY FOR IMPLEMENTATION (v1.1)  
-**Priority Order**: Phase 0 (Theory-Gated Scoring) -> Phase 1 (WorldModel Wiring) -> Phase 2 (Questioning with Teeth) -> Phase 3 (Persona Management)  
-**Next Steps**: Implement `score_proposal_with_theory()` FIRST - this single constraint wakes up the entire system  
-**Owner**: Autonomous Oracle System  
-**Review Date**: After 10 generations of evolution with changes applied  
+**Document Status**: READY FOR IMPLEMENTATION (v1.1)
+**Priority Order**: Phase 0 (Theory-Gated Scoring) -> Phase 1 (WorldModel Wiring) -> Phase 2 (Questioning with Teeth) -> Phase 3 (Persona Management)
+**Next Steps**: Implement `score_proposal_with_theory()` FIRST - this single constraint wakes up the entire system
+**Owner**: Autonomous Oracle System
+**Review Date**: After 10 generations of evolution with changes applied
 **v1.1 Changes**: Added Theory-Gated Scoring, Speculation Mode, Active Belief Graphs, Question Enforcement, Persona Budgeting

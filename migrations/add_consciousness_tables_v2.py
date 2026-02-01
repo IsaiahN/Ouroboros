@@ -10,6 +10,7 @@ specified in the architecture document but not included in v1.
 """
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
@@ -23,31 +24,31 @@ def run_migration():
     """Create the remaining consciousness system tables."""
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
-    
+
     tables_created = 0
     indexes_created = 0
-    
+
     # Table 1: abstraction_quality - Transfer quality tracking
     try:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS abstraction_quality (
                 quality_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 lesson_id TEXT NOT NULL,
-                
+
                 -- Transfer attempts
                 source_game_type TEXT NOT NULL,
                 target_game_type TEXT NOT NULL,
                 target_level INTEGER,
-                
+
                 -- Outcome
                 transfer_succeeded BOOLEAN,
                 actions_to_success INTEGER,
                 adaptation_required TEXT,
-                
+
                 -- Quality metrics
                 is_memorization BOOLEAN DEFAULT FALSE,
                 is_abstraction BOOLEAN DEFAULT FALSE,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -55,7 +56,7 @@ def run_migration():
         print("[OK] Created table: abstraction_quality")
     except Exception as e:
         print(f"[SKIP] abstraction_quality: {e}")
-    
+
     # Table 2: persona_theory_bindings - Bind personas to theories
     try:
         cursor.execute("""
@@ -65,9 +66,9 @@ def run_migration():
                 theory_id TEXT NOT NULL,
                 bound_at_action INTEGER,
                 agent_id TEXT,
-                
+
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
+
                 UNIQUE(persona_id, theory_id)
             )
         """)
@@ -75,7 +76,7 @@ def run_migration():
         print("[OK] Created table: persona_theory_bindings")
     except Exception as e:
         print(f"[SKIP] persona_theory_bindings: {e}")
-    
+
     # Table 3: lesson_interpretations_v2 - Schema-aligned lessons table
     try:
         cursor.execute("""
@@ -111,7 +112,7 @@ def run_migration():
         ("idx_persona_bindings_agent", "persona_theory_bindings", "agent_id"),
         ("idx_lesson_v2_game_level", "lesson_interpretations_v2", "game_type, level_number"),
     ]
-    
+
     for idx_name, table, column in index_definitions:
         try:
             cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table}({column})")
@@ -119,14 +120,14 @@ def run_migration():
             print(f"[OK] Created index: {idx_name}")
         except Exception as e:
             print(f"[SKIP] {idx_name}: {e}")
-    
+
     conn.commit()
     conn.close()
-    
+
     print(f"\n=== Migration Complete ===")
     print(f"Tables created: {tables_created}")
     print(f"Indexes created: {indexes_created}")
-    
+
     return tables_created, indexes_created
 
 

@@ -24,27 +24,38 @@ New Clean Modules (v2):
 - belief_system: BeliefSystem for belief dependencies and cascade invalidation
 """
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+from .action6_behavior import Action6BehaviorEngine
+from .belief_system import Belief, BeliefStatus, BeliefSystem, BeliefType
+from .click_behavior import ClickBehavior, ClickBehaviorClassifier, ClickResult
+from .cognitive_core import CognitiveCore
+from .completion_predictor import CompletionPredictor
+
+# Export new clean modules (v2)
+from .control_tracker import ControlledObject, ControlObservation, ControlTracker
+from .discovery_engine import DiscoveryEngine, DiscoveryPhase, ObjectBehavior
+from .embedding_matcher import EmbeddingMatcher
+from .few_shot_relations import FewShotRelations
+from .grid_analysis import (
+    FrameDiff,
+    GridAnalyzer,
+    ObjectMovement,
+    frames_identical,
+    quick_diff,
+)
+from .network_sharing import NetworkSharingEngine
 
 # Export existing classes
 from .symbolic_tracker import SymbolicStateTracker
-from .completion_predictor import CompletionPredictor
-from .embedding_matcher import EmbeddingMatcher
-from .few_shot_relations import FewShotRelations
-from .network_sharing import NetworkSharingEngine
-from .action6_behavior import Action6BehaviorEngine
-
-# Export new clean modules (v2)
-from .control_tracker import ControlTracker, ControlledObject, ControlObservation
-from .discovery_engine import DiscoveryEngine, DiscoveryPhase, ObjectBehavior
-from .grid_analysis import GridAnalyzer, FrameDiff, ObjectMovement, quick_diff, frames_identical
-from .trigger_sequences import TriggerSequenceTracker, TriggerChain, ProvenSequence
-from .valence_goals import ValenceGoalEngine, Valence, GoalType
-from .universal_patterns import UniversalPatternEngine, PatternScope, PatternType
-from .click_behavior import ClickBehaviorClassifier, ClickBehavior, ClickResult
-from .belief_system import BeliefSystem, Belief, BeliefType, BeliefStatus
+from .trigger_sequences import ProvenSequence, TriggerChain, TriggerSequenceTracker
+from .universal_patterns import PatternScope, PatternType, UniversalPatternEngine
+from .valence_goals import GoalType, Valence, ValenceGoalEngine
 
 __all__ = [
+    # Core (unified interface)
+    'CognitiveCore',
     # Existing
     'SymbolicStateTracker',
     'CompletionPredictor',
@@ -54,7 +65,7 @@ __all__ = [
     'Action6BehaviorEngine',
     # New clean modules (v2)
     'ControlTracker',
-    'ControlledObject', 
+    'ControlledObject',
     'ControlObservation',
     'DiscoveryEngine',
     'DiscoveryPhase',

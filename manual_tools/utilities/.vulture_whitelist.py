@@ -19,7 +19,7 @@ _: Any = None  # Placeholder for attribute access
 # =============================================================================
 # arc_api_client.py:169 - __aexit__ signature
 exc_type: Any  # unused-variable
-exc_val: Any   # unused-variable  
+exc_val: Any   # unused-variable
 exc_tb: Any    # unused-variable
 
 # =============================================================================

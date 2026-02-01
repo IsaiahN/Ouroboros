@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 """
@@ -13,21 +14,21 @@ Purpose:
 - Store learning events for network synthesis (viral knowledge transfer)
 
 Key Insight (from user):
-"With each replay, agents should get smart enough to understand WHY that game 
-level works the way it does, learn the rules, and could play it without 
-sequences or even BETTER because they understand the rules. They would even 
+"With each replay, agents should get smart enough to understand WHY that game
+level works the way it does, learn the rules, and could play it without
+sequences or even BETTER because they understand the rules. They would even
 know what is wasted movement (useful for optimizer class)."
 
 Following Rule 2: All data stored in database
 Following Rule 11: No Unicode emojis
 """
 
+import hashlib
 import json
 import uuid
-import hashlib
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple, TYPE_CHECKING
-from dataclasses import dataclass, field, asdict
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from engines.engine_logger import get_engine_logger
 
@@ -43,25 +44,25 @@ class ReplayPrediction:
     action_index: int
     action_type: int  # 1-7
     coordinate: Optional[Tuple[int, int]] = None  # For ACTION6
-    
+
     # Predictions (generated BEFORE seeing the action outcome)
     predicted_frame_change: str = "unknown"  # 'none', 'minor', 'major', 'level_transition'
     predicted_object_effect: str = "unknown"  # 'move', 'toggle', 'collect', 'destroy', 'none'
     predicted_score_change: float = 0.0
     hypothesized_rule: str = ""  # Agent's best guess about the underlying rule
     confidence: float = 0.0  # 0.0-1.0
-    
+
     # Set AFTER observing outcome
     actual_frame_change: str = ""
     actual_object_effect: str = ""
     actual_score_change: float = 0.0
     prediction_correct: bool = False
-    
+
     # Learning derived from comparison
     inferred_rule: str = ""
     primitive_candidate: str = ""
     wasted_action: bool = False  # True if action had no effect (optimizer signal)
-    
+
 
 @dataclass
 class ReplayLearningContext:
@@ -71,25 +72,25 @@ class ReplayLearningContext:
     game_type: str
     level_number: int
     agent_id: str
-    
+
     # Accumulated learning
     predictions: List[ReplayPrediction] = field(default_factory=list)
     correct_predictions: int = 0
     total_predictions: int = 0
-    
+
     # Pattern detection
     action_effect_map: Dict[int, List[str]] = field(default_factory=dict)  # action -> [observed effects]
     click_effect_map: Dict[str, List[str]] = field(default_factory=dict)  # "color_at_coord" -> [effects]
     wasted_action_indices: List[int] = field(default_factory=list)
-    
+
     # Inferred rules (built up during replay)
     inferred_rules: List[Dict[str, Any]] = field(default_factory=list)
     inferred_primitives: List[str] = field(default_factory=list)
-    
+
     # For rule induction
     frame_before_first_action: Optional[List] = None
     consecutive_no_change_count: int = 0
-    
+
     # ================================================================
     # INSIGHT TRACKING: Only record learning when insights are NEW
     # ================================================================
@@ -101,7 +102,7 @@ class ReplayLearningContext:
     prior_accuracy: float = 0.0   # Previous best accuracy for this sequence
     prior_rules_count: int = 0    # Previously known rules for this game type
     prior_rule_hashes: set = field(default_factory=set)  # Hash of known rules
-    
+
     # Insight detection results
     new_insight_gained: bool = False  # Did we learn something new?
     accuracy_improved: bool = False   # Did prediction accuracy improve?
@@ -111,31 +112,31 @@ class ReplayLearningContext:
 class ReplayLearningEngine:
     """
     Enable agents to learn from sequence replays through prediction and comparison.
-    
+
     Core Loop (per replay action):
     1. PREDICT: What will this action do? (before seeing outcome)
     2. EXECUTE: Run the actual sequence action
     3. COMPARE: What actually happened vs prediction?
     4. LEARN: Extract rules, mark wasted actions, build understanding
-    
+
     This transforms passive sequence replay into active learning.
     """
-    
+
     def __init__(self, database_interface: 'DatabaseInterface'):
         self.db = database_interface
         self.engine_id = f"replay_learn_{uuid.uuid4().hex[:8]}"
         self._ensure_tables_exist()
-        
+
         # Action type names for reasoning
         self.ACTION_NAMES = {
             1: 'UP', 2: 'DOWN', 3: 'RIGHT', 4: 'LEFT',
             5: 'SPECIAL', 6: 'CLICK', 7: 'UNDO'
         }
-        
+
         # Cache for game type patterns (learned from previous replays)
         self._game_type_patterns: Dict[str, Dict] = {}
         self._load_known_patterns()
-    
+
     def _ensure_tables_exist(self):
         """Create database tables for replay learning (Rule 2: Database-only)."""
         try:
@@ -152,31 +153,31 @@ class ReplayLearningEngine:
                     action_type INTEGER NOT NULL,
                     coordinate_x INTEGER,
                     coordinate_y INTEGER,
-                    
+
                     -- Predictions (made before action)
                     predicted_frame_change TEXT,
                     predicted_object_effect TEXT,
                     predicted_score_change REAL DEFAULT 0.0,
                     hypothesized_rule TEXT,
                     prediction_confidence REAL DEFAULT 0.0,
-                    
+
                     -- Actuals (observed after action)
                     actual_frame_change TEXT,
                     actual_object_effect TEXT,
                     actual_score_change REAL DEFAULT 0.0,
                     prediction_correct BOOLEAN DEFAULT FALSE,
-                    
+
                     -- Learning outputs
                     inferred_rule TEXT,
                     primitive_candidate TEXT,
                     wasted_action BOOLEAN DEFAULT FALSE,
-                    
+
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
                 )
             """)
-            
+
             # Aggregated patterns per game type (for transfer learning)
             self.db.execute_query("""
                 CREATE TABLE IF NOT EXISTS replay_inferred_patterns (
@@ -189,11 +190,11 @@ class ReplayLearningEngine:
                     observation_count INTEGER DEFAULT 1,
                     last_observed TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     UNIQUE(game_type, pattern_type, pattern_description)
                 )
             """)
-            
+
             # Wasted action markers for optimizer use
             self.db.execute_query("""
                 CREATE TABLE IF NOT EXISTS replay_wasted_actions (
@@ -204,11 +205,11 @@ class ReplayLearningEngine:
                     potential_savings INTEGER DEFAULT 1,
                     verified_removable BOOLEAN DEFAULT FALSE,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     UNIQUE(sequence_id, action_index)
                 )
             """)
-            
+
             # Session-level learning summaries (for evolution tracking)
             self.db.execute_query("""
                 CREATE TABLE IF NOT EXISTS replay_learning_sessions (
@@ -226,21 +227,21 @@ class ReplayLearningEngine:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
             # Create indices for fast lookups
             self.db.execute_query("""
-                CREATE INDEX IF NOT EXISTS idx_replay_learning_game_type 
+                CREATE INDEX IF NOT EXISTS idx_replay_learning_game_type
                 ON replay_learning_events(game_type, level_number)
             """)
             self.db.execute_query("""
-                CREATE INDEX IF NOT EXISTS idx_replay_patterns_game_type 
+                CREATE INDEX IF NOT EXISTS idx_replay_patterns_game_type
                 ON replay_inferred_patterns(game_type)
             """)
-            
+
         except Exception as e:
             # Table creation is non-critical
             pass
-    
+
     def _load_known_patterns(self):
         """Load previously learned patterns for each game type."""
         try:
@@ -250,7 +251,7 @@ class ReplayLearningEngine:
                 WHERE confidence >= 0.6
                 ORDER BY confidence DESC
             """)
-            
+
             if patterns:
                 for p in patterns:
                     game_type = p['game_type']
@@ -260,7 +261,7 @@ class ReplayLearningEngine:
                             'click_effects': {},
                             'rules': []
                         }
-                    
+
                     if p['pattern_type'] == 'action_effect':
                         try:
                             mapping = json.loads(p['action_mapping']) if p['action_mapping'] else {}
@@ -274,7 +275,7 @@ class ReplayLearningEngine:
                         })
         except Exception:
             pass
-    
+
     def start_learning_session(
         self,
         sequence_id: str,
@@ -285,18 +286,18 @@ class ReplayLearningEngine:
     ) -> ReplayLearningContext:
         """
         Initialize a learning context for a replay session.
-        
+
         Call this BEFORE starting sequence replay.
-        
+
         Loads prior learning state to enable insight detection:
         - If this is first replay: Full learning mode
         - If replayed before: Only record if new insights gained
         """
         game_type = game_id.split('-')[0] if '-' in game_id else game_id
-        
+
         # Check prior learning state for this sequence
         prior_state = self._load_prior_learning_state(sequence_id, game_type, agent_id)
-        
+
         context = ReplayLearningContext(
             sequence_id=sequence_id,
             game_id=game_id,
@@ -310,7 +311,7 @@ class ReplayLearningEngine:
             prior_rules_count=prior_state['prior_rules_count'],
             prior_rule_hashes=prior_state['prior_rule_hashes']
         )
-        
+
         # Pre-load any known patterns for this game type
         if game_type in self._game_type_patterns:
             known = self._game_type_patterns[game_type]
@@ -318,9 +319,9 @@ class ReplayLearningEngine:
                 int(k): v for k, v in known.get('action_effects', {}).items()
                 if isinstance(k, (int, str)) and str(k).isdigit()
             }
-        
+
         return context
-    
+
     def _load_prior_learning_state(
         self,
         sequence_id: str,
@@ -329,7 +330,7 @@ class ReplayLearningEngine:
     ) -> Dict[str, Any]:
         """
         Load prior learning state to detect if new insights are gained.
-        
+
         Returns dict with:
         - is_first_replay: True if agent never replayed this sequence
         - prior_accuracy: Best accuracy achieved on previous replays
@@ -342,7 +343,7 @@ class ReplayLearningEngine:
             'prior_rules_count': 0,
             'prior_rule_hashes': set()
         }
-        
+
         try:
             # Check if this agent has replayed this sequence before
             prior = self.db.execute_query("""
@@ -350,30 +351,30 @@ class ReplayLearningEngine:
                 FROM replay_learning_sessions
                 WHERE sequence_id = ? AND agent_id = ?
             """, (sequence_id, agent_id))
-            
+
             if prior and prior[0].get('replay_count', 0) > 0:
                 result['is_first_replay'] = False
                 result['prior_accuracy'] = prior[0].get('best_accuracy', 0.0) or 0.0
-            
+
             # Get existing rules for this game type
             rules = self.db.execute_query("""
                 SELECT pattern_description
                 FROM replay_inferred_patterns
                 WHERE game_type = ? AND pattern_type = 'rule'
             """, (game_type,))
-            
+
             if rules:
                 result['prior_rules_count'] = len(rules)
                 result['prior_rule_hashes'] = {
                     hashlib.md5(r['pattern_description'].encode()).hexdigest()[:12]
                     for r in rules if r.get('pattern_description')
                 }
-                
+
         except Exception:
             pass  # Use defaults if DB query fails
-        
+
         return result
-    
+
     def generate_prediction(
         self,
         context: ReplayLearningContext,
@@ -385,7 +386,7 @@ class ReplayLearningEngine:
     ) -> ReplayPrediction:
         """
         Generate a prediction for what the upcoming action will do.
-        
+
         Call this BEFORE executing each sequence action.
         Uses:
         - Previously observed effects in this replay
@@ -397,10 +398,10 @@ class ReplayLearningEngine:
             action_type=action_type,
             coordinate=coordinate
         )
-        
+
         # Build prediction based on accumulated knowledge
         action_key = action_type
-        
+
         # 1. Use known effects from this replay session
         if action_key in context.action_effect_map and context.action_effect_map[action_key]:
             effects = context.action_effect_map[action_key]
@@ -410,7 +411,7 @@ class ReplayLearningEngine:
             # Generate hypothesis for cached effect (don't leave empty!)
             action_name = self.ACTION_NAMES.get(action_type, f'ACTION{action_type}')
             prediction.hypothesized_rule = f"{action_name} causes '{most_common}' effect (observed {len(effects)}x)"
-        
+
         # 2. Use known patterns from game type (previous replays)
         elif context.game_type in self._game_type_patterns:
             known = self._game_type_patterns[context.game_type]
@@ -420,7 +421,7 @@ class ReplayLearningEngine:
                 # Generate hypothesis for transferred knowledge
                 action_name = self.ACTION_NAMES.get(action_type, f'ACTION{action_type}')
                 prediction.hypothesized_rule = f"{action_name} causes '{prediction.predicted_object_effect}' (learned from prior games)"
-        
+
         # 3. Default predictions based on action type
         if prediction.predicted_object_effect == "unknown":
             if action_type in [1, 2, 3, 4]:  # Movement
@@ -445,25 +446,25 @@ class ReplayLearningEngine:
                 prediction.predicted_frame_change = "minor"
                 prediction.hypothesized_rule = "ACTION7 undoes last action"
                 prediction.confidence = 0.6
-        
+
         # 4. Analyze sequence structure for score prediction
         remaining_actions = len(sequence_actions) - action_index
         if remaining_actions <= 3:
             # Near end of sequence - might trigger level completion
             prediction.predicted_score_change = 0.5  # Possible
-        
+
         # 5. Detect potential wasted actions early
         # If same action repeated 3+ times consecutively, middle ones might be wasted
         if action_index >= 2:
             recent = sequence_actions[max(0, action_index-3):action_index]
             if len(recent) >= 2 and all(a == action_type for a in recent):
                 prediction.hypothesized_rule += " (possibly redundant - repeated action)"
-        
+
         context.predictions.append(prediction)
         context.total_predictions += 1
-        
+
         return prediction
-    
+
     def record_outcome(
         self,
         context: ReplayLearningContext,
@@ -475,7 +476,7 @@ class ReplayLearningEngine:
     ) -> Dict[str, Any]:
         """
         Record what actually happened and compare to prediction.
-        
+
         Call this AFTER executing each sequence action.
         Returns learning insights for this action.
         """
@@ -483,68 +484,68 @@ class ReplayLearningEngine:
         frame_change = self._classify_frame_change(frame_before, frame_after)
         object_effect = self._detect_object_effect(frame_before, frame_after, prediction.action_type, prediction.coordinate)
         score_change = score_after - score_before
-        
+
         # Update prediction with actuals
         prediction.actual_frame_change = frame_change
         prediction.actual_object_effect = object_effect
         prediction.actual_score_change = score_change
-        
+
         # Compare prediction to actual
         prediction.prediction_correct = (
             prediction.predicted_object_effect == object_effect or
             (prediction.predicted_frame_change == frame_change and frame_change != 'none')
         )
-        
+
         if prediction.prediction_correct:
             context.correct_predictions += 1
-        
+
         # Detect wasted actions (no effect)
         if frame_change == 'none' and score_change == 0:
             prediction.wasted_action = True
             context.wasted_action_indices.append(prediction.action_index)
             context.consecutive_no_change_count += 1
-            
+
             if context.consecutive_no_change_count >= 3:
                 prediction.inferred_rule = "REDUNDANT: Multiple consecutive no-effect actions"
         else:
             context.consecutive_no_change_count = 0
-        
+
         # Update action-effect mapping for future predictions
         action_key = prediction.action_type
         if action_key not in context.action_effect_map:
             context.action_effect_map[action_key] = []
         context.action_effect_map[action_key].append(object_effect)
-        
+
         # Infer rules from comparison
         learning_result = self._induce_rule(context, prediction, frame_before, frame_after)
-        
+
         # Store learning event in database
         self._store_learning_event(context, prediction)
-        
+
         return learning_result
-    
+
     def _classify_frame_change(self, before: List, after: List) -> str:
         """Classify the magnitude of frame change."""
         if not before or not after:
             return 'unknown'
-        
+
         try:
             # Count pixel differences
             diff_count = 0
             total_pixels = 0
-            
+
             for r1, r2 in zip(before, after):
                 if isinstance(r1, list) and isinstance(r2, list):
                     for c1, c2 in zip(r1, r2):
                         total_pixels += 1
                         if c1 != c2:
                             diff_count += 1
-            
+
             if total_pixels == 0:
                 return 'unknown'
-            
+
             diff_ratio = diff_count / total_pixels
-            
+
             if diff_ratio == 0:
                 return 'none'
             elif diff_ratio < 0.05:
@@ -553,10 +554,10 @@ class ReplayLearningEngine:
                 return 'major'
             else:
                 return 'level_transition'
-                
+
         except Exception:
             return 'unknown'
-    
+
     def _detect_object_effect(
         self,
         before: List,
@@ -567,7 +568,7 @@ class ReplayLearningEngine:
         """Detect what effect the action had on objects."""
         if not before or not after:
             return 'unknown'
-        
+
         try:
             # For click actions, check the clicked region
             if action_type == 6 and coordinate:
@@ -575,13 +576,13 @@ class ReplayLearningEngine:
                 # Check 3x3 region around click
                 before_region = self._get_region(before, x, y, 3)
                 after_region = self._get_region(after, x, y, 3)
-                
+
                 if before_region != after_region:
                     # Something changed at click location
                     return 'toggle'
                 else:
                     return 'none'
-            
+
             # For movement actions, detect object displacement
             if action_type in [1, 2, 3, 4]:
                 # Find positions that changed
@@ -590,7 +591,7 @@ class ReplayLearningEngine:
                     return 'move'
                 else:
                     return 'none'
-            
+
             # For other actions
             frame_change = self._classify_frame_change(before, after)
             if frame_change == 'none':
@@ -599,15 +600,15 @@ class ReplayLearningEngine:
                 return 'collect'  # Likely collected something to trigger transition
             else:
                 return 'toggle'
-                
+
         except Exception:
             return 'unknown'
-    
+
     def _get_region(self, frame: List, x: int, y: int, size: int) -> List:
         """Get a region of pixels around a coordinate."""
         region = []
         half = size // 2
-        
+
         try:
             for dy in range(-half, half + 1):
                 row = []
@@ -620,13 +621,13 @@ class ReplayLearningEngine:
                 region.append(row)
         except (TypeError, IndexError):
             pass  # Invalid frame data - return partial region
-        
+
         return region
-    
+
     def _find_changed_positions(self, before: List, after: List) -> List[Tuple[int, int]]:
         """Find all positions where pixels changed."""
         changes = []
-        
+
         try:
             for y, (row1, row2) in enumerate(zip(before, after)):
                 if isinstance(row1, list) and isinstance(row2, list):
@@ -635,9 +636,9 @@ class ReplayLearningEngine:
                             changes.append((x, y))
         except (TypeError, IndexError):
             pass  # Invalid frame data - return partial changes
-        
+
         return changes
-    
+
     def _get_pixel_color(self, frame: List, coord: Tuple[int, int]) -> str:
         """Get the color/value at a coordinate."""
         try:
@@ -647,7 +648,7 @@ class ReplayLearningEngine:
         except (TypeError, IndexError):
             pass  # Invalid frame or coord - return unknown
         return "unknown"
-    
+
     def _induce_rule(
         self,
         context: ReplayLearningContext,
@@ -665,17 +666,17 @@ class ReplayLearningEngine:
             'wasted': prediction.wasted_action,
             'optimizer_suggestion': None
         }
-        
+
         # Rule induction based on observed patterns
         action_name = self.ACTION_NAMES.get(prediction.action_type, f'ACTION{prediction.action_type}')
-        
+
         if prediction.actual_object_effect == 'move':
             # Movement rule
             rule = f"{action_name} moves controlled object"
             prediction.inferred_rule = rule
             result['inferred_rule'] = rule
             result['primitive_candidate'] = 'object_control'
-            
+
         elif prediction.actual_object_effect == 'toggle':
             # Toggle rule
             if prediction.action_type == 6 and prediction.coordinate:
@@ -689,19 +690,19 @@ class ReplayLearningEngine:
                 prediction.inferred_rule = rule
                 result['inferred_rule'] = rule
                 result['primitive_candidate'] = 'toggle_interaction'
-        
+
         elif prediction.wasted_action:
             # Wasted action - valuable for optimizers
             result['optimizer_suggestion'] = f"Action {prediction.action_index} ({action_name}) had no effect - potentially removable"
             prediction.inferred_rule = "NO_EFFECT: Action did not change game state"
-        
+
         # Level completion detection
         if prediction.actual_score_change > 0:
             rule = f"Actions before index {prediction.action_index} complete level {context.level_number}"
             prediction.inferred_rule = rule
             result['inferred_rule'] = rule
             result['primitive_candidate'] = 'level_completion_trigger'
-        
+
         # Store rule if significant
         if result['inferred_rule']:
             context.inferred_rules.append({
@@ -709,12 +710,12 @@ class ReplayLearningEngine:
                 'action_index': prediction.action_index,
                 'confidence': prediction.confidence + 0.2 if prediction.prediction_correct else prediction.confidence
             })
-        
+
         if result['primitive_candidate'] and result['primitive_candidate'] not in context.inferred_primitives:
             context.inferred_primitives.append(result['primitive_candidate'])
-        
+
         return result
-    
+
     def _store_learning_event(self, context: ReplayLearningContext, prediction: ReplayPrediction):
         """Store a learning event in the database."""
         try:
@@ -754,32 +755,32 @@ class ReplayLearningEngine:
             ))
         except Exception as e:
             pass  # Non-critical - don't break replay for logging
-    
+
     def finalize_session(self, context: ReplayLearningContext) -> Dict[str, Any]:
         """
         Finalize learning session and store aggregated patterns.
-        
+
         Call this AFTER sequence replay completes.
-        
+
         INSIGHT-BASED STORAGE:
         - First replay: Always store full learning
         - Subsequent replays: Only store if new insights gained
           - Accuracy improved by >= 10%
           - New rules discovered (not in prior_rule_hashes)
           - New wasted actions identified
-        
+
         Returns summary of what was learned.
         """
         current_accuracy = (
-            context.correct_predictions / context.total_predictions 
+            context.correct_predictions / context.total_predictions
             if context.total_predictions > 0 else 0.0
         )
-        
+
         # ================================================================
         # INSIGHT DETECTION: Did we learn something new?
         # ================================================================
         accuracy_improved = current_accuracy > context.prior_accuracy + 0.10  # 10% improvement threshold
-        
+
         # Check for genuinely new rules (not seen before)
         new_rules = []
         for rule in context.inferred_rules:
@@ -787,9 +788,9 @@ class ReplayLearningEngine:
             rule_hash = hashlib.md5(rule_text.encode()).hexdigest()[:12]
             if rule_hash not in context.prior_rule_hashes:
                 new_rules.append(rule)
-        
+
         new_wasted_actions = len(context.wasted_action_indices) > 0
-        
+
         # Determine if we have new insights worth storing
         has_new_insight = (
             context.is_first_replay or  # First replay always stores
@@ -797,12 +798,12 @@ class ReplayLearningEngine:
             len(new_rules) > 0 or         # Discovered new rules
             new_wasted_actions             # Found optimization opportunities
         )
-        
+
         # Update context with insight detection results
         context.new_insight_gained = has_new_insight
         context.accuracy_improved = accuracy_improved
         context.new_rules_found = len(new_rules)
-        
+
         summary = {
             'sequence_id': context.sequence_id,
             'game_type': context.game_type,
@@ -822,17 +823,17 @@ class ReplayLearningEngine:
             'new_rules_found': len(new_rules),
             'skipped_storage': not has_new_insight  # True if we didn't store (no new insights)
         }
-        
+
         # ================================================================
         # CONDITIONAL STORAGE: Only persist if new insights gained
         # ================================================================
         if has_new_insight:
             # Store aggregated patterns for future replays (UPSERT)
             self._store_aggregated_patterns(context)
-            
+
             # Store wasted actions for optimizer use (UPSERT)
             self._store_wasted_actions(context)
-            
+
             # Log that we learned something new
             if not context.is_first_replay:
                 import logging
@@ -842,7 +843,7 @@ class ReplayLearningEngine:
                     f"accuracy {context.prior_accuracy:.0%} -> {current_accuracy:.0%}, "
                     f"{len(new_rules)} new rules"
                 )
-        
+
         # Update cache (always, for session performance)
         if context.game_type not in self._game_type_patterns:
             self._game_type_patterns[context.game_type] = {
@@ -850,15 +851,15 @@ class ReplayLearningEngine:
                 'click_effects': {},
                 'rules': []
             }
-        
+
         # Merge action effects into cache
         for action, effects in context.action_effect_map.items():
             if effects:
                 most_common = max(set(effects), key=effects.count)
                 self._game_type_patterns[context.game_type]['action_effects'][str(action)] = most_common
-        
+
         return summary
-    
+
     def _store_aggregated_patterns(self, context: ReplayLearningContext):
         """Store patterns learned from this replay for future transfer."""
         try:
@@ -866,13 +867,13 @@ class ReplayLearningEngine:
             for action, effects in context.action_effect_map.items():
                 if not effects:
                     continue
-                    
+
                 most_common = max(set(effects), key=effects.count)
                 confidence = effects.count(most_common) / len(effects)
-                
+
                 self.db.execute_query("""
                     INSERT INTO replay_inferred_patterns (
-                        game_type, pattern_type, pattern_description, action_mapping, 
+                        game_type, pattern_type, pattern_description, action_mapping,
                         confidence, observation_count, last_observed, created_at
                     ) VALUES (?, 'action_effect', ?, ?, ?, 1, ?, ?)
                     ON CONFLICT(game_type, pattern_type, pattern_description) DO UPDATE SET
@@ -887,12 +888,12 @@ class ReplayLearningEngine:
                     datetime.now().isoformat(),
                     datetime.now().isoformat()
                 ))
-            
+
             # Store inferred rules
             for rule in context.inferred_rules:
                 self.db.execute_query("""
                     INSERT INTO replay_inferred_patterns (
-                        game_type, pattern_type, pattern_description, 
+                        game_type, pattern_type, pattern_description,
                         confidence, observation_count, last_observed, created_at
                     ) VALUES (?, 'rule', ?, ?, 1, ?, ?)
                     ON CONFLICT(game_type, pattern_type, pattern_description) DO UPDATE SET
@@ -906,10 +907,10 @@ class ReplayLearningEngine:
                     datetime.now().isoformat(),
                     datetime.now().isoformat()
                 ))
-                
+
         except Exception:
             pass
-    
+
     def _store_wasted_actions(self, context: ReplayLearningContext):
         """Store wasted actions for optimizer agents to use."""
         try:
@@ -925,11 +926,11 @@ class ReplayLearningEngine:
                 ))
         except Exception:
             pass
-    
+
     def get_wasted_actions_for_optimizer(self, sequence_id: str) -> List[Dict]:
         """
         Get list of wasted actions for an optimizer to try removing.
-        
+
         Optimizer agents can use this to create more efficient sequences.
         """
         try:
@@ -939,15 +940,15 @@ class ReplayLearningEngine:
                 WHERE sequence_id = ?
                 ORDER BY action_index
             """, (sequence_id,))
-            
+
             return result if result else []
         except Exception:
             return []
-    
+
     def get_known_rules_for_game(self, game_type: str) -> List[Dict]:
         """
         Get all inferred rules for a game type.
-        
+
         Agents can use these to understand the game without replaying.
         """
         try:
@@ -958,11 +959,11 @@ class ReplayLearningEngine:
                 ORDER BY confidence DESC, observation_count DESC
                 LIMIT 20
             """, (game_type,))
-            
+
             return result if result else []
         except Exception:
             return []
-    
+
     def build_rich_reasoning(
         self,
         prediction: ReplayPrediction,
@@ -973,18 +974,18 @@ class ReplayLearningEngine:
     ) -> Dict[str, Any]:
         """
         Build rich reasoning payload for the reasoning log.
-        
+
         Replaces monotonous "replaying sequence" with actual learning.
         """
         action_name = self.ACTION_NAMES.get(prediction.action_type, f'ACTION{prediction.action_type}')
-        
+
         reasoning = {
             'action': f'ACTION{prediction.action_type}',
             'sequence_id': sequence_id,
             'replay_step': prediction.action_index + 1,
             'total_steps': total_steps,
             'agent_role': agent_role,
-            
+
             # Prediction (what agent expected)
             'prediction': {
                 'expected_effect': prediction.predicted_object_effect,
@@ -992,14 +993,14 @@ class ReplayLearningEngine:
                 'hypothesis': prediction.hypothesized_rule,
                 'confidence': round(prediction.confidence, 2)
             },
-            
+
             # Actual outcome
             'actual': {
                 'effect': prediction.actual_object_effect,
                 'frame_change': prediction.actual_frame_change,
                 'score_change': prediction.actual_score_change
             },
-            
+
             # Learning
             'prediction_correct': prediction.prediction_correct,
             'learning': {
@@ -1008,11 +1009,11 @@ class ReplayLearningEngine:
                 'wasted': prediction.wasted_action
             }
         }
-        
+
         # Add coordinate for clicks
         if prediction.coordinate:
             reasoning['coordinate'] = {'x': prediction.coordinate[0], 'y': prediction.coordinate[1]}
-        
+
         # Build human-readable reasoning string
         if prediction.prediction_correct:
             reasoning['reasoning'] = (
@@ -1028,5 +1029,5 @@ class ReplayLearningEngine:
                 f"{agent_role.upper()}: Predicted '{prediction.predicted_object_effect}' but got '{prediction.actual_object_effect}' "
                 f"- updating understanding: {prediction.inferred_rule or 'learning new pattern'}"
             )
-        
+
         return reasoning

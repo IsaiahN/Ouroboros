@@ -13,16 +13,17 @@ If either triggers, we skip all 7 phases and return immediately.
 """
 
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-import random
 import logging
+import random
 from dataclasses import dataclass
-from typing import Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
+    from engines.decision.phase_contracts import AgentContext, FinalDecision, GameState
     from engines.registry import EngineRegistry
-    from engines.decision.phase_contracts import GameState, AgentContext, FinalDecision
 
 logger = logging.getLogger(__name__)
 
@@ -35,28 +36,28 @@ logger = logging.getLogger(__name__)
 class EmergencyThresholds:
     """
     Configurable emergency thresholds.
-    
+
     Defaults are empirically chosen but can be learned per-game-type:
     - loop_detection: 15 = ~3 full movement cycles stuck on same position
     - frustration_override: 20 = ~5% of typical 400-action budget
-    
+
     TODO: Learn these from database via game_session_manager data:
-          SELECT AVG(actions_before_breakthrough) FROM game_results 
+          SELECT AVG(actions_before_breakthrough) FROM game_results
           GROUP BY game_type
     """
     loop_detection: int = 15
     frustration_override: int = 20
-    
+
     @classmethod
     def for_game_type(cls, game_type: str, db=None) -> 'EmergencyThresholds':
         """
         Get thresholds tuned for a specific game type.
-        
+
         Falls back to defaults if no learned data available.
         """
         if db is None:
             return cls()
-        
+
         try:
             # Try to get learned thresholds from database
             # TODO: Implement actual learning query
@@ -74,17 +75,17 @@ class EmergencyThresholds:
 class EmergencyCheck:
     """
     Pre-phase emergency detection.
-    
+
     This is the ONLY place in the decision pipeline where early-exit is allowed.
     All other phases must complete and contribute weights.
-    
+
     Thresholds can be configured per-game-type for better tuning.
     """
-    
+
     # Default thresholds (class-level, for backwards compatibility)
     DEFAULT_LOOP_THRESHOLD = 15
     DEFAULT_FRUSTRATION_THRESHOLD = 20
-    
+
     def __init__(
         self,
         engines: 'EngineRegistry',
@@ -95,16 +96,16 @@ class EmergencyCheck:
         self._recent_actions: List[str] = []
         self._recent_positions: List[tuple] = []
         self._no_change_count: int = 0
-    
+
     def set_thresholds_for_game(self, game_type: str, db=None) -> None:
         """
         Update thresholds based on game type.
-        
+
         Call this when switching to a new game type to use
         learned thresholds if available.
         """
         self.thresholds = EmergencyThresholds.for_game_type(game_type, db)
-    
+
     def check(
         self,
         game_state: 'GameState',
@@ -112,16 +113,16 @@ class EmergencyCheck:
     ) -> Optional['FinalDecision']:
         """
         Check for emergency conditions.
-        
+
         Returns:
             FinalDecision if emergency triggered, None otherwise
         """
         # Import here to avoid circular imports
         from engines.decision.phase_contracts import FinalDecision
-        
+
         # Track state for loop detection
         self._update_tracking(game_state)
-        
+
         # Check 1: Infinite loop detection
         loop_action = self._check_infinite_loop(game_state)
         if loop_action:
@@ -138,7 +139,7 @@ class EmergencyCheck:
                 deliberation_changed=True,
                 selection_method="emergency_loop_break",
             )
-        
+
         # Check 2: Frustration override
         frustration_action = self._check_frustration(game_state, agent_context)
         if frustration_action:
@@ -155,10 +156,10 @@ class EmergencyCheck:
                 deliberation_changed=True,
                 selection_method="emergency_frustration",
             )
-        
+
         # No emergency - continue to phases
         return None
-    
+
     def _update_tracking(self, game_state: 'GameState') -> None:
         """Update action/position tracking for loop detection."""
         # Track position changes
@@ -171,18 +172,18 @@ class EmergencyCheck:
             # Keep last 20 positions
             if len(self._recent_positions) > 20:
                 self._recent_positions.pop(0)
-        
+
         # Track actions
         if game_state.previous_action:
             self._recent_actions.append(game_state.previous_action)
             # Keep last 20 actions
             if len(self._recent_actions) > 20:
                 self._recent_actions.pop(0)
-    
+
     def _check_infinite_loop(self, game_state: 'GameState') -> Optional[str]:
         """
         Detect infinite loops via repeated no-change states.
-        
+
         Returns random action if loop detected, None otherwise.
         Threshold is configurable via self.thresholds.loop_detection.
         """
@@ -191,14 +192,14 @@ class EmergencyCheck:
             all_actions = [f"ACTION{i}" for i in range(1, 8)]
             recent_set = set(self._recent_actions[-5:]) if self._recent_actions else set()
             available = [a for a in all_actions if a not in recent_set]
-            
+
             if not available:
                 available = all_actions
-            
+
             return random.choice(available)
-        
+
         return None
-    
+
     def _check_frustration(
         self,
         game_state: 'GameState',
@@ -206,12 +207,12 @@ class EmergencyCheck:
     ) -> Optional[str]:
         """
         Check if frustration threshold exceeded.
-        
+
         Uses frustration_detector engine if available.
         Returns exploration action if frustrated, None otherwise.
         """
         frustration_detector = self.engines.get('frustration_detector')
-        
+
         if frustration_detector:
             try:
                 is_frustrated = frustration_detector.is_frustrated(
@@ -220,14 +221,14 @@ class EmergencyCheck:
                     agent_id=agent_context.agent_id,
                     action_count=game_state.action_number,
                 )
-                
+
                 if is_frustrated:
                     # Force exploration - try movement actions
                     exploration_actions = ["ACTION1", "ACTION2", "ACTION3", "ACTION4"]
                     return random.choice(exploration_actions)
             except Exception as e:
                 logger.debug(f"[EMERGENCY] Frustration check failed: {e}")
-        
+
         # Alternative: check action count directly
         if game_state.action_number >= self.thresholds.frustration_override:
             # Check if we're making progress via frame changes
@@ -235,9 +236,9 @@ class EmergencyCheck:
                 # No frame change for many actions - frustrated
                 if self._no_change_count >= 10:
                     return random.choice(["ACTION1", "ACTION2", "ACTION3", "ACTION4"])
-        
+
         return None
-    
+
     def reset(self) -> None:
         """Reset tracking state for new game/level."""
         self._recent_actions.clear()

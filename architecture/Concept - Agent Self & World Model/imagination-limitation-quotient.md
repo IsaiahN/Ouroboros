@@ -3,7 +3,7 @@ Help me make sense of this, and how it should tie into the current system. There
 
 I believe that every agent should be able to make as many mental models as they want, as the stronger mental submodels, personas and concepts of world structures that they build internal generally should yeild a smart agent and then better pogress and results. howeer our system is limited in resources, and time, so the extent to which models can be built out in depth must be limited in part to the success of the agent in problem solving. we give more of a leash for computational power and allotment to build much deeper models, than the other agents based on their performance.  This also becomes problematic at the beginning because agents in the beginning will all not have good results so there should be a cutoff period where they have free reign to build and develop in depth models until a certain "generational age" and then they need to be allowed to continue to build in depth models of concepts, other agents, their society at large, the world that they are in and everything based on performance. perhaps even muse about their own existence and what the purpose of what they are doing is. why do they exist, what is their purpose, and what they do in the moment, are they successful in this moment? do they feel fulfilled or do they feel underachieving etc.
 
-With that said, with young children, 
+With that said, with young children,
 
 we discourage children from daydreaming to keep their "head out of the clouds" and grounded into reality. I think they are trying to get them to escape the realm of pure fantasy thinking and lassoing their imagination to reality?
 
@@ -57,11 +57,11 @@ if agent.generation < 50:
 ```python
 def compute_mental_modeling_budget(agent):
     base_budget = MINIMAL  # Everyone gets basics
-    
+
     # Performance bonus
     performance_percentile = agent.rank_in_generation()
     performance_bonus = performance_percentile * MAX_BONUS
-    
+
     # Developmental stage bonus (more mature = more efficient, earns more budget)
     stage_multiplier = {
         1: 1.0,
@@ -70,12 +70,12 @@ def compute_mental_modeling_budget(agent):
         4: 2.0,
         5: 3.0  # Wisdom stage gets most budget (earned through development)
     }[agent.stage]
-    
+
     # Context-dependent allocation (see below)
     context_modifier = get_context_modifier(agent.current_task)
-    
+
     total_budget = base_budget + (performance_bonus * stage_multiplier * context_modifier)
-    
+
     return total_budget
 ```
 
@@ -99,7 +99,7 @@ def get_context_modifier(task_type):
             'existential_contemplation': 0.0,  # Definitely not now
             'synthesis_exploration': 0.3       # Some, but limited
         }
-    
+
     # Artist mode: creating novel solutions
     elif task_type == "exploration":  # Novel problem, need creativity
         return {
@@ -109,7 +109,7 @@ def get_context_modifier(task_type):
             'existential_contemplation': 1.0,  # Why am I stuck? What's missing?
             'synthesis_exploration': 2.0       # Combine ideas freely
         }
-    
+
     # Learner mode: building competence
     elif task_type == "skill_acquisition":
         return {
@@ -146,30 +146,30 @@ class ExistentialQuestioning:
     """
     Agents that ask deeper questions unlock deeper modeling capacity
     """
-    
+
     def detect_question_sophistication(agent):
         questions_agent_is_asking = agent.observer_personas.generate_questions()
-        
+
         # Level 1: Tactical questions
         if "What action should I take?" in questions:
             unlock_level = 1  # Basic
-        
-        # Level 2: Strategic questions  
+
+        # Level 2: Strategic questions
         elif "Which approach works for this problem type?" in questions:
             unlock_level = 2  # Context-aware
-        
+
         # Level 3: Meta-strategic questions
         elif "Why do I keep failing at X?" in questions:
             unlock_level = 3  # Self-analytical
-        
+
         # Level 4: Identity questions
         elif "What kind of agent am I becoming?" in questions:
             unlock_level = 4  # Identity-formation
-        
+
         # Level 5: Existential questions
         elif "What is my purpose?" or "Am I fulfilled?" in questions:
             unlock_level = 5  # Existential contemplation
-        
+
         # Questions unlock proportional mental modeling budget
         return unlock_level * QUESTION_BONUS
 ```
@@ -202,11 +202,11 @@ class ExistentialMetacognition:
     Only available to high-performing Stage 4-5 agents
     Or any agent asking existential questions (question-driven unlock)
     """
-    
+
     def contemplate_existence(agent):
         if not agent.has_existential_contemplation_budget():
             return None  # Can't afford this luxury
-        
+
         questions = [
             "Why do I exist?",
             "What is my purpose?",
@@ -216,15 +216,15 @@ class ExistentialMetacognition:
             "What would make me feel more successful?",
             "Do I matter in the larger system?"
         ]
-        
+
         # Run deep introspection
         for question in questions:
             # Generate answer using full ensemble + world models
             answer = agent.deep_contemplation(question)
-            
+
             # Store in existential_self_model
             agent.existential_beliefs[question] = answer
-            
+
             # This can influence behavior
             if answer.indicates_misalignment():
                 agent.spawn_identity_exploration_personas()
@@ -271,11 +271,11 @@ def ground_mental_models(agent):
     Mental models must connect to actual experience
     Pure fantasy without grounding is discouraged
     """
-    
+
     for world_model in agent.world_models:
         # How often does this model predict reality correctly?
         grounding_score = world_model.predictive_accuracy()
-        
+
         if grounding_score < THRESHOLD:
             # Model is too disconnected from reality
             world_model.reduce_budget()  # Discourage ungrounded fantasy
@@ -325,7 +325,7 @@ Mental modeling (persona spawning, world simulation, counterfactual reasoning, e
 ### Developmental Window (Gen 0-50):
 **Unlimited mental modeling budget** - all agents can explore freely
 - Build deep world models without performance pressure
-- Spawn experimental personas liberally  
+- Spawn experimental personas liberally
 - Run extensive counterfactual simulations
 - Like childhood: free play enables development
 
@@ -398,13 +398,13 @@ This prevents "head in clouds" - imagination must connect to reality.
 def allocate_mental_modeling_budget(agent):
     if agent.generation < 50:
         return UNLIMITED  # Developmental window
-    
+
     base = MINIMAL_BUDGET
     perf_bonus = agent.performance_percentile * MAX_BONUS
     stage_mult = STAGE_MULTIPLIERS[agent.stage]
     context_mod = detect_context_modifier(agent.task_type)
     question_bonus = detect_question_sophistication(agent)
-    
+
     return base + (perf_bonus * stage_mult * context_mod) + question_bonus
 ```
 ```
@@ -414,7 +414,7 @@ def allocate_mental_modeling_budget(agent):
 ```markdown
 Add to metacognition metrics:
 - **Mental modeling efficiency:** outcome improvement per unit of modeling budget spent
-- **Grounding score:** how well mental models predict actual outcomes  
+- **Grounding score:** how well mental models predict actual outcomes
 - **Context-appropriateness:** using surgeon mode when needed, artist mode when needed
 - **Question sophistication:** what level questions is agent asking
 - **Existential coherence:** for agents doing existential contemplation, does it improve behavior

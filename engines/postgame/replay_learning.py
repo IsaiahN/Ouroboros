@@ -1,4 +1,5 @@
 import os
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 """
@@ -26,8 +27,8 @@ Following Rules:
 
 # Re-export from the full implementation
 from engines.planning.replay_learning_engine import (
-    ReplayLearningEngine,
     ReplayLearningContext,
+    ReplayLearningEngine,
     ReplayPrediction,
 )
 

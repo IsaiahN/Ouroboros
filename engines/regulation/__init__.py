@@ -2,7 +2,11 @@
 """Regulation engines - frustration detection, budgets, signals, and exploration tracking."""
 
 from engines.regulation.frustration_detector import FrustrationDetector
-from engines.regulation.imagination_budget import ImaginationBudgetManager, compute_mental_modeling_budget
+from engines.regulation.imagination_budget import (
+    ImaginationBudgetManager,
+    compute_mental_modeling_budget,
+)
+
 
 def get_regulatory_signal_engine():
     from engines.regulation.regulatory_signal_engine import RegulatorySignalEngine

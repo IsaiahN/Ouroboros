@@ -317,7 +317,7 @@ Babies don't process everything equally—they have built-in attention biases th
 What objects are FOR—can't act without understanding purpose.
 
 - **is_movable**: Can be pushed or pulled
-- **is_container**: Holds other objects  
+- **is_container**: Holds other objects
 - **is_obstacle**: Blocks movement
 - **is_interactive**: Responds to actions
 - **is_reference**: **CRITICAL** - Object encodes rules about others (templates, schemas, legends, keys—not instances). The FT09 lesson learned.
@@ -524,11 +524,11 @@ Which prior was violated?
 IF violates solidity_bias:
     hypothesis = "Objects can pass through each other here"
     → Test teleportation or portal mechanics
-    
+
 IF violates contingency_bias:
     hypothesis = "My actions have delayed effects"
     → Test temporal dependencies
-    
+
 IF violates reference_object_affordance:
     hypothesis = "This object defines rules for others"
     → Test template or mapping mechanics
@@ -752,7 +752,7 @@ detect_interactive_motion:
     Step 3: filter(objects, is_interactive) → list of interactive moving objects
     Step 4: map(objects, get_object_movement) → list of directions
     Step 5: max(directions, key=frequency) → dominant movement direction
-    
+
 Result: "Most common direction of interactive moving objects"
 Use case: Detect which way controllable objects are drifting
 ```
@@ -826,7 +826,7 @@ Generation N+1 starts with expanded vocabulary:
     - All previous primitives PLUS
     - Newly unlocked primitives PLUS
     - Novel primitives registered
-    
+
 Repeat forever (or until AGI achieved)
 ```
 
@@ -1207,7 +1207,7 @@ DISCOVERY (what system LEARNS)
 Operator: frame_differ
     detect_change(get_previous_frame(), get_frame())
     Result: List of changed pixel positions
-    
+
 moving_objects = detect_motion(get_previous_frame(), get_frame())
     Result: List of moving object IDs
 ```
@@ -1981,11 +1981,11 @@ Encounter unknown game:
         If significant improvement:
             Formalize primitive
             Add to primitive library
-            
+
             Meta-step: WHY did this work?
             Analyze utility pattern
             Add to discovery strategies
-            
+
             Retry with new primitive
 ```
 
@@ -2149,7 +2149,7 @@ UNDERSTANDING = (Innate Primitives)
               × (Generalization)
               × (Meta-Representation)
               × (Self-Extension)
-              
+
 WHERE each factor AMPLIFIES the others through feedback
 ```
 

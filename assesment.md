@@ -29,16 +29,16 @@ SEED_PRIMITIVES = {
     'detect_change': "Flag regions that differ from previous frame",
     'detect_motion': "Flag objects that change position",
     'action_contingency': "Does my action correlate with this event?",
-    
+
     # Affordances (what objects are FOR)
     'is_movable': "Can I move this?",
     'is_container': "Can this hold things?",
     'is_reference': "Does this define rules for others?",  # Critical for FT09
-    
+
     # Negative space (absences matter)
     'detect_hole': "Empty regions bounded by objects",
     'detect_open_edge': "Boundaries with missing walls",  # Critical for SP80
-    
+
     # Metacognition (know what you know)
     'get_confidence': "How certain am I?",
     'detect_stuck': "Am I making progress?",
@@ -159,10 +159,10 @@ class OracleInterface:
     - Oracle responds asynchronously
     - System unlocks or registers novel primitive
     """
-    
+
     def query_primitive_match(self, discovered_operator):
         """Check if discovered pattern matches locked primitive"""
-        
+
     def register_novel_primitive(self, operator):
         """Add to knowledge base as novel discovery"""
 ```
@@ -280,7 +280,7 @@ Your system can discover operators, but **cannot discover how to discover operat
 
 Progress.md line 22-32 shows three click types:
 1. SELF_TOGGLE
-2. TRIGGER  
+2. TRIGGER
 3. SELECTABLE
 
 **Missing**:
@@ -401,10 +401,10 @@ Your tests (line 3401-3408) verify:
 ```python
 def test_primitive_unlock_on_discovery():
     """System discovers symmetry pattern → unlocks detect_symmetry()"""
-    
+
 def test_novel_primitive_registration():
     """System discovers unknown pattern → registers as novel"""
-    
+
 def test_concept_emergence():
     """System solves 3 containment problems → concept 'containment' emerges"""
 ```
@@ -532,7 +532,7 @@ Run evolution, see if SP80 Level 2 success rate improves. If yes, you've validat
 
 **What you've built**: Strong infrastructure (CODS operators, cognitive stages, viral packages, self-model)
 
-**What's missing**: 
+**What's missing**:
 1. Baby primitives foundation
 2. Primitive unlock mechanism
 3. Concept discovery layer
