@@ -199,6 +199,11 @@ class DecisionContext:
             'checkpoint_sequence': self.checkpoint_sequence,
             'checkpoint_position': self.checkpoint_position,
 
+            # Active sequence aliases (used by CONTEXT_ADAPTIVE strategy selection)
+            # Maps checkpoint -> active_sequence for unified handling
+            'active_sequence': self.checkpoint_sequence,
+            'sequence_position': self.checkpoint_position,
+
             # Flags
             'is_stuck': self.is_stuck,
             'is_oscillating': self.is_oscillating,
@@ -229,6 +234,7 @@ class ContextBuilder:
     - Recent actions history
     - Exploration stats
     - CODS context
+    - Frontier checkpoint replay state with divergence detection
     """
 
     def __init__(
@@ -256,6 +262,16 @@ class ContextBuilder:
         self._visited_positions: Set[Tuple[int, int]] = set()
         self._death_count = 0
         self._current_game_id: Optional[str] = None
+
+        # Frontier checkpoint replay state
+        self._checkpoint_sequence: Optional[List[str]] = None
+        self._checkpoint_position: int = 0
+        self._checkpoint_level: Optional[int] = None  # Track which level checkpoint is for
+
+        # Divergence detection state
+        self._checkpoint_expected_frames: int = 0  # Expected unique frames from checkpoint
+        self._checkpoint_frames_seen: Set[str] = set()  # Frame hashes seen during replay
+        self._checkpoint_divergence_checked: bool = False  # Only check once at midpoint
 
     def build(
         self,
@@ -357,6 +373,10 @@ class ContextBuilder:
             sequence_step=seq_step,
             sequence_length=seq_length,
 
+            # Frontier checkpoint (for CONTEXT_ADAPTIVE strategy transition)
+            checkpoint_sequence=self._checkpoint_sequence,
+            checkpoint_position=self._checkpoint_position,
+
             # Flags
             is_stuck=self._detect_stuck(),
             is_oscillating=self._detect_oscillation(),
@@ -367,13 +387,14 @@ class ContextBuilder:
             frame_height=frame_height,
         )
 
-    def update(self, action: str, outcome: ActionOutcome) -> None:
+    def update(self, action: str, outcome: ActionOutcome, decision_metadata: Optional[Dict[str, Any]] = None) -> None:
         """
         Update internal state after an action.
 
         Args:
             action: The action name that was taken
             outcome: The outcome of the action
+            decision_metadata: Optional metadata from the decision system (contains checkpoint info)
         """
         # Track action
         self._recent_actions.append(action)
@@ -408,9 +429,166 @@ class ContextBuilder:
         if len(self._position_history) > 100:
             self._position_history = self._position_history[-100:]
 
-        # Track deaths
+        # Track deaths - also clears checkpoint on death
         if outcome.is_death:
             self._death_count += 1
+            self._clear_checkpoint()
+
+        # Handle checkpoint state from decision metadata
+        if decision_metadata:
+            self._handle_checkpoint_metadata(decision_metadata)
+
+        # Advance checkpoint position if we're replaying
+        if self._checkpoint_sequence is not None:
+            # Track frame for divergence detection
+            if outcome.frame_after:
+                frame_hash = self._compute_frame_hash(outcome.frame_after)
+                self._track_frame_for_divergence(frame_hash)
+
+            # Check for divergence at midpoint
+            if self._check_checkpoint_divergence():
+                # Checkpoint has diverged - bail early and switch to WEIGHTED
+                self._clear_checkpoint()
+            else:
+                self._checkpoint_position += 1
+                # Check if we've exhausted the checkpoint
+                if self._checkpoint_position >= len(self._checkpoint_sequence):
+                    # Checkpoint exhausted - will fall through to WEIGHTED on next decision
+                    # Keep the sequence for one more cycle so strategy can detect the transition
+                    pass
+
+    def _handle_checkpoint_metadata(self, metadata: Dict[str, Any]) -> None:
+        """
+        Handle checkpoint-related metadata from decision system.
+
+        When FrontierCheckpointRung loads a checkpoint, it returns metadata with:
+        - checkpoint_loaded: True
+        - checkpoint_data: {'action_sequence': [...], 'unique_frames_seen': N, ...}
+
+        This captures that data for subsequent context builds and divergence detection.
+        """
+        if metadata.get('checkpoint_loaded') and metadata.get('checkpoint_data'):
+            checkpoint_data = metadata['checkpoint_data']
+            sequence = checkpoint_data.get('action_sequence', [])
+            if sequence:
+                self._checkpoint_sequence = sequence
+                self._checkpoint_position = 0  # Will be incremented after this action
+                # Capture expected frames for divergence detection
+                self._checkpoint_expected_frames = checkpoint_data.get('unique_frames_seen', 0)
+                self._checkpoint_frames_seen = set()  # Reset frame tracking
+                self._checkpoint_divergence_checked = False
+
+    def _track_frame_for_divergence(self, frame_hash: str) -> None:
+        """Track a frame hash during checkpoint replay for divergence detection."""
+        if self._checkpoint_sequence is not None and frame_hash:
+            self._checkpoint_frames_seen.add(frame_hash)
+
+    def _check_checkpoint_divergence(self) -> bool:
+        """
+        Check if checkpoint replay has diverged from expected trajectory.
+
+        Called at ~50% through the checkpoint. If unique_frames_seen is
+        significantly below expected, the game state has diverged and we
+        should bail early to avoid wasting actions.
+
+        Returns:
+            True if diverged (should clear checkpoint), False if on track
+        """
+        if self._checkpoint_sequence is None:
+            return False
+
+        if self._checkpoint_divergence_checked:
+            return False  # Only check once
+
+        seq_len = len(self._checkpoint_sequence)
+        midpoint = seq_len // 2
+
+        # Only check at or after midpoint
+        if self._checkpoint_position < midpoint:
+            return False
+
+        self._checkpoint_divergence_checked = True
+
+        # If no expected frames recorded, skip check
+        if self._checkpoint_expected_frames <= 0:
+            return False
+
+        # Calculate expected frames at this point (proportional)
+        progress_ratio = self._checkpoint_position / seq_len
+        expected_at_this_point = int(self._checkpoint_expected_frames * progress_ratio)
+
+        # Allow 30% tolerance - if we're seeing <70% of expected frames, bail
+        threshold = expected_at_this_point * 0.7
+        actual_frames = len(self._checkpoint_frames_seen)
+
+        if actual_frames < threshold and expected_at_this_point >= 3:
+            # Diverged - not seeing enough unique frames
+            # Minimum 3 expected frames to trigger (avoid false positives on short checkpoints)
+            return True
+
+        return False
+
+    def set_checkpoint(self, sequence: List[str], level: int) -> None:
+        """
+        Explicitly set a checkpoint sequence for replay.
+
+        Args:
+            sequence: List of action names to replay
+            level: The level this checkpoint is for
+        """
+        self._checkpoint_sequence = sequence
+        self._checkpoint_position = 0
+        self._checkpoint_level = level
+        self._checkpoint_expected_frames = 0
+        self._checkpoint_frames_seen = set()
+        self._checkpoint_divergence_checked = False
+
+    def _clear_checkpoint(self) -> None:
+        """Clear checkpoint state (on death, level change, divergence, or exhaustion)."""
+        self._checkpoint_sequence = None
+        self._checkpoint_position = 0
+        self._checkpoint_level = None
+        self._checkpoint_expected_frames = 0
+        self._checkpoint_frames_seen = set()
+        self._checkpoint_divergence_checked = False
+
+    def _compute_frame_hash(self, frame: Optional[List[List[int]]]) -> str:
+        """
+        Compute a hash of a frame for divergence detection.
+
+        Args:
+            frame: 2D grid of integers
+
+        Returns:
+            Hash string, or empty string if frame is None
+        """
+        if not frame:
+            return ""
+        try:
+            import hashlib
+
+            # Flatten and convert to bytes
+            flat = []
+            for row in frame:
+                for cell in row:
+                    # Handle both scalar and array values
+                    if hasattr(cell, '__iter__') and not isinstance(cell, (str, bytes)):
+                        flat.extend(cell)
+                    else:
+                        flat.append(int(cell))
+            data = bytes(flat)
+            return hashlib.md5(data).hexdigest()[:12]
+        except Exception:
+            return ""
+
+    def on_level_change(self, new_level: int) -> None:
+        """
+        Handle level transition.
+
+        Clears checkpoint if it was for a different level.
+        """
+        if self._checkpoint_level is not None and self._checkpoint_level != new_level:
+            self._clear_checkpoint()
 
     def reset(self, game_id: str) -> None:
         """
@@ -425,6 +603,7 @@ class ContextBuilder:
         self._position_history.clear()
         self._visited_positions.clear()
         self._death_count = 0
+        self._clear_checkpoint()  # Clear checkpoint on game reset
 
     def _determine_phase(self, budget_used_percent: float) -> str:
         """Determine the current game phase based on budget usage."""

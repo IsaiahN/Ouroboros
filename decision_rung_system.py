@@ -109,6 +109,7 @@ class DecisionStrategy(Enum):
     WEIGHTED = "weighted"       # All rungs vote, weighted sum
     PHASED = "phased"           # Different ordering by phase
     PARALLEL = "parallel"       # Run all, pick highest confidence
+    CONTEXT_ADAPTIVE = "context_adaptive"  # Select strategy based on context (frontier/replay/optimization)
 
 
 @dataclass
@@ -2444,16 +2445,22 @@ class DecisionRungSystem:
     }
 
     def __init__(self,
-                 strategy: str = 'ladder',
+                 strategy: str = 'context_adaptive',
                  core_gameplay_ref: Any = None,
                  config_path: Optional[str] = None,
                  engine_registry: Optional["EngineRegistry"] = None):
         """
         Args:
-            strategy: 'ladder', 'weighted', 'phased', or 'parallel'
+            strategy: 'ladder', 'weighted', 'phased', 'parallel', or 'context_adaptive' (default)
             core_gameplay_ref: Reference to CoreGameplay instance (legacy)
             config_path: Optional path to custom ordering config
             engine_registry: EngineRegistry for modular engine access (preferred)
+
+        Note: CONTEXT_ADAPTIVE is recommended - it selects strategy based on game context:
+        - replay_mode (following winning sequence): LADDER - deterministic replay
+        - frontier_mode (unbeaten level): WEIGHTED - all rungs vote
+        - optimization_mode (refining beaten game): WEIGHTED - find improvements
+        - Emergency rungs (loop_breaker, oscillation) always checked first with LADDER semantics
         """
         self.strategy = DecisionStrategy(strategy)
         self.core: Any = core_gameplay_ref
@@ -2465,6 +2472,9 @@ class DecisionRungSystem:
         # Stats
         self.total_decisions = 0
         self.rung_wins: Dict[str, int] = {}
+
+        # Last decision metadata (for checkpoint handoff to context builder)
+        self.last_decision_metadata: Dict[str, Any] = {}
 
         # Load default ordering
         self.load_ordering('efficiency')
@@ -2564,12 +2574,15 @@ class DecisionRungSystem:
             return self._decide_phased(game_state, context)
         elif self.strategy == DecisionStrategy.PARALLEL:
             return self._decide_parallel(game_state, context)
+        elif self.strategy == DecisionStrategy.CONTEXT_ADAPTIVE:
+            return self._decide_context_adaptive(game_state, context)
         else:
             return self._decide_ladder(game_state, context)
 
     def _decide_ladder(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
         """First confident answer wins"""
         accumulated_weights: Dict[str, float] = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+        self.last_decision_metadata = {}  # Reset metadata
 
         for rung in self.rungs:
             if not rung.enabled:
@@ -2586,6 +2599,8 @@ class DecisionRungSystem:
             if result.has_suggestion(rung.confidence_threshold):
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
                 rung.record_outcome(was_accepted=True)
+                # Capture metadata for checkpoint handoff
+                self.last_decision_metadata = result.metadata or {}
                 return result.action or 'ACTION1', f"[{rung.name}] {result.reason}"
 
         # No confident answer - use accumulated weights for fallback
@@ -2595,6 +2610,7 @@ class DecisionRungSystem:
         """All rungs vote, weighted sum decides"""
         action_votes: Dict[str, float] = {f'ACTION{i}': 0.0 for i in range(1, 8)}
         reasons: List[str] = []
+        self.last_decision_metadata = {}  # Reset metadata
 
         for rung in self.rungs:
             if not rung.enabled:
@@ -2667,6 +2683,193 @@ class DecisionRungSystem:
             if r <= cumulative:
                 return action
         return 'ACTION1'
+
+    # =========================================================================
+    # EMERGENCY RUNGS - Always checked first regardless of strategy
+    # =========================================================================
+    EMERGENCY_RUNG_NAMES = frozenset({
+        'infinite_loop_breaker',
+        'coordinate_oscillation',
+    })
+
+    def _decide_context_adaptive(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
+        """
+        Context-dependent strategy selection.
+
+        This addresses the "early exit problem" identified in architecture review:
+        - LADDER strategy discards accumulated weights when a suggestion fires
+        - On frontier levels, we want ALL rungs to vote (WEIGHTED)
+        - On replay/optimization, we want deterministic sequence following (LADDER)
+        - Emergency rungs (loop_breaker, oscillation) ALWAYS get LADDER priority
+
+        Strategy selection:
+        - replay_mode (following winning sequence): LADDER - deterministic replay
+        - frontier_mode (unbeaten level): WEIGHTED - all rungs vote
+        - optimization_mode (refining beaten game): WEIGHTED - find improvements
+        - default: LADDER for backwards compatibility
+        """
+        # Phase 1: ALWAYS check emergency rungs first (LADDER-style)
+        emergency_result = self._check_emergency_rungs(game_state, context)
+        if emergency_result is not None:
+            return emergency_result
+
+        # Phase 2: Determine effective strategy from context
+        effective_strategy = self._select_effective_strategy(context)
+
+        # Phase 3: Execute with effective strategy
+        if effective_strategy == 'weighted':
+            return self._decide_weighted_non_emergency(game_state, context)
+        else:
+            return self._decide_ladder_non_emergency(game_state, context)
+
+    def _check_emergency_rungs(self, game_state: Any, context: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+        """
+        Check emergency rungs with LADDER semantics (first confident answer wins).
+        Returns None if no emergency action needed.
+        """
+        for rung in self.rungs:
+            if not rung.enabled:
+                continue
+            if rung.name not in self.EMERGENCY_RUNG_NAMES:
+                continue
+
+            result = rung.evaluate(game_state, context)
+
+            if result.has_suggestion(rung.confidence_threshold):
+                self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
+                rung.record_outcome(was_accepted=True)
+                return result.action or 'ACTION1', f"[EMERGENCY:{rung.name}] {result.reason}"
+
+        return None
+
+    def _select_effective_strategy(self, context: Dict[str, Any]) -> str:
+        """
+        Select effective strategy based on context.
+
+        Returns:
+            'weighted' or 'ladder'
+        """
+        # Explicit replay mode: use LADDER for deterministic sequence following
+        replay_mode = context.get('replay_mode', False)
+        active_sequence = context.get('active_sequence')
+        sequence_position = context.get('sequence_position', 0)
+
+        # Check if we're actively replaying (have sequence AND haven't exhausted it)
+        # This handles the frontier checkpoint edge case: once we exhaust the checkpoint
+        # prefix, we switch to WEIGHTED for the exploration-beyond-checkpoint phase
+        if replay_mode:
+            return 'ladder'
+        if active_sequence and sequence_position < len(active_sequence):
+            return 'ladder'
+
+        # Frontier mode (unbeaten level): use WEIGHTED so all rungs contribute
+        frontier_mode = context.get('frontier_mode', False)
+        if frontier_mode:
+            return 'weighted'
+
+        # Optimization mode (refining beaten game): use WEIGHTED to find improvements
+        optimization_mode = context.get('optimization_mode', False)
+        if optimization_mode:
+            return 'weighted'
+
+        # Check game state - if no winning sequence exists, treat as frontier
+        game_state_mode = context.get('game_state_mode', 'unknown')
+        if game_state_mode == 'exploration':
+            return 'weighted'
+
+        # Beaten level but not in explicit replay or optimization mode:
+        # Use WEIGHTED to allow for improvement discovery
+        # (This addresses Edge Case 2: agent learning a beaten level fresh)
+        has_winning_sequence = context.get('has_winning_sequence', False)
+        if has_winning_sequence and not active_sequence:
+            return 'weighted'
+
+        # Default: LADDER for backwards compatibility
+        return 'ladder'
+
+    def _decide_weighted_non_emergency(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
+        """
+        WEIGHTED strategy excluding emergency rungs (already checked).
+        All non-emergency rungs vote, weighted sum decides.
+        """
+        action_votes: Dict[str, float] = {f'ACTION{i}': 0.0 for i in range(1, 8)}
+        accumulated_weights: Dict[str, float] = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+        reasons: List[str] = []
+
+        for rung in self.rungs:
+            if not rung.enabled:
+                continue
+            # Skip emergency rungs - already checked
+            if rung.name in self.EMERGENCY_RUNG_NAMES:
+                continue
+
+            result = rung.evaluate(game_state, context)
+
+            # Accumulate filter weights (multiplicative)
+            if result.weights:
+                for action, weight in result.weights.items():
+                    accumulated_weights[action] = accumulated_weights.get(action, 1.0) * weight
+
+            # Add suggestion votes (additive, weighted by confidence and priority)
+            if result.action:
+                # Weight by confidence and rung priority (lower priority = higher weight)
+                weight = result.confidence * (100 - rung.get_priority()) / 100
+                action_votes[result.action] = action_votes.get(result.action, 0) + weight
+                reasons.append(f"{rung.name}:{result.action}({weight:.2f})")
+
+        # Combine: multiply votes by accumulated filter weights
+        final_scores: Dict[str, float] = {}
+        for action in action_votes:
+            # Base vote + small boost from filter weights
+            vote = action_votes[action]
+            filter_weight = accumulated_weights.get(action, 1.0)
+            # Filter weights modify the final score
+            # If filter_weight < 1.0, action is penalized (e.g., death avoidance)
+            # If filter_weight > 1.0, action is boosted
+            final_scores[action] = (vote + 0.1) * filter_weight  # +0.1 ensures all actions have some chance
+
+        # Pick highest scored action
+        best_action = max(final_scores, key=lambda k: final_scores[k])
+        best_score = final_scores[best_action]
+
+        # If best score is very low, fall back to weighted random
+        if best_score < 0.15:
+            return self._weighted_random_choice(accumulated_weights), "Weighted random (low confidence)"
+
+        top_contributors = ', '.join(reasons[:3]) if reasons else 'filters only'
+        return best_action, f"[WEIGHTED] {best_action} ({best_score:.2f}) from [{top_contributors}]"
+
+    def _decide_ladder_non_emergency(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
+        """
+        LADDER strategy excluding emergency rungs (already checked).
+        First confident non-emergency answer wins.
+        """
+        accumulated_weights: Dict[str, float] = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+
+        for rung in self.rungs:
+            if not rung.enabled:
+                continue
+            # Skip emergency rungs - already checked
+            if rung.name in self.EMERGENCY_RUNG_NAMES:
+                continue
+
+            result = rung.evaluate(game_state, context)
+
+            # Accumulate weights from filter rungs
+            if result.weights:
+                for action, weight in result.weights.items():
+                    accumulated_weights[action] = accumulated_weights.get(action, 1.0) * weight
+
+            # Check if this rung has a confident suggestion
+            if result.has_suggestion(rung.confidence_threshold):
+                self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
+                rung.record_outcome(was_accepted=True)
+                # Capture metadata for checkpoint handoff
+                self.last_decision_metadata = result.metadata or {}
+                return result.action or 'ACTION1', f"[{rung.name}] {result.reason}"
+
+        # No confident answer - use accumulated weights for fallback
+        return self._weighted_random_choice(accumulated_weights), "Weighted fallback after ladder"
 
     def get_stats(self) -> Dict[str, Any]:
         """Get decision statistics"""

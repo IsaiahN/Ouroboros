@@ -1,7 +1,7 @@
 # Frontier Checkpoint System
-**Version**: 1.4
+**Version**: 1.5
 **Date**: February 1, 2026
-**Status**: IMPLEMENTED
+**Status**: FULLY WIRED
 **Purpose**: Constructive pathfinding for hard frontier levels through incremental progress tracking + network-level topology aggregation
 
 ---
@@ -18,6 +18,67 @@
 | Audit Tool | DONE | `manual_tools/audit_data_usage.py` |
 | **Network Topology** | **DONE** | `decision_rung_system.py:FrontierTopologyRung` |
 | **Prior Lessons Rung** | **DONE** | `decision_rung_system.py:PriorLessonsRung` |
+| **Checkpoint State Tracking** | **DONE** | `context_builder.py:_checkpoint_sequence/_checkpoint_position` |
+| **Metadata Handoff** | **DONE** | `decision_rung_system.py:last_decision_metadata` → `game_loop.py` → `context_builder.py` |
+| **Strategy Transition** | **DONE** | `decision_rung_system.py:_select_effective_strategy()` |
+| **Divergence Detection** | **DONE** | `context_builder.py:_check_checkpoint_divergence()` |
+
+### Checkpoint Replay Flow (Wired 2026-02-01)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    FRONTIER CHECKPOINT REPLAY FLOW                       │
+│                                                                          │
+│  1. FrontierCheckpointRung queries DB for best checkpoint               │
+│     └─► Returns first action + metadata: {checkpoint_loaded: True, ...} │
+│     └─► Metadata includes unique_frames_seen for divergence detection   │
+│                                                                          │
+│  2. DecisionRungSystem stores metadata in last_decision_metadata        │
+│                                                                          │
+│  3. GameLoop passes metadata to ContextBuilder.update()                 │
+│     └─► _handle_checkpoint_metadata() captures sequence + expected      │
+│     └─► _checkpoint_sequence set, _checkpoint_position = 0              │
+│     └─► _checkpoint_expected_frames = unique_frames_seen from metadata  │
+│                                                                          │
+│  4. During replay: _track_frame_for_divergence() tracks unique frames   │
+│     └─► At ~50% through checkpoint: _check_checkpoint_divergence()      │
+│     └─► If actual frames < 70% of expected → checkpoint is STALE        │
+│     └─► _clear_checkpoint() called, falls through to WEIGHTED explore   │
+│                                                                          │
+│  5. Subsequent builds include active_sequence/sequence_position aliases │
+│     └─► CONTEXT_ADAPTIVE sees sequence_position < len → LADDER          │
+│     └─► Deterministic replay of checkpoint prefix                       │
+│                                                                          │
+│  6. When sequence_position >= len(sequence):                            │
+│     └─► CONTEXT_ADAPTIVE sees frontier_mode → WEIGHTED                  │
+│     └─► Exploration phase begins with all rungs voting                  │
+│                                                                          │
+│  7. On death: _clear_checkpoint() resets state                          │
+│  8. On level change: on_level_change() clears if different level        │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Divergence Detection (Added 2026-02-01)
+
+**Problem**: Checkpoints can become stale when game dynamics evolve (e.g., enemy patterns differ between runs). Replaying a stale checkpoint wastes the full action budget before discovering divergence at the terminal state.
+
+**Solution**: Track unique frames seen during replay and compare to expected frames at midpoint:
+
+```python
+# At checkpoint load:
+expected_frames = checkpoint_metadata.get("unique_frames_seen", 0)
+
+# During replay, track each frame:
+frame_hash = _compute_frame_hash(current_frame)
+_checkpoint_frames_seen.add(frame_hash)
+
+# At ~50% through checkpoint:
+if len(_checkpoint_frames_seen) < expected_frames * 0.7:
+    # Divergence detected - checkpoint is stale
+    _clear_checkpoint()  # Falls through to WEIGHTED exploration
+```
+
+**Threshold**: 70% of expected unique frames at midpoint. This catches major divergences early while allowing minor variations.
 
 ### Network-Level Topology (Added 2026-02-01)
 

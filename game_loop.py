@@ -27,7 +27,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from arcengine import GameAction, GameState
 
@@ -247,8 +247,11 @@ class GameLoop:
         # Track outcome
         self._tracker.add(outcome)
 
-        # Update context builder
-        self._context_builder.update(action.name, outcome)
+        # Get decision metadata for checkpoint handoff
+        decision_metadata = self._get_decision_metadata()
+
+        # Update context builder (with decision metadata for checkpoint tracking)
+        self._context_builder.update(action.name, outcome, decision_metadata)
 
         # Update learning systems
         self._learning.update(state, action, outcome)
@@ -258,6 +261,12 @@ class GameLoop:
 
         self._action_count += 1
         self._action_sequence.append(action.name)
+
+    def _get_decision_metadata(self) -> Optional[Dict[str, Any]]:
+        """Get metadata from the last decision (for checkpoint handoff)."""
+        if hasattr(self._decision_system, 'last_decision_metadata'):
+            return self._decision_system.last_decision_metadata
+        return None
 
     def _build_loop_state(self) -> LoopState:
         """Build the current loop state."""
@@ -384,6 +393,10 @@ class GameLoop:
 
     def _handle_level_complete(self) -> None:
         """Handle level completion transition."""
+        # Notify context builder of level change (clears checkpoint if needed)
+        new_level = self._current_level + 1
+        self._context_builder.on_level_change(new_level)
+
         # For now, just return to playing
         # In full implementation, might reset self-model, update exploration, etc.
         self._phase = LoopPhase.PLAYING
