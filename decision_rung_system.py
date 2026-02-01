@@ -56,7 +56,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 # Set up logging with database support (Rule 2) + console output
 # setup_database_logging configures root logger with both handlers
@@ -934,7 +934,7 @@ class FrontierTopologyRung(DecisionRung):
 
             # Initialize weights with EXPLORATION BONUS for untried actions
             weights = {f'ACTION{i}': 1.5 for i in range(1, 8)}  # Start high - untried = bonus!
-            tried_actions = set()
+            tried_actions: Set[str] = set()
             total_data_points = 0
             best_action = None
             best_score = -999
@@ -942,7 +942,7 @@ class FrontierTopologyRung(DecisionRung):
             # Provenance tracking
             total_positive = 0
             total_negative = 0
-            unique_sessions = set()
+            unique_sessions: Set[int] = set()
             first_seen = None
             last_seen = None
 
@@ -1281,6 +1281,16 @@ class FrontierCheckpointRung(DecisionRung):
         super().__init__(*args, **kwargs)
         self._cached_checkpoint: Optional[Dict[str, Any]] = None
         self._cache_key: Optional[Tuple[str, int]] = None
+        self._db: Any = None  # Lazy-loaded database interface
+
+    def _get_db(self) -> Any:
+        """Get database interface, lazy-loading if needed."""
+        if self._db is None and self.engines:
+            try:
+                self._db = self.engines._get_db_interface()
+            except Exception:
+                pass
+        return self._db
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         try:
@@ -1308,7 +1318,8 @@ class FrontierCheckpointRung(DecisionRung):
                 )
 
             # If no active checkpoint, try to load one from database
-            if checkpoint_sequence is None and self._db is not None:
+            db = self._get_db()
+            if checkpoint_sequence is None and db is not None:
                 game_type = context.get('game_type', '')
                 level = context.get('level', 1)
 
@@ -1341,11 +1352,12 @@ class FrontierCheckpointRung(DecisionRung):
 
     def _query_best_checkpoint(self, game_type: str, level: int) -> Optional[Dict[str, Any]]:
         """Query database for best checkpoint for this game_type/level."""
-        if self._db is None:
+        db = self._get_db()
+        if db is None:
             return None
 
         try:
-            result = self._db.execute_query("""
+            result: List[Dict[str, Any]] = db.execute_query("""
                 SELECT action_sequence, actions_count, survival_score,
                        unique_frames_seen, terminal_frame_hash
                 FROM frontier_checkpoints
@@ -1356,14 +1368,13 @@ class FrontierCheckpointRung(DecisionRung):
 
             if result and len(result) > 0:
                 row = result[0]
-                import json
-                action_sequence = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                action_sequence: Any = json.loads(row.get('action_sequence', '[]')) if isinstance(row.get('action_sequence'), str) else row.get('action_sequence', [])
                 return {
                     'action_sequence': action_sequence,
-                    'actions_count': row[1],
-                    'survival_score': row[2],
-                    'unique_frames_seen': row[3],
-                    'terminal_frame_hash': row[4],
+                    'actions_count': row.get('actions_count', 0),
+                    'survival_score': row.get('survival_score', 0),
+                    'unique_frames_seen': row.get('unique_frames_seen', 0),
+                    'terminal_frame_hash': row.get('terminal_frame_hash'),
                 }
         except Exception as e:
             logger.debug(f"[FRONTIER-CHECKPOINT] Query failed: {e}")

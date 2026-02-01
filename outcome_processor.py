@@ -275,7 +275,7 @@ class OutcomeProcessor:
                     pass
 
             # Build trace data
-            trace_data = {
+            trace_data: Dict[str, Any] = {
                 'session_id': self._session_id,
                 'game_id': before_state.game_id,
                 'action_number': action_number,
@@ -300,7 +300,7 @@ class OutcomeProcessor:
             # Call save_action_trace which will compute frame_hash
             self._db.save_action_trace(trace_data)
 
-        except Exception as e:
+        except Exception:  # noqa: Telemetry failure is acceptable
             # Log but don't fail the game loop
             # Per Rule 2: use database logging, but we don't want to import that here
             # Silent failure is acceptable for telemetry

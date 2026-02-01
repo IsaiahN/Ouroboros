@@ -682,7 +682,7 @@ class MortalityState:
         if self.death_persona_active and self.death_persona:
             self.death_persona.record_contribution()
 
-    def get_death_summary(self) -> Dict[str, any]:
+    def get_death_summary(self) -> Dict[str, Any]:
         """Get a summary of the agent's mortality state for logging/analysis."""
         return {
             'agent_id': self.agent_id,

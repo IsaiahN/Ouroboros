@@ -34,7 +34,7 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from arcengine import GameAction, GameState
 
@@ -140,7 +140,7 @@ class LearningSystems:
 
         # Frontier checkpoint tracking (per-level)
         self._level_action_sequence: List[str] = []
-        self._unique_frame_hashes: set = set()
+        self._unique_frame_hashes: Set[str] = set()
         self._current_level: int = 1
 
         # Movement observations for self-model
@@ -804,8 +804,7 @@ class LearningSystems:
                 unique_frames,
                 survival_score,
             ))
-        except Exception as e:
-            # Silently fail - checkpoint saving is optimization, not critical
+        except Exception:  # noqa: checkpoint saving is optimization, not critical
             pass
 
 

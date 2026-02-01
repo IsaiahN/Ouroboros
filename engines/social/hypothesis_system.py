@@ -19,7 +19,7 @@ Also includes Mortality Awareness features:
 
 import json
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 if TYPE_CHECKING:
     from database_interface import DatabaseInterface
@@ -315,7 +315,7 @@ class AgentHypothesisSystem:
                     confidence_after=new_confidence,
                 )
         except Exception as e:
-            log_silent_failure(logger, "hypothesis_event_logging", e, {"hypothesis_id": hypothesis_id})
+            log_silent_failure("hypothesis_system", "hypothesis_event_logging", e, hypothesis_id=hypothesis_id)
 
         self.db.execute_query(f"""
             UPDATE agent_hypotheses
@@ -665,7 +665,7 @@ class AgentHypothesisSystem:
                     })
 
         # Deduplicate and sort by confidence
-        seen: set = set()
+        seen: Set[str] = set()
         unique: List[Dict[str, Any]] = []
         for m in matches:
             if m['hypothesis_id'] not in seen:
@@ -903,7 +903,7 @@ class AgentHypothesisSystem:
                 memento['ancestors_words'] = [r['summary'] for r in result]
 
         except Exception as e:
-            log_silent_failure(logger, "ancestor_words_retrieval", e, {"agent_id": agent_id})
+            log_silent_failure("hypothesis_system", "ancestor_words_retrieval", e, agent_id=agent_id)
 
         return memento
 

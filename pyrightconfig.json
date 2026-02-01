@@ -1,0 +1,29 @@
+{
+  "include": [
+    "*.py",
+    "engines/**/*.py",
+    "models/**/*.py",
+    "tools/**/*.py",
+    "tests/**/*.py"
+  ],
+  "exclude": [
+    "deprecated/**",
+    ".venv/**",
+    "**/__pycache__"
+  ],
+  "reportPrivateUsage": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownParameterType": "none",
+  "reportMissingTypeArgument": "none",
+  "reportGeneralTypeIssues": "warning",
+  "reportOptionalMemberAccess": "warning",
+  "reportOptionalSubscript": "warning",
+  "reportAttributeAccessIssue": "none",
+  "reportCallIssue": "none",
+  "reportIndexIssue": "none",
+  "reportReturnType": "none",
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "off"
+}

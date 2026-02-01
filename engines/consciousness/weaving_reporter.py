@@ -30,12 +30,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Check IThread availability at module level
-ITHREAD_AVAILABLE = False
+_ithread_available = False
 IThread = None
 try:
     from engines.consciousness.i_thread import IThread as IThreadImport
     IThread = IThreadImport
-    ITHREAD_AVAILABLE = True
+    _ithread_available = True
 except ImportError:
     pass
 
@@ -71,7 +71,7 @@ class WeavingReporter:
         self._i_thread = i_thread
 
         # Create IThread if not provided and available
-        if self._i_thread is None and ITHREAD_AVAILABLE and IThread is not None:
+        if self._i_thread is None and _ithread_available and IThread is not None:
             try:
                 self._i_thread = IThread(db)
             except Exception as e:

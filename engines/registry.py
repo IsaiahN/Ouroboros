@@ -35,7 +35,7 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import importlib
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 from engines.engine_logger import get_engine_logger, log_import_error
 

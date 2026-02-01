@@ -6,3 +6,5 @@
 # These are used for type hints but vulture sees them as unused
 IThreadType  # noqa: F821 - Used in type hint line 63 of weaving_reporter.py
 RepresentationLearner  # noqa: F821 - Used in type hints
+CognitiveStageSystem  # noqa: F821 - Used in type hint in hypothesis_system.py
+DatabaseInterface  # noqa: F821 - Used in type hint in hypothesis_system.py
