@@ -22,11 +22,11 @@ from database_interface import DatabaseInterface
 import logging
 
 if TYPE_CHECKING:
-    from i_thread import IThread as IThreadType
+    from engines.consciousness.i_thread import IThread as IThreadType
 
 # IThread integration for Two Streams consciousness
 try:
-    from i_thread import IThread, ROLE_DEFAULT_WEIGHTS
+    from engines.consciousness.i_thread import IThread, ROLE_DEFAULT_WEIGHTS
     ITHREAD_AVAILABLE = True
 except ImportError:
     ITHREAD_AVAILABLE = False
@@ -4840,7 +4840,7 @@ class AgentSelfModel:
         if self._abstraction_engine or self._abstraction_unavailable:
             return self._abstraction_engine
         try:
-            from sequence_abstraction import SequenceAbstraction
+            from engines.planning.sequence_abstraction import SequenceAbstraction
             self._abstraction_engine = SequenceAbstraction(self.db_path)
             return self._abstraction_engine
         except Exception as exc:
@@ -5188,17 +5188,16 @@ class AgentSelfModel:
         results: List[Dict]
     ) -> None:
         """
-        Report symmetry experiment findings to CODS for hypothesis generation.
+        Report symmetry experiment findings for hypothesis generation.
         
-        FIX 2: CODS Integration
+        FIX 2: Store symmetry results for network learning.
         When symmetry experiment completes, generate conceptual hypotheses:
         - "All color_X objects are toggleable"
         - "Color_X objects are moveable with ACTION1->up"
+        
+        Note: CODS integration deprecated. Uses direct database storage.
         """
         try:
-            from cods_engine import get_cods_engine
-            cods = get_cods_engine()
-            
             # Count successes
             total = len(results)
             successes = sum(1 for r in results if r.get('property_confirmed', False))
@@ -5222,40 +5221,27 @@ class AgentSelfModel:
                 hypothesis = f"color_{color} property varies - no symmetry"
                 generalization = 'none'
             
-            # Store as conceptual pattern in CODS if track_successful_operator_pattern exists
-            if hasattr(cods, 'concept_engine') and cods.concept_engine and hasattr(cods.concept_engine, 'track_successful_operator_pattern'):
-                # Use track_successful_operator_pattern which is the available method
-                cods.concept_engine.track_successful_operator_pattern(
-                    operator_id=f"symmetry_{property_type}_{color}",
-                    game_id=game_type,
-                    sub_patterns=[f"property_symmetry_{generalization}", f"color_{color}_{property_type}"]
-                )
-                logger.info(
-                    f"[CODS] Symmetry hypothesis: {hypothesis} "
-                    f"(confidence {confidence:.2f}, {successes}/{total} objects)"
-                )
-            else:
-                # Fallback: store in network hypotheses
-                hypothesis_id = f"symmetry_{game_type}_L{level}_color{color}_{property_type}"
-                self.db.execute_query("""
-                    INSERT OR REPLACE INTO network_object_control_hypotheses
-                    (hypothesis_id, game_type, level_number, control_pattern, 
-                     reliability_score, discovery_method, validation_attempts, validation_successes)
-                    VALUES (?, ?, ?, ?, ?, 'symmetry_experiment', ?, ?)
-                """, (
-                    hypothesis_id, game_type, level,
-                    json.dumps({
-                        'type': 'symmetry',
-                        'color': color,
-                        'property': property_type,
-                        'generalization': generalization
-                    }),
-                    confidence, total, successes
-                ))
-                logger.info(f"[SYMMETRY] Stored hypothesis: {hypothesis}")
+            # Store in network hypotheses table
+            hypothesis_id = f"symmetry_{game_type}_L{level}_color{color}_{property_type}"
+            self.db.execute_query("""
+                INSERT OR REPLACE INTO network_object_control_hypotheses
+                (hypothesis_id, game_type, level_number, control_pattern, 
+                 reliability_score, discovery_method, validation_attempts, validation_successes)
+                VALUES (?, ?, ?, ?, ?, 'symmetry_experiment', ?, ?)
+            """, (
+                hypothesis_id, game_type, level,
+                json.dumps({
+                    'type': 'symmetry',
+                    'color': color,
+                    'property': property_type,
+                    'generalization': generalization
+                }),
+                confidence, total, successes
+            ))
+            logger.info(f"[SYMMETRY] Stored hypothesis: {hypothesis} (confidence {confidence:.2f})")
                 
         except Exception as e:
-            logger.debug(f"CODS symmetry reporting failed (non-critical): {e}")
+            logger.debug(f"Symmetry reporting failed (non-critical): {e}")
     
     def record_symmetry_experiment_result(
         self,

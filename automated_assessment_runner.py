@@ -28,7 +28,7 @@ from typing import Dict, Any, List
 from pathlib import Path
 
 from database_interface import DatabaseInterface
-from resonance_detector import ResonanceDetector
+from engines.social.resonance_detector import ResonanceDetector
 
 logger = logging.getLogger(__name__)
 

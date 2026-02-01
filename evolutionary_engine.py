@@ -16,12 +16,12 @@ import copy
 from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional
 from database_interface import DatabaseInterface
-from prestige_engine import PrestigeEngine
+from engines.social.prestige_engine import PrestigeEngine
 from agent_operating_mode_system import AgentOperatingModeSystem
 
 # Phase 4.5: Import sensation engine for emotional intelligence inheritance
 try:
-    from sensation_engine import SensationEngine
+    from engines.consciousness.sensation_engine import SensationEngine
     SENSATION_AVAILABLE = True
 except ImportError:
     SENSATION_AVAILABLE = False
@@ -418,7 +418,7 @@ class EvolutionaryEngine:
         Uses performance_analyzer.calculate_diversity_fitness()
         """
         try:
-            from performance_analyzer import PerformanceAnalyzer
+            from manual_tools.analysis.performance_analyzer import PerformanceAnalyzer
             analyzer = PerformanceAnalyzer(self.db)
             
             diversity_metrics = analyzer.calculate_diversity_fitness(agent_id)

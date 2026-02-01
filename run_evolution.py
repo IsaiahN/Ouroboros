@@ -35,7 +35,7 @@ except ImportError:
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 from autonomous_evolution_runner import AutonomousEvolutionRunner
-from cleanup_temp_files import cleanup_temp_files
+from manual_tools.utilities.cleanup_temp_files import cleanup_temp_files
 
 
 def main():

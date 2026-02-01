@@ -13,7 +13,7 @@
     ["network_wisdom", 40],
     ["discovery_exploitation", 45],
     ["embedding_suggestion", 50],
-    ["cods_engine", 55],
+    ["primitive_suggester", 55],
     ["smart_action_selection", 99]
   ],
   
@@ -23,7 +23,7 @@
     ["discovery_exploitation", 10],
     ["embedding_suggestion", 15],
     ["network_wisdom", 20],
-    ["cods_engine", 25],
+    ["primitive_suggester", 25],
     ["exploration_phase", 30],
     ["scientific_method", 35],
     ["death_avoidance", 90],
@@ -40,7 +40,7 @@
     ["discovery_exploitation", 25],
     ["scientific_method", 30],
     ["exploration_phase", 35],
-    ["cods_engine", 40],
+    ["primitive_suggester", 40],
     ["smart_action_selection", 99]
   ],
   
@@ -53,7 +53,7 @@
     ["two_streams", 25],
     ["survey", 30],
     ["scientific_method", 35],
-    ["cods_engine", 40],
+    ["primitive_suggester", 40],
     ["smart_action_selection", 99]
   ],
   

@@ -5,7 +5,7 @@ One-time script to bootstrap Phase 3 from historical data
 """
 
 from database_interface import DatabaseInterface
-from viral_package_engine import ViralPackageEngine
+from engines.social.viral_package_engine import ViralPackageEngine
 import random
 
 def main():
@@ -73,7 +73,7 @@ def main():
     
     # Show dashboard
     print("\nDisplaying viral ecosystem dashboard...\n")
-    from viral_package_engine import display_viral_ecosystem_dashboard
+    from engines.social.viral_package_engine import display_viral_ecosystem_dashboard
     display_viral_ecosystem_dashboard(db, generation=87)
 
 if __name__ == '__main__':

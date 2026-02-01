@@ -146,7 +146,19 @@ class LearningSystems:
     
     @property
     def cods(self) -> Any:
-        """Get CODS engine (lazy loaded)."""
+        """
+        Get CODS engine (lazy loaded).
+        
+        DEPRECATED: Returns PrimitiveSuggester instead of CODSEngine.
+        CODS has been deprecated - use primitive_suggester property instead.
+        """
+        if not self._cods_loaded:
+            self._load_cods()
+        return self._cods
+    
+    @property
+    def primitive_suggester(self) -> Any:
+        """Get primitive suggester (replaces CODS engine)."""
         if not self._cods_loaded:
             self._load_cods()
         return self._cods
@@ -173,21 +185,26 @@ class LearningSystems:
         return self._terminal
     
     def _load_cods(self) -> None:
-        """Lazy load CODS engine."""
+        """
+        Lazy load primitive suggester (replaces deprecated CODS engine).
+        
+        Note: The 'cods' property name is kept for backward compatibility
+        but now loads PrimitiveSuggester instead of CODSEngine.
+        """
         try:
-            from cods_engine import CODSEngine
-            self._cods = CODSEngine(self._db)
+            from engines.social.primitive_suggester import PrimitiveSuggester
+            self._cods = PrimitiveSuggester(self._db)
         except ImportError:
             self._cods = None
         except Exception as e:
-            print(f"[WARN] Failed to load CODS engine: {e}")
+            print(f"[WARN] Failed to load primitive suggester: {e}")
             self._cods = None
         self._cods_loaded = True
     
     def _load_replay(self) -> None:
         """Lazy load replay learning engine."""
         try:
-            from replay_learning_engine import ReplayLearningEngine
+            from engines.planning.replay_learning_engine import ReplayLearningEngine
             self._replay = ReplayLearningEngine(self._db)
         except ImportError:
             self._replay = None
@@ -199,7 +216,7 @@ class LearningSystems:
     def _load_self_model(self) -> None:
         """Lazy load agent self-model."""
         try:
-            from agent_self_model import AgentSelfModel
+            from deprecated.agent_self_model_legacy import AgentSelfModel
             self._self_model = AgentSelfModel(self._db)
         except ImportError:
             self._self_model = None
@@ -211,7 +228,7 @@ class LearningSystems:
     def _load_terminal_detector(self) -> None:
         """Lazy load terminal pattern detector."""
         try:
-            from terminal_pattern_detector import TerminalPatternDetector
+            from engines.perception.terminal_pattern_detector import TerminalPatternDetector
             self._terminal = TerminalPatternDetector(self._db)
         except ImportError:
             self._terminal = None

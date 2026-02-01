@@ -9,7 +9,7 @@ import sys
 import hashlib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from terminal_pattern_detector import TerminalPatternDetector
+from engines.perception.terminal_pattern_detector import TerminalPatternDetector
 from database_interface import DatabaseInterface
 
 db = DatabaseInterface()

@@ -10,7 +10,7 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 import pytest
 
 # Imports handled by conftest.py sys.path setup
-from autopoiesis_monitor import AutopoiesisMonitor
+from manual_tools.analysis.autopoiesis_monitor import AutopoiesisMonitor
 
 
 class MockDatabase:

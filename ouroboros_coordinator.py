@@ -178,11 +178,11 @@ class OuroborosNetworkSteward:
             self.evolution_engine = EvolutionaryEngine(self.db)
 
         if self.arc_rlvr is None:
-            from arc_rlvr_framework import ARCRLVRFramework
-            self.arc_rlvr = ARCRLVRFramework(self.db)
+            from engines.postgame import FitnessCalculator
+            self.arc_rlvr = FitnessCalculator(self.db)
 
         if self.performance_analyzer is None:
-            from performance_analyzer import PerformanceAnalyzer
+            from manual_tools.analysis.performance_analyzer import PerformanceAnalyzer
             self.performance_analyzer = PerformanceAnalyzer(self.db)
 
         if self.agent_factory is None:

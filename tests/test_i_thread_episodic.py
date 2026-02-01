@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from i_thread import (
+from engines.consciousness.i_thread import (
     IThread,
     IThreadState,
     EpisodicMemory,

@@ -11,7 +11,7 @@ import pytest
 import json
 
 # Imports handled by conftest.py sys.path setup
-from trigger_controller import TriggerController
+from engines.regulation.trigger_controller import TriggerController
 
 
 class MockDatabase:

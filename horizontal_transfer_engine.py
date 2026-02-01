@@ -30,7 +30,7 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.append(str(Path(__file__).parent))
 
 from database_interface import DatabaseInterface
-from sensation_engine import SensationEngine
+from engines.consciousness.sensation_engine import SensationEngine
 
 def safe_json_parse(json_str, default=None):
     """Safely parse JSON string, returning default if invalid or empty."""

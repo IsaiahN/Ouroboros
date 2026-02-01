@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 from database_interface import DatabaseInterface
-from persona_runtime import PersonaManager, PersonaDecision
+from engines.consciousness.persona_runtime import PersonaManager, PersonaDecision
 
 
 @pytest.fixture

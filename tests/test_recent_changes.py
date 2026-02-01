@@ -345,7 +345,7 @@ class TestAbstractionEngineIntegration(unittest.TestCase):
     
     def test_abstraction_engine_can_be_imported(self):
         """Verify sequence_abstraction can be imported."""
-        from sequence_abstraction import SequenceAbstraction
+        from engines.planning.sequence_abstraction import SequenceAbstraction
         self.assertTrue(True)
     
     def test_abstraction_config_is_used(self):

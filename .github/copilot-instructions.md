@@ -126,7 +126,7 @@ python -c "import sys; print(sys.prefix)"
   - All learned knowledge (rules, patterns, etc.)
 
 ### **RULE 13: Regular Dependency Analysis (PyDeps)**
-- Run `python analyze_dependencies.py --stats --orphans` before major changes
+- Run `python manual_tools/analysis/analyze_dependencies.py --stats --orphans` before major changes
 - Check for circular imports with `--cycles` option
 - Follow `architecture/Pydeps_Usage_Guide.md` for detailed procedures
 - **When to Run**:
@@ -151,7 +151,7 @@ python -c "import sys; print(sys.prefix)"
   - `deps_core_gameplay.svg` - Core gameplay dependencies
   - `deps_cods_engine.svg` - CODS engine dependencies
   - `deps_seed_primitives.svg` - Primitives dependencies
-- **Regenerate Command**: `python analyze_dependencies.py --full --core --reasoning`
+- **Regenerate Command**: `python manual_tools/analysis/analyze_dependencies.py --full --core --reasoning`
 - Diagrams should reflect reality, not aspirations
 
 ### **RULE 15: Tests Folder Exception**

@@ -15,7 +15,7 @@ import sqlite3
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scientific_method_engine import ScientificMethodEngine, Theory, TheoryStatus, TheoryType
+from engines.reasoning.scientific_method_engine import ScientificMethodEngine, Theory, TheoryStatus, TheoryType
 from datetime import datetime
 
 

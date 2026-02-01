@@ -54,32 +54,32 @@ except ImportError:
     pass
 
 from database_logger import setup_database_logging
-from enhanced_database_interface import EnhancedDatabaseInterface as DatabaseInterface
-from prestige_parasite_detector import check_for_parasites  # Parasite detection
+from manual_tools.utilities.enhanced_database_interface import EnhancedDatabaseInterface as DatabaseInterface
+from manual_tools.analysis.prestige_parasite_detector import check_for_parasites  # Parasite detection
 from ouroboros_coordinator import OuroborosNetworkSteward
 from agent_factory import AgentFactory
-from performance_analyzer import PerformanceAnalyzer
+from manual_tools.analysis.performance_analyzer import PerformanceAnalyzer
 from disk_space_monitor import DiskSpaceMonitor
 from evolutionary_engine import EvolutionaryEngine
-from arc_rlvr_framework import ARCRLVRFramework
+from engines.postgame import FitnessCalculator as ARCRLVRFramework  # Migrated to postgame module
 from arc_api_client import ARCClient
 from core_gameplay import GameplayEngine
 from adaptive_action_limits import AdaptiveActionLimits
 from network_intelligence_engine import NetworkIntelligenceEngine, display_network_intelligence_dashboard
-from prestige_engine import PrestigeEngine, display_prestige_leaderboard
-from viral_package_engine import ViralPackageEngine, display_viral_ecosystem_dashboard  # Phase 3
+from engines.social.prestige_engine import PrestigeEngine, display_prestige_leaderboard
+from engines.social.viral_package_engine import ViralPackageEngine, display_viral_ecosystem_dashboard  # Phase 3
 from evolution_game_scheduler import EvolutionGameScheduler  # NEW: Prevent duplicate game plays
-from regulatory_signal_engine import RegulatorySignalEngine  # Phase 4: Distributed Regulation
-from sequence_pruning_system import SequencePruningSystem  # NEW: Automatic bad sequence removal
-from optimization_threshold_system import OptimizationThresholdSystem  # NEW: Track optimized levels
+from engines.regulation.regulatory_signal_engine import RegulatorySignalEngine  # Phase 4: Distributed Regulation
+from manual_tools.analysis.sequence_pruning_system import SequencePruningSystem  # NEW: Automatic bad sequence removal
+from manual_tools.analysis.optimization_threshold_system import OptimizationThresholdSystem  # NEW: Track optimized levels
 from breakthrough_budget_allocator import BreakthroughBudgetAllocator  # Tier 1: Dynamic budgets (+50%)
 from automated_assessment_runner import AutomatedAssessmentRunner  # Other AI #3: Auto-metrics
-from pariah_validator import PariahValidator, run_pariah_validation  # False pariah detection/cleanup
+from manual_tools.analysis.pariah_validator import PariahValidator, run_pariah_validation  # False pariah detection/cleanup
 # GameDiversityPreserver import removed - prestige-only protection now
 
 # Sequence Miner - retroactive learning from winning sequences
 try:
-    from sequence_miner import SequenceMiner
+    from deprecated.sequence_miner import SequenceMiner
     SEQUENCE_MINER_AVAILABLE = True
 except ImportError:
     SEQUENCE_MINER_AVAILABLE = False
@@ -87,20 +87,27 @@ except ImportError:
 
 # Autopoiesis Monitor - system health and emergence tracking
 try:
-    from autopoiesis_monitor import AutopoiesisMonitor
+    from manual_tools.analysis.autopoiesis_monitor import AutopoiesisMonitor
     AUTOPOIESIS_AVAILABLE = True
 except ImportError:
     AUTOPOIESIS_AVAILABLE = False
     AutopoiesisMonitor = None
 
-# CODS - Cognitive Operator Discovery System (post-generation unlock checks)
+# PRIMITIVE SUGGESTER - Direct primitive-to-action mapping (replaces deprecated CODS)
+# Note: CODS (Cognitive Operator Discovery System) has been deprecated.
+# All 315 primitives are always available - no unlock ceremony needed.
 try:
-    from cods_engine import check_for_potential_unlocks, CODSEngine
-    CODS_AVAILABLE = True
+    from engines.social.primitive_suggester import PrimitiveSuggester, get_primitive_suggester
+    PRIMITIVE_SUGGESTER_AVAILABLE = True
 except ImportError:
-    CODS_AVAILABLE = False
-    check_for_potential_unlocks = None
-    CODSEngine = None
+    PRIMITIVE_SUGGESTER_AVAILABLE = False
+    PrimitiveSuggester = None
+    get_primitive_suggester = None
+
+# Legacy CODS stub for backward compatibility
+CODS_AVAILABLE = False
+check_for_potential_unlocks = None
+CODSEngine = None
 
 # Schema Auto-Maintenance - sync on startup to catch tables created by other modules
 try:
@@ -112,8 +119,8 @@ except ImportError:
 
 # Oracle Health Monitor - self-diagnostic and experimentation system
 try:
-    from oracle_health_monitor import OracleHealthMonitor, HealthStatus
-    from console_metrics_capture import (
+    from manual_tools.analysis.oracle_health_monitor import OracleHealthMonitor, HealthStatus
+    from manual_tools.analysis.console_metrics_capture import (
         ConsoleMetricsCapture, get_metrics_capture, reset_metrics_capture,
         record_game_start, record_game_end, record_cods, record_stuck,
         get_reasoning_capture, get_reasoning_diagnostics, ReasoningLogCapture
@@ -198,12 +205,12 @@ class AutonomousEvolutionRunner:
         self.transfer_engine = HorizontalTransferEngine(self.db)
         
         # NEW BREAKTHROUGH SYSTEMS (Tier 1-3)
-        from subgoal_planner import SubgoalPlanner
-        from frustration_detector import FrustrationDetector
-        from near_miss_analyzer import NearMissAnalyzer
+        from engines.planning.subgoal_planner import SubgoalPlanner
+        from engines.regulation.frustration_detector import FrustrationDetector
+        from engines.memory.near_miss_analyzer import NearMissAnalyzer
         from collective_reasoning_engine import CollectiveReasoningEngine
-        from oracle_stuck_game_diagnostics import OracleStuckGameDiagnostics
-        from lessons_learned_engine import LessonsLearnedEngine
+        from manual_tools.analysis.oracle_stuck_game_diagnostics import OracleStuckGameDiagnostics
+        from deprecated.lessons_learned_engine import LessonsLearnedEngine
         
         self.subgoal_planner = SubgoalPlanner(self.db)  # Hierarchical planning
         self.frustration_detector = FrustrationDetector(self.db)  # Frustration tracking
@@ -217,8 +224,8 @@ class AutonomousEvolutionRunner:
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
             from meta_learning_curriculum import MetaLearningCurriculum
-            from rule_induction_engine import RuleInductionEngine
-            from visual_reasoning_engine import VisualReasoningEngine
+            from deprecated.rule_induction_engine import RuleInductionEngine
+            from deprecated.visual_reasoning_engine import VisualReasoningEngine
             
             self.curriculum = MetaLearningCurriculum(self.db)
             self.rule_engine = RuleInductionEngine(self.db)
@@ -1737,11 +1744,7 @@ class AutonomousEvolutionRunner:
                                             total_actions=result.get('actions_taken', 0),
                                             generation=self.current_generation,
                                         )
-                                        if insights_id and hasattr(engine_slot, 'cods_engine') and engine_slot.cods_engine:
-                                            try:
-                                                engine_slot.cods_engine.process_near_miss_patterns(insights_id)
-                                            except Exception:
-                                                pass
+                                        # Near-miss pattern processing now handled by lessons engine
                                     except Exception as e:
                                         print(f"  [WARN] Near-miss analysis failed: {e}")
 
@@ -1763,32 +1766,30 @@ class AutonomousEvolutionRunner:
                                     except Exception as e:
                                         print(f"  [WARN] Lessons recording failed: {e}")
 
-                                # CODS outcome logging
-                                if hasattr(engine_slot, 'cods_engine') and engine_slot.cods_engine:
+                                # Primitive effectiveness tracking (replaces CODS outcome logging)
+                                # PrimitiveSuggester tracks what works via RLVR tables
+                                if PRIMITIVE_SUGGESTER_AVAILABLE and self.total_games_played % 10 == 0:
                                     try:
-                                        cods_result = engine_slot.cods_engine.record_game_outcome(
-                                            game_id=game_id,
-                                            final_score=final_score,
-                                            max_level_reached=result.get('level_completions', 0) + 1,
-                                            total_actions=result.get('actions_taken', 0),
+                                        suggester = get_primitive_suggester(self.db.db_path)
+                                        # Record game result for primitive effectiveness tracking
+                                        suggester.record_game_result(
+                                            game_type=game_type,
                                             won=result.get('win', False),
+                                            final_score=final_score
                                         )
-                                        if cods_result.get('primitive_gaps'):
-                                            print(f"  [CODS] Detected {len(cods_result['primitive_gaps'])} primitive gaps")
                                     except Exception:
                                         pass
                                 
-                                # Check lessons for CODS pattern discoveries (every 10 games)
+                                # Lessons engine pattern tracking (simplified from CODS)
                                 if self.lessons_engine and self.total_games_played % 10 == 0:
                                     try:
                                         patterns = self.lessons_engine.get_patterns_for_cods(game_type)
                                         if patterns:
-                                            # Feed patterns to CODS for primitive unlock consideration
                                             death_patterns = [p for p in patterns if p.get('caused_death')]
                                             high_conf_patterns = [p for p in patterns if p.get('confidence', 0) >= 0.7]
                                             
                                             if death_patterns or high_conf_patterns:
-                                                print(f"  [LESSONS-CODS] Found {len(death_patterns)} death patterns, "
+                                                print(f"  [LESSONS] Found {len(death_patterns)} death patterns, "
                                                       f"{len(high_conf_patterns)} high-confidence patterns for {game_type}")
                                                 
                                                 # Mark as reported (CODS will process these)
@@ -1808,7 +1809,7 @@ class AutonomousEvolutionRunner:
 
                                 # Viral package usage tracking
                                 try:
-                                    from viral_package_engine import ViralPackageEngine
+                                    from engines.social.viral_package_engine import ViralPackageEngine
                                     viral_engine = ViralPackageEngine(self.db)
                                     infections = self.db.execute_query(
                                         """
@@ -2109,30 +2110,9 @@ class AutonomousEvolutionRunner:
                 import traceback
                 traceback.print_exc()
             
-            # OPERATOR LIFECYCLE: Promote strong operators, kill weak ones
-            print(f"\n[OPERATOR LIFECYCLE] Running operator survival selection for generation {self.current_generation}...")
-            try:
-                from cods_engine import get_cods_engine
-                cods_engine = get_cods_engine(self.db.db_path)
-                lifecycle_results = cods_engine.run_operator_lifecycle()
-                
-                if lifecycle_results.get('promoted', 0) > 0:
-                    print(f"[OK] Promoted {lifecycle_results['promoted']} operators to canonical status")
-                if lifecycle_results.get('killed', 0) > 0:
-                    print(f"[OK] Killed {lifecycle_results['killed']} failing/unused operators")
-                
-                # Show survival stats
-                survival_stats = cods_engine.get_operator_survival_stats()
-                by_status = survival_stats.get('by_status', {})
-                total = sum(by_status.values())
-                canonical = by_status.get('canonical', 0)
-                at_risk = survival_stats.get('at_risk', 0)
-                print(f"[OK] Operator population: {total} total, {canonical} canonical, {at_risk} at risk")
-                
-            except Exception as e:
-                print(f"[WARN] Operator lifecycle failed: {e}")
-                import traceback
-                traceback.print_exc()
+            # NOTE: OPERATOR LIFECYCLE removed - CODS operator system deprecated
+            # All 315 seed primitives are always available, no operators to promote/kill
+            # Primitive effectiveness tracked via PrimitiveSuggester RLVR feedback tables
             
             # OPTIMIZATION TRACKING: Update which levels are optimized vs need work
             print(f"\n[OPTIMIZATION] Updating level optimization status for generation {self.current_generation}...")
@@ -2461,7 +2441,7 @@ class AutonomousEvolutionRunner:
             # Check if any agents should be revived based on triggers
             if self.current_generation % 5 == 0:  # Check every 5 generations
                 try:
-                    from revive_agents import AgentRevivalSystem
+                    from manual_tools.utilities.revive_agents import AgentRevivalSystem
                     revival_system = AgentRevivalSystem()
                     
                     triggers = revival_system.detect_revival_triggers(self.current_generation)
@@ -2492,7 +2472,7 @@ class AutonomousEvolutionRunner:
             
             # Frontier package cleanup (remove temp packages when sequences exist)
             try:
-                from viral_package_engine import ViralPackageEngine
+                from engines.social.viral_package_engine import ViralPackageEngine
                 viral_engine = ViralPackageEngine(self.db)
                 cleaned = viral_engine.cleanup_obsolete_frontier_packages(min_sequences_to_cleanup=3)
                 if cleaned > 0:
@@ -2726,182 +2706,30 @@ class AutonomousEvolutionRunner:
         except Exception as e:
             print(f"[WARN] Mastery update failed: {e}")
         
-        # CODS: Check for potential primitive unlocks (post-generation)
-        if CODS_AVAILABLE and check_for_potential_unlocks:
+        # PRIMITIVE SUGGESTER: Update primitive effectiveness tracking (post-generation)
+        # Note: CODS unlock system deprecated - all 315 primitives are always available
+        if PRIMITIVE_SUGGESTER_AVAILABLE and get_primitive_suggester:
             try:
-                # Bootstrap operators if none exist (seed the system)
-                from cods_engine import get_cods_engine
-                cods_engine = get_cods_engine(self.db.db_path)
-                bootstrap_count = cods_engine.bootstrap_operators_from_patterns(limit=10)
-                if bootstrap_count > 0:
-                    print(f"[CODS] Bootstrapped {bootstrap_count} initial operators")
+                suggester = get_primitive_suggester(self.db.db_path)
                 
-                # Evolve existing operators
-                evolved = cods_engine.evolve_operators(n_generations=1, population_size=10)
-                if evolved:
-                    print(f"[CODS] Evolved {len(evolved)} operator variants")
-                
-                # Now check for unlocks
-                cods_results = check_for_potential_unlocks(
-                    db_path=self.db.db_path,
-                    min_success_rate=0.70,
-                    min_cross_game_rate=0.50,
-                    min_tests=5
-                )
-                if cods_results['unlock_attempts'] > 0:
-                    print(f"[CODS] Checked {cods_results['operators_checked']} operators, "
-                          f"{cods_results['unlock_attempts']} attempts, "
-                          f"{cods_results['unlocks_approved']} unlocked, "
-                          f"{cods_results['novel_discoveries']} novel")
+                # Show primitive effectiveness stats
+                stats = suggester.get_effectiveness_stats()
+                if stats.get('total_tracked', 0) > 0:
+                    print(f"[PRIMITIVES] Tracking {stats['total_tracked']} primitive-action pairs")
                     
-                    # Show details for any unlocks
-                    for detail in cods_results.get('details', []):
-                        if detail.get('verdict') == 'approved':
-                            print(f"  [UNLOCK] {detail['matched_primitive']} unlocked via {detail['operator']}")
-                        elif detail.get('verdict') == 'novel':
-                            print(f"  [NOVEL] {detail['operator']} registered as novel discovery")
-                
-                # STRATEGY-DRIVEN UNLOCK: Process agent strategy signals
-                # This is the "Teacher Model" - CODS listens to what agents say they need
-                # and unlocks primitives when the network expresses a capability gap
-                try:
-                    # Reuse the cods_engine instance created earlier (don't create a new one)
-                    if cods_engine:
-                        # ADAPTIVE: threshold = 10% of active agents (floor 15, cap 100)
-                        strategy_results = cods_engine.process_agent_strategy_signals(
-                            min_frequency=10,
-                            unlock_threshold=None,  # Use adaptive
-                            unlock_percentage=0.10  # 10% of network must express need
-                        )
-                        if strategy_results.get('needs_detected'):
-                            top_needs = sorted(
-                                strategy_results['needs_detected'].items(),
-                                key=lambda x: x[1]['total_frequency'],
-                                reverse=True
-                            )[:3]
-                            print(f"[CODS-TEACHER] Network needs: " + 
-                                  ", ".join(f"{p}({d['total_frequency']}x)" for p, d in top_needs))
-                        
-                        if strategy_results.get('unlocks_triggered'):
-                            for unlock in strategy_results['unlocks_triggered']:
-                                print(f"  [NEED-UNLOCK] {unlock['primitive']} "
-                                      f"(expressed {unlock['frequency']}x by network)")
-                except Exception as e:
-                    pass  # Silently skip on error (strategy unlock is supplemental)
-                
-                # STUCK POINT ANALYSIS (Gap #2): Identify primitive gaps from stuck patterns
-                try:
-                    # Reuse cods_engine instance
-                    if cods_engine:
-                        stuck_analysis = cods_engine.analyze_stuck_points_for_unlocks(
-                            min_stuck_count=10,
-                            min_confidence=0.5
-                        )
-                        if stuck_analysis.get('gaps_identified'):
-                            print(f"[STUCK-ANALYSIS] Found {len(stuck_analysis['gaps_identified'])} "
-                                  f"capability gaps from {stuck_analysis['hotspots_analyzed']} hotspots")
-                            # Show top gaps
-                            for gap in stuck_analysis['gaps_identified'][:3]:
-                                prims = ', '.join(gap['suggested_primitives'][:3])
-                                print(f"  [GAP] {gap['game_type']} L{gap['level']}: "
-                                      f"{gap['stuck_count']} stuck -> needs [{prims}]")
-                        if stuck_analysis.get('unlocks_triggered'):
-                            for unlock in stuck_analysis['unlocks_triggered']:
-                                print(f"  [STUCK-UNLOCK] {unlock['primitive']} "
-                                      f"({unlock['stuck_count']} agents stuck)")
-                except Exception as e:
-                    pass  # Supplemental analysis
-                
-                # CONCEPT-DRIVEN UNLOCK (Gap #3): Check concepts for games with stuck points
-                try:
-                    # Reuse cods_engine instance
-                    if cods_engine:
-                        # Get game types with most stuck agents
-                        stuck_games = self.db.execute_query("""
-                            SELECT game_type, SUM(times_hit) as total_stuck
-                            FROM network_stuck_points
-                            GROUP BY game_type
-                            ORDER BY total_stuck DESC
-                            LIMIT 5
-                        """)
-                        if stuck_games:
-                            for game in stuck_games:
-                                game_type = game['game_type']
-                                concept_results = cods_engine.check_all_relevant_concepts(game_type)
-                                if concept_results.get('unlocks'):
-                                    for unlock in concept_results['unlocks']:
-                                        print(f"  [CONCEPT-UNLOCK] {unlock['primitive']} "
-                                              f"(concept '{unlock.get('reason', 'unknown')}' for {game_type})")
-                except Exception as e:
-                    pass  # Supplemental analysis
-                
-                # PRIMITIVE INVENTORY: Show what network has access to
-                try:
-                    # Reuse cods_engine instance
-                    if cods_engine:
-                        inventory = cods_engine.get_primitive_inventory()
-                        summary = inventory.get('summary', {})
-                        print(f"[CODS-INVENTORY] Available: {summary.get('total_available', 0)} primitives "
-                              f"(seed={summary.get('seed_count', 0)}, "
-                              f"grandfathered={summary.get('grandfathered_count', 0)}, "
-                              f"unlocked={summary.get('unlocked_count', 0)}, "
-                              f"novel={summary.get('novel_count', 0)}) | "
-                              f"Locked: {summary.get('locked_count', 0)}")
-                        
-                        # Show most used if any usage
-                        most_used = summary.get('most_used', [])
-                        if most_used:
-                            top_3 = most_used[:3]
-                            usage_str = ", ".join(f"{name}({data['calls']})" for name, data in top_3)
-                            print(f"[CODS-INVENTORY] Most used: {usage_str}")
-                except Exception as e:
-                    pass  # Silently skip inventory display on error
-                
-                # AGENT PATTERN DISCOVERY: Analyze agent gameplay for emerging patterns
-                # This is the species writing its own cookbook through gameplay
-                try:
-                    if cods_engine:
-                        # Run the full pattern discovery + synthesis pipeline
-                        pattern_results = cods_engine.process_generation_patterns(
-                            generation=self.current_generation
-                        )
-                        
-                        # Show pattern discovery results
-                        patterns = pattern_results.get('patterns', {})
-                        if patterns.get('patterns_discovered'):
-                            print(f"[AGENT-PATTERNS] Discovered {len(patterns['patterns_discovered'])} "
-                                  f"primitive combinations from agent gameplay")
-                            for p in patterns['patterns_discovered'][:3]:  # Top 3
-                                prims = ' + '.join(p['primitives'])
-                                print(f"  [{p['evidence_strength'].upper()}] {prims}: "
-                                      f"success={p['success_rate']:.0%}, diff=+{p['differential']:.0%}")
-                        
-                        # Show synthesis results (from patterns feeding Bayesian system)
-                        synth = pattern_results.get('synthesis', {})
-                        if synth.get('syntheses_triggered', 0) > 0:
-                            print(f"[CODS-SYNTH] Synthesized {synth['syntheses_triggered']} "
-                                  f"operators from {synth['hypotheses_checked']} confirmed hypotheses")
-                            for op_id in synth.get('operators_created', []):
-                                print(f"  [SYNTH] New operator: {op_id}")
-                            for prim in synth.get('primitives_unlocked', []):
-                                print(f"  [UNLOCK] Primitive unlocked: {prim}")
-                        
-                        # Show hypothesis summary
-                        hyp_summary = cods_engine.get_hypothesis_summary()
-                        if hyp_summary.get('active', 0) > 0:
-                            print(f"[CODS-BAYES] Hypotheses: {hyp_summary.get('active', 0)} active, "
-                                  f"{hyp_summary.get('synthesized', 0)} synthesized, "
-                                  f"max P={hyp_summary.get('max_posterior', 0):.2f}")
-                        
-                        # Prune refuted hypotheses periodically
-                        if self.current_generation % 5 == 0:
-                            pruned = cods_engine.prune_refuted_hypotheses(max_age_days=14)
-                            if pruned > 0:
-                                print(f"[CODS-BAYES] Pruned {pruned} refuted hypotheses")
-                except Exception as e:
-                    pass  # Supplemental - pattern discovery is optional
+                    # Show top performing primitives
+                    top_primitives = stats.get('top_performing', [])
+                    if top_primitives:
+                        top_str = ", ".join(f"{p['primitive']}({p['score']:.2f})" for p in top_primitives[:3])
+                        print(f"[PRIMITIVES] Top performers: {top_str}")
+                    
+                    # Show primitives needing more data
+                    underexplored = stats.get('underexplored', [])
+                    if underexplored:
+                        under_str = ", ".join(underexplored[:5])
+                        print(f"[PRIMITIVES] Need more data: {under_str}")
             except Exception as e:
-                print(f"[CODS] Unlock check skipped: {e}")
+                print(f"[PRIMITIVES] Stats skipped: {e}")
         
         # Print status
         self.print_status(

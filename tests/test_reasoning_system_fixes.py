@@ -54,23 +54,29 @@ def mock_game_state():
 
 @pytest.fixture
 def mock_cods_engine():
-    """Create a mock CODS engine."""
+    """
+    Create a mock primitive suggester (backward compatible name).
+    
+    Note: Named 'mock_cods_engine' for backward compatibility but
+    actually mocks PrimitiveSuggester behavior.
+    """
     engine = MagicMock()
     engine.suggest_action = MagicMock(return_value={
         'action': 1,
         'confidence': 0.45,
-        'operator': 'symmetry_detector',
-        'operators': ['symmetry_detector', 'shape_finder']
+        'primitive': 'detect_symmetry',
+        'reasoning': 'Detected vertical symmetry',
+        'candidates': []
     })
-    engine.bootstrap_operators_from_patterns = MagicMock(return_value={
-        'bootstrapped': ['translate', 'rotate'],
-        'from_strategy': True
+    engine.get_effectiveness_stats = MagicMock(return_value={
+        'total_tracked': 50,
+        'top_performing': [
+            {'primitive': 'detect_symmetry', 'score': 0.8},
+            {'primitive': 'detect_edges', 'score': 0.7}
+        ],
+        'underexplored': ['detect_motion']
     })
-    engine.get_primitive_inventory = MagicMock(return_value={
-        'seed': ['translate', 'rotate'],
-        'unlocked': ['reflect'],
-        'locked': []
-    })
+    engine.record_outcome = MagicMock(return_value=None)
     return engine
 
 

@@ -5,25 +5,24 @@ Decision Rung System - Modular Action Decision Architecture
 Allows swapping the order of decision features like LEGO bricks.
 Each "rung" is a pluggable component with a standard interface.
 
-INTEGRATION WITH CODS/PRIMITIVES:
----------------------------------
-The rung system integrates with CODS (Cognitive Operator Discovery System)
-and Seed Primitives at three levels:
+INTEGRATION WITH PRIMITIVES:
+----------------------------
+The rung system integrates with Seed Primitives via PrimitiveSuggester:
 
-1. DIRECT RUNG: CODSEngineRung calls cods_engine.suggest_action() for composed
-   operator suggestions built from primitives.
+1. DIRECT RUNG: PrimitiveSuggesterRung applies primitives to frames and
+   maps outputs to action suggestions with RLVR feedback.
 
 2. PRIMITIVE-AWARE RUNGS: Rungs can declare `required_primitives` to use
    seed primitives directly (e.g., detect_novelty, get_confidence).
 
-3. IMPLICIT FLOW: Many rungs use CODS discoveries indirectly through
+3. IMPLICIT FLOW: Many rungs use primitive discoveries indirectly through
    network knowledge, validated patterns, and shared hypotheses.
 
 The architecture separates:
-- WHAT primitives are available (SeedPrimitiveRegistry)
-- HOW they are combined (OperatorComposer)
+- WHAT primitives are available (SeedPrimitiveRegistry - 315 primitives)
+- HOW they map to actions (PrimitiveSuggester)
 - WHEN to use them (Decision Rung System)
-- VALIDATION (CODS Oracle - centralized)
+- FEEDBACK (RLVR - learn what works per game type)
 
 Ordering Strategies:
 1. LADDER: First confident answer wins (current behavior)
@@ -51,7 +50,7 @@ import random
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, List, Tuple, Any, TYPE_CHECKING
 from enum import Enum
 from pathlib import Path
 
@@ -59,6 +58,10 @@ from pathlib import Path
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 logger = logging.getLogger(__name__)
+
+# Type hints for engine registry (avoid circular imports)
+if TYPE_CHECKING:
+    from engines.registry import EngineRegistry
 
 # =============================================================================
 # PRIMITIVE INTEGRATION - Lazy loading to avoid circular imports
@@ -136,12 +139,18 @@ class DecisionRung(ABC):
     # Primitive requirements (override in subclasses)
     required_primitives: List[str] = []  # e.g., ['detect_novelty', 'get_confidence']
     
-    def __init__(self, core_gameplay_ref: Any = None):
+    def __init__(
+        self, 
+        core_gameplay_ref: Any = None,
+        engine_registry: Optional["EngineRegistry"] = None
+    ):
         """
         Args:
-            core_gameplay_ref: Reference to CoreGameplay instance for accessing state
+            core_gameplay_ref: Reference to CoreGameplay instance (legacy)
+            engine_registry: EngineRegistry for modular engine access (preferred)
         """
         self.core: Any = core_gameplay_ref
+        self._engine_registry: Optional["EngineRegistry"] = engine_registry
         self.enabled = True
         self.priority_override: Optional[int] = None
         self.stats: Dict[str, Any] = {
@@ -154,6 +163,28 @@ class DecisionRung(ABC):
         # Lazy-load primitives
         self._primitives = None
         self._primitives_validated = False
+    
+    @property
+    def engines(self) -> "EngineRegistry":
+        """
+        Access modular engines via registry.
+        
+        Falls back to creating a registry from self.core if not provided.
+        This allows gradual migration from self.core.X to self.engines.X
+        """
+        if self._engine_registry is not None:
+            return self._engine_registry
+        
+        # Lazy-create registry from legacy core
+        if self.core is not None:
+            from engines.registry import EngineRegistry
+            self._engine_registry = EngineRegistry(legacy_core=self.core)
+        else:
+            # Return a minimal registry with stubs
+            from engines.registry import EngineRegistry
+            self._engine_registry = EngineRegistry()
+        
+        return self._engine_registry
     
     def _ensure_primitives(self) -> bool:
         """Ensure primitives are loaded and validated."""
@@ -239,7 +270,11 @@ class DecisionRung(ABC):
 # =============================================================================
 
 class SurveyRung(DecisionRung):
-    """Survey the environment at level start - ORIENTATION"""
+    """Survey the environment at level start - ORIENTATION
+    
+    NOTE: Uses self.core._build_survey_context() private method.
+    Kept as core access since it reads internal survey state.
+    """
     name = "survey"
     category = "orientation"
     default_priority = 5
@@ -275,11 +310,11 @@ class QuestioningRung(DecisionRung):
     confidence_threshold = 0.5
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'scientific_method_engine'):
+        sme = self.engines.scientific_method_engine
+        if sme is None:
             return RungResult()
         
         try:
-            sme = self.core.scientific_method_engine
             if not hasattr(sme, 'questioning_engine'):
                 return RungResult()
             
@@ -308,43 +343,46 @@ class DeathAvoidanceRung(DecisionRung):
     confidence_threshold = 0.6
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
+        detector = self.engines.terminal_pattern_detector
+        if detector is None:
             return RungResult()
         
         try:
             # Get graduated weights from terminal pattern detector
-            if hasattr(self.core, 'terminal_pattern_detector'):
-                detector = self.core.terminal_pattern_detector
-                if hasattr(detector, 'get_graduated_action_weights'):
-                    game_type = context.get('game_type', '')
-                    level = context.get('level', 1)
-                    position = context.get('position', (0, 0))
-                    frontier_mode = context.get('frontier_mode', False)
-                    
-                    weights = detector.get_graduated_action_weights(
-                        game_type=game_type,
-                        level=level,
-                        position=position,
-                        frontier_mode=frontier_mode
-                    )
-                    
-                    # Find most dangerous action
-                    min_weight = min(weights.values()) if weights else 1.0
-                    dangerous_actions = [a for a, w in weights.items() if w < 0.3]
-                    
-                    return RungResult(
-                        confidence=0.7 if dangerous_actions else 0.1,
-                        reason=f"Danger weights calculated, {len(dangerous_actions)} risky actions",
-                        weights=weights,
-                        metadata={'dangerous_actions': dangerous_actions, 'min_weight': min_weight}
-                    )
+            if hasattr(detector, 'get_graduated_action_weights'):
+                game_type = context.get('game_type', '')
+                level = context.get('level', 1)
+                position = context.get('position', (0, 0))
+                frontier_mode = context.get('frontier_mode', False)
+                
+                weights = detector.get_graduated_action_weights(
+                    game_type=game_type,
+                    level=level,
+                    position=position,
+                    frontier_mode=frontier_mode
+                )
+                
+                # Find most dangerous action
+                min_weight = min(weights.values()) if weights else 1.0
+                dangerous_actions = [a for a, w in weights.items() if w < 0.3]
+                
+                return RungResult(
+                    confidence=0.7 if dangerous_actions else 0.1,
+                    reason=f"Danger weights calculated, {len(dangerous_actions)} risky actions",
+                    weights=weights,
+                    metadata={'dangerous_actions': dangerous_actions, 'min_weight': min_weight}
+                )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Death avoidance failed: {e}")
 
 
 class DiscoveryExploitationRung(DecisionRung):
-    """Exploit recent discoveries immediately - EXPLOITATION"""
+    """Exploit recent discoveries immediately - EXPLOITATION
+    
+    NOTE: Uses self.core._last_discovery private attribute.
+    Kept as core access since it reads ephemeral discovery state.
+    """
     name = "discovery_exploitation"
     category = "exploitation"
     default_priority = 20
@@ -393,11 +431,12 @@ class EmbeddingSuggestionRung(DecisionRung):
     confidence_threshold = 0.7
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'self_model'):
+        sm = self.engines.self_model
+        if sm is None:
             return RungResult()
         
         try:
-            suggestion = self.core.self_model.get_embedding_suggested_action(
+            suggestion = sm.get_embedding_suggested_action(
                 game_type=None,  # Search all games
                 level=None,
                 current_frame=game_state.frame if hasattr(game_state, 'frame') else None,
@@ -433,11 +472,11 @@ class ScientificMethodRung(DecisionRung):
     confidence_threshold = 0.4
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'scientific_method_engine'):
+        sme = self.engines.scientific_method_engine
+        if sme is None:
             return RungResult()
         
         try:
-            sme = self.core.scientific_method_engine
             theory_stage = sme.get_theory_stage() if hasattr(sme, 'get_theory_stage') else 'exploring'
             
             if theory_stage == 'contradicted':
@@ -463,7 +502,11 @@ class ScientificMethodRung(DecisionRung):
 
 
 class TwoStreamsRung(DecisionRung):
-    """Stream A (private) vs Stream B (network) conflict detection - HYPOTHESIS"""
+    """Stream A (private) vs Stream B (network) conflict detection - HYPOTHESIS
+    
+    NOTE: Uses self.core._wA and self.core._wB private attributes.
+    Kept as core access since it reads stream weight state.
+    """
     name = "two_streams"
     category = "hypothesis"
     default_priority = 30
@@ -495,13 +538,18 @@ class TwoStreamsRung(DecisionRung):
 
 
 class NetworkWisdomRung(DecisionRung):
-    """Historical action traces from network - EXPLOITATION"""
+    """Historical action traces from network - EXPLOITATION
+    
+    NOTE: This rung uses self.core._get_network_action_wisdom() which is a private
+    method on CoreGameplay. Kept as core access for now.
+    """
     name = "network_wisdom"
     category = "exploitation"
     default_priority = 35
     confidence_threshold = 0.4
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        # Uses private method on core, not an engine
         if not self.core or not hasattr(self.core, '_get_network_action_wisdom'):
             return RungResult()
         
@@ -530,34 +578,55 @@ class NetworkWisdomRung(DecisionRung):
             return RungResult(reason=f"Network wisdom failed: {e}")
 
 
-class CODSEngineRung(DecisionRung):
-    """Compositional operator suggestions - EXPLOITATION"""
-    name = "cods_engine"
+class PrimitiveSuggesterRung(DecisionRung):
+    """Primitive-based action suggestions - EXPLOITATION
+    
+    Simplified replacement for CODS. Applies seed primitives to frames
+    and maps outputs to action suggestions with RLVR feedback.
+    """
+    name = "primitive_suggester"
     category = "exploitation"
     default_priority = 40
     confidence_threshold = 0.35
     
+    def __init__(self, engines: Any):
+        super().__init__(engines)
+        self._suggester = None
+    
+    def _get_suggester(self):
+        if self._suggester is None:
+            try:
+                from primitive_suggester import get_primitive_suggester
+                self._suggester = get_primitive_suggester()
+            except ImportError:
+                pass
+        return self._suggester
+    
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'cods_engine'):
+        suggester = self._get_suggester()
+        if suggester is None:
             return RungResult()
         
         try:
-            cods_context = context.get('cods_context', {})
-            suggestion = self.core.cods_engine.suggest_action(
-                game_context=cods_context,
-                available_actions=[f'ACTION{i}' for i in range(1, 8)]
-            )
+            frame = getattr(game_state, 'frame', None)
+            if frame is None:
+                return RungResult()
             
-            if suggestion and suggestion.get('confidence', 0) >= self.confidence_threshold:
+            game_type = context.get('game_type') or context.get('game_id', '').split('-')[0]
+            recent_actions = context.get('recent_actions', [])
+            
+            result = suggester.suggest_action(frame, game_type, recent_actions)
+            
+            if result and result.confidence >= self.confidence_threshold:
                 return RungResult(
-                    action=f"ACTION{suggestion.get('action', 1)}",
-                    confidence=suggestion.get('confidence', 0),
-                    reason=f"CODS: {suggestion.get('operator_name', '?')} (conf={suggestion.get('confidence', 0):.2f})",
-                    metadata={'cods_suggestion': suggestion}
+                    action=f"ACTION{result.action}",
+                    confidence=result.confidence,
+                    reason=f"Primitive: {result.primitive} - {result.reasoning}",
+                    metadata={'primitive_result': result.to_dict()}
                 )
             return RungResult()
         except Exception as e:
-            return RungResult(reason=f"CODS engine failed: {e}")
+            return RungResult(reason=f"Primitive suggester failed: {e}")
 
 
 class MetacognitivePredictionRung(DecisionRung):
@@ -568,12 +637,13 @@ class MetacognitivePredictionRung(DecisionRung):
     confidence_threshold = 0.3
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'self_model'):
+        # Use metacognitive_engine which has get_current_prediction()
+        me = self.engines.metacognitive_engine
+        if me is None:
             return RungResult()
         
         try:
-            sm = self.core.self_model
-            prediction = sm.get_current_prediction() if hasattr(sm, 'get_current_prediction') else None
+            prediction = me.get_current_prediction() if hasattr(me, 'get_current_prediction') else None
             
             if prediction:
                 return RungResult(
@@ -595,9 +665,6 @@ class ExplorationPhaseRung(DecisionRung):
     confidence_threshold = 0.5
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
-            return RungResult()
-        
         try:
             budget_used = context.get('budget_used_percent', 0)
             coverage = context.get('coverage_percent', 0)
@@ -624,9 +691,6 @@ class FrontierTopologyRung(DecisionRung):
     confidence_threshold = 0.5
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
-            return RungResult()
-        
         try:
             is_frontier = context.get('frontier_mode', False)
             if not is_frontier:
@@ -695,9 +759,6 @@ class InfiniteLoopBreakerRung(DecisionRung):
     confidence_threshold = 0.9
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
-            return RungResult()
-        
         try:
             stuck_count = context.get('recent_stuck_count', 0)
             
@@ -720,7 +781,11 @@ class InfiniteLoopBreakerRung(DecisionRung):
 # =============================================================================
 
 class MapIntelCollisionRung(DecisionRung):
-    """Obstacle avoidance when last action caused no frame change - EXPLOITATION"""
+    """Obstacle avoidance when last action caused no frame change - EXPLOITATION
+    
+    NOTE: Uses self.core._last_action_no_change private attribute.
+    Kept as core access since it reads collision state.
+    """
     name = "map_intel_collision"
     category = "exploitation"
     default_priority = 24
@@ -767,11 +832,11 @@ class TheoryGateRung(DecisionRung):
     confidence_threshold = 0.6
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'scientific_method_engine'):
+        sme = self.engines.scientific_method_engine
+        if sme is None:
             return RungResult()
         
         try:
-            sme = self.core.scientific_method_engine
             theory = sme.get_working_theory() if hasattr(sme, 'get_working_theory') else None
             
             if theory and theory.get('stage') == 'contradicted':
@@ -797,11 +862,11 @@ class AbstractionTemplatesRung(DecisionRung):
     confidence_threshold = 0.4
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'abstraction_engine'):
+        engine = self.engines.abstraction_engine
+        if engine is None:
             return RungResult()
         
         try:
-            engine = self.core.abstraction_engine
             game_type = context.get('game_type', '')
             level = context.get('level', 1)
             
@@ -829,11 +894,11 @@ class FewShotInvariantsRung(DecisionRung):
     confidence_threshold = 0.35
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'self_model'):
+        sm = self.engines.self_model
+        if sm is None:
             return RungResult()
         
         try:
-            sm = self.core.self_model
             if hasattr(sm, 'get_few_shot_control_relations'):
                 invariants = sm.get_few_shot_control_relations()
                 if invariants and invariants.get('sample_size', 0) >= 2:
@@ -858,9 +923,6 @@ class ThreeTrySequenceRung(DecisionRung):
     confidence_threshold = 0.7
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
-            return RungResult()
-        
         try:
             # Check if we have an active sequence
             active_sequence = context.get('active_sequence')
@@ -887,11 +949,11 @@ class MultiStageMatchingRung(DecisionRung):
     confidence_threshold = 0.5
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'multi_stage_pipeline'):
+        pipeline = self.engines.multi_stage_pipeline
+        if pipeline is None:
             return RungResult()
         
         try:
-            pipeline = self.core.multi_stage_pipeline
             game_type = context.get('game_type', '')
             level = context.get('level', 1)
             
@@ -910,7 +972,11 @@ class MultiStageMatchingRung(DecisionRung):
 
 
 class ThreeLayerFilterRung(DecisionRung):
-    """Meta-learning filter preventing wasted actions - FILTER"""
+    """Meta-learning filter preventing wasted actions - FILTER
+    
+    NOTE: Uses self.core._action_filter_layer* private methods.
+    Kept as core access since these are tightly coupled filter methods.
+    """
     name = "three_layer_filter"
     category = "filter"
     default_priority = 55
@@ -967,11 +1033,11 @@ class PariahAvoidanceRung(DecisionRung):
     confidence_threshold = 0.0  # Modifies weights
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'viral_package_engine'):
+        vpe = self.engines.viral_package_engine
+        if vpe is None:
             return RungResult()
         
         try:
-            vpe = self.core.viral_package_engine
             game_type = context.get('game_type', '')
             level = context.get('level', 1)
             role = context.get('agent_role', 'generalist')
@@ -1015,12 +1081,11 @@ class FrustrationDetectionRung(DecisionRung):
     confidence_threshold = 0.6
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'frustration_detector'):
+        fd = self.engines.frustration_detector
+        if fd is None:
             return RungResult()
         
         try:
-            fd = self.core.frustration_detector
-            
             if hasattr(fd, 'is_frustrated'):
                 frustration = fd.is_frustrated()
                 if frustration.get('is_frustrated', False):
@@ -1044,11 +1109,11 @@ class TerminalPatternRung(DecisionRung):
     confidence_threshold = 0.7
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'terminal_pattern_detector'):
+        tpd = self.engines.terminal_pattern_detector
+        if tpd is None:
             return RungResult()
         
         try:
-            tpd = self.core.terminal_pattern_detector
             frame = game_state.frame if hasattr(game_state, 'frame') else None
             
             if hasattr(tpd, 'detect_terminal_approach'):
@@ -1077,12 +1142,11 @@ class SensationEngineRung(DecisionRung):
     confidence_threshold = 0.35
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'sensation_engine'):
+        se = self.engines.sensation_engine
+        if se is None:
             return RungResult()
         
         try:
-            se = self.core.sensation_engine
-            
             if hasattr(se, 'get_tetrahedral_sensation'):
                 sensation = se.get_tetrahedral_sensation(context)
                 
@@ -1118,11 +1182,11 @@ class IThreadRung(DecisionRung):
     confidence_threshold = 0.4
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'i_thread'):
+        ithread = self.engines.i_thread
+        if ithread is None:
             return RungResult()
         
         try:
-            ithread = self.core.i_thread
             
             # Get stream weights
             wA = ithread.get_wA() if hasattr(ithread, 'get_wA') else 0.5
@@ -1153,11 +1217,11 @@ class NearMissAnalyzerRung(DecisionRung):
     confidence_threshold = 0.4
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'near_miss_analyzer'):
+        nma = self.engines.near_miss_analyzer
+        if nma is None:
             return RungResult()
         
         try:
-            nma = self.core.near_miss_analyzer
             game_type = context.get('game_type', '')
             level = context.get('level', 1)
             
@@ -1186,12 +1250,11 @@ class SubgoalPlanningRung(DecisionRung):
     confidence_threshold = 0.5
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'subgoal_planner'):
+        planner = self.engines.subgoal_planner
+        if planner is None:
             return RungResult()
         
         try:
-            planner = self.core.subgoal_planner
-            
             if hasattr(planner, 'get_current_subgoal'):
                 subgoal = planner.get_current_subgoal()
                 if subgoal and subgoal.get('next_action'):
@@ -1214,11 +1277,11 @@ class BreakthroughBudgetRung(DecisionRung):
     confidence_threshold = 0.0  # Context modifier, not action suggester
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'breakthrough_allocator'):
+        allocator = self.engines.breakthrough_allocator
+        if allocator is None:
             return RungResult()
         
         try:
-            allocator = self.core.breakthrough_allocator
             game_type = context.get('game_type', '')
             
             if hasattr(allocator, 'get_budget'):
@@ -1245,12 +1308,11 @@ class RegulatorySignalRung(DecisionRung):
     confidence_threshold = 0.0  # Context modifier
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'regulatory_engine'):
+        re = self.engines.regulatory_engine
+        if re is None:
             return RungResult()
         
         try:
-            re = self.core.regulatory_engine
-            
             if hasattr(re, 'get_active_signals'):
                 signals = re.get_active_signals()
                 
@@ -1282,11 +1344,11 @@ class VisualAnalyzerRung(DecisionRung):
     confidence_threshold = 0.5
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'visual_analyzer'):
+        va = self.engines.visual_analyzer
+        if va is None:
             return RungResult()
         
         try:
-            va = self.core.visual_analyzer
             frame = game_state.frame if hasattr(game_state, 'frame') else None
             
             if hasattr(va, 'get_priority_targets'):
@@ -1312,11 +1374,11 @@ class ResonanceDetectorRung(DecisionRung):
     confidence_threshold = 0.5
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'resonance_detector'):
+        rd = self.engines.resonance_detector
+        if rd is None:
             return RungResult()
         
         try:
-            rd = self.core.resonance_detector
             role = context.get('agent_role', 'generalist')
             
             # Role-specific query frequencies
@@ -1341,18 +1403,30 @@ class ResonanceDetectorRung(DecisionRung):
 
 
 class MicroCounterfactualRung(DecisionRung):
-    """Lightweight 'what if' rollouts - EXPLOITATION"""
+    """
+    Lightweight 'what if' rollouts - EXPLOITATION
+    
+    WARNING: This rung is currently BROKEN/NON-FUNCTIONAL.
+    The counterfactual_analyzer.generate_micro_rollouts() method is a STUB 
+    that always returns an empty list. Until real counterfactual logic is 
+    implemented, this rung will never produce suggestions.
+    
+    TODO: Either implement generate_micro_rollouts() or remove/disable this rung.
+    Consider commenting out from RUNG_REGISTRY if it causes issues.
+    """
     name = "micro_counterfactual"
     category = "exploitation"
     default_priority = 44
     confidence_threshold = 0.4
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'counterfactual_analyzer'):
+        # NOTE: This rung is effectively disabled - counterfactual_analyzer is a stub
+        # The generate_micro_rollouts() method returns empty list, so this never fires
+        cf = self.engines.counterfactual_analyzer
+        if cf is None:
             return RungResult()
         
         try:
-            cf = self.core.counterfactual_analyzer
             budget = context.get('imagination_budget_remaining', 0.5)
             
             if budget < 0.02:
@@ -1383,12 +1457,11 @@ class CoordinateOscillationRung(DecisionRung):
     confidence_threshold = 0.8
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'action_handler'):
+        ah = self.engines.action_handler
+        if ah is None:
             return RungResult()
         
         try:
-            ah = self.core.action_handler
-            
             if hasattr(ah, 'detect_oscillation'):
                 oscillation = ah.detect_oscillation()
                 if oscillation.get('oscillation_detected', False):
@@ -1418,12 +1491,11 @@ class GridExplorationRung(DecisionRung):
     confidence_threshold = 0.3
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'visual_analyzer'):
+        va = self.engines.visual_analyzer
+        if va is None:
             return RungResult()
         
         try:
-            va = self.core.visual_analyzer
-            
             if hasattr(va, 'get_grid_exploration_targets'):
                 targets = va.get_grid_exploration_targets()
                 if targets:
@@ -1447,11 +1519,11 @@ class NetworkObjectInventoryRung(DecisionRung):
     confidence_threshold = 0.45
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'self_model'):
+        sm = self.engines.self_model
+        if sm is None:
             return RungResult()
         
         try:
-            sm = self.core.self_model
             game_type = context.get('game_type', '')
             level = context.get('level', 1)
             
@@ -1480,12 +1552,11 @@ class PrimitiveStuckDetectionRung(DecisionRung):
     confidence_threshold = 0.6
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'primitive_helper'):
+        ph = self.engines.primitive_helper
+        if ph is None:
             return RungResult()
         
         try:
-            ph = self.core.primitive_helper
-            
             if hasattr(ph, 'detect_stuck_pattern'):
                 stuck = ph.detect_stuck_pattern(context.get('recent_frames', []), context.get('recent_actions', []))
                 if stuck.get('is_stuck', False):
@@ -1502,7 +1573,11 @@ class PrimitiveStuckDetectionRung(DecisionRung):
 
 
 class DeliberationSystemRung(DecisionRung):
-    """TRM-inspired iterative refinement - HYPOTHESIS"""
+    """TRM-inspired iterative refinement - HYPOTHESIS
+    
+    NOTE: Uses self.core._last_deliberation_result private attribute.
+    Kept as core access since it reads ephemeral deliberation state.
+    """
     name = "deliberation_system"
     category = "hypothesis"
     default_priority = 29
@@ -1538,12 +1613,11 @@ class ReplayLearningRung(DecisionRung):
     confidence_threshold = 0.5
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'replay_learning_engine'):
+        rle = self.engines.replay_learning_engine
+        if rle is None:
             return RungResult()
         
         try:
-            rle = self.core.replay_learning_engine
-            
             if hasattr(rle, 'get_current_prediction'):
                 prediction = rle.get_current_prediction()
                 if prediction and context.get('is_replay', False):
@@ -1566,12 +1640,11 @@ class ImaginationBudgetRung(DecisionRung):
     confidence_threshold = 0.0  # Context modifier
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'imagination_budget'):
+        ib = self.engines.imagination_budget
+        if ib is None:
             return RungResult()
         
         try:
-            ib = self.core.imagination_budget
-            
             if hasattr(ib, 'calculate_budget'):
                 budget = ib.calculate_budget(
                     is_novel=context.get('is_novel_game', False),
@@ -1600,9 +1673,6 @@ class CompletionPredictionRung(DecisionRung):
     confidence_threshold = 0.4
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
-            return RungResult()
-        
         try:
             prediction = context.get('completion_prediction', {})
             
@@ -1633,11 +1703,11 @@ class NetworkExplorationStatsRung(DecisionRung):
     confidence_threshold = 0.4
     
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core or not hasattr(self.core, 'network_exploration_tracker'):
+        net = self.engines.network_exploration_tracker
+        if net is None:
             return RungResult()
         
         try:
-            net = self.core.network_exploration_tracker
             game_type = context.get('game_type', '')
             level = context.get('level', 1)
             
@@ -1680,7 +1750,7 @@ ORDERING_PRESETS = {
         ('frontier_topology', 25),
         ('exploration_phase', 30),
         ('two_streams', 35),
-        ('cods_engine', 40),
+        ('primitive_suggester', 40),
         ('network_wisdom', 45),
         ('smart_action_selection', 99),
     ],
@@ -1716,7 +1786,7 @@ ORDERING_PRESETS = {
         ('multi_stage_matching', 46),
         ('replay_learning', 48),
         ('micro_counterfactual', 50),
-        ('cods_engine', 52),
+        ('primitive_suggester', 52),
         ('abstraction_templates', 54),
         ('few_shot_invariants', 56),
         ('subgoal_planning', 58),
@@ -1749,7 +1819,7 @@ ORDERING_PRESETS = {
         ('i_thread', 26),               # Self-awareness
         ('two_streams', 28),            # Conflict detection
         ('sensation_engine', 30),       # Emotional coloring
-        ('cods_engine', 35),            # Rule-based reasoning
+        ('primitive_suggester', 35),    # Primitive-based reasoning
         ('discovery_exploitation', 40), # Use what works
         ('smart_action_selection', 99),
     ],
@@ -1794,7 +1864,7 @@ ORDERING_PRESETS = {
         ('multi_stage_matching', 43),
         ('replay_learning', 44),
         ('micro_counterfactual', 45),
-        ('cods_engine', 46),
+        ('primitive_suggester', 46),
         ('network_wisdom', 47),
         ('abstraction_templates', 48),
         ('few_shot_invariants', 49),
@@ -1850,7 +1920,7 @@ ORDERING_PRESETS = {
         ('embedding_suggestion', 20),
         ('multi_stage_matching', 25),
         ('network_wisdom', 30),
-        ('cods_engine', 35),
+        ('primitive_suggester', 35),
         ('completion_prediction', 40),
         ('frontier_topology', 45),
         ('smart_action_selection', 99),
@@ -1905,7 +1975,7 @@ class DecisionRungSystem:
         'scientific_method': ScientificMethodRung,
         'two_streams': TwoStreamsRung,
         'network_wisdom': NetworkWisdomRung,
-        'cods_engine': CODSEngineRung,
+        'primitive_suggester': PrimitiveSuggesterRung,  # Replaced cods_engine
         'metacognitive_prediction': MetacognitivePredictionRung,
         'exploration_phase': ExplorationPhaseRung,
         'frontier_topology': FrontierTopologyRung,
@@ -1950,15 +2020,18 @@ class DecisionRungSystem:
     def __init__(self, 
                  strategy: str = 'ladder',
                  core_gameplay_ref: Any = None,
-                 config_path: Optional[str] = None):
+                 config_path: Optional[str] = None,
+                 engine_registry: Optional["EngineRegistry"] = None):
         """
         Args:
             strategy: 'ladder', 'weighted', 'phased', or 'parallel'
-            core_gameplay_ref: Reference to CoreGameplay instance
+            core_gameplay_ref: Reference to CoreGameplay instance (legacy)
             config_path: Optional path to custom ordering config
+            engine_registry: EngineRegistry for modular engine access (preferred)
         """
         self.strategy = DecisionStrategy(strategy)
         self.core: Any = core_gameplay_ref
+        self._engine_registry: Optional["EngineRegistry"] = engine_registry
         self.rungs: List[DecisionRung] = []
         self.ordering_name = 'default'
         self.config_path = config_path or str(Path(__file__).parent / 'config' / 'rung_orderings.json')
@@ -1969,6 +2042,22 @@ class DecisionRungSystem:
         
         # Load default ordering
         self.load_ordering('efficiency')
+    
+    @property
+    def engines(self) -> "EngineRegistry":
+        """Access modular engines via registry."""
+        if self._engine_registry is not None:
+            return self._engine_registry
+        
+        # Lazy-create registry from legacy core
+        if self.core is not None:
+            from engines.registry import EngineRegistry
+            self._engine_registry = EngineRegistry(legacy_core=self.core)
+        else:
+            from engines.registry import EngineRegistry
+            self._engine_registry = EngineRegistry()
+        
+        return self._engine_registry
     
     def load_ordering(self, preset_name: str) -> None:
         """Load a preset ordering or custom config"""
@@ -1984,10 +2073,13 @@ class DecisionRungSystem:
                 print(f"[RUNG-SYSTEM] Warning: Unknown ordering '{preset_name}', using efficiency")
                 ordering = ORDERING_PRESETS['efficiency']
         
-        # Instantiate rungs
+        # Instantiate rungs with both legacy core AND engine registry
         for rung_name, priority in ordering:
             if rung_name in self.RUNG_REGISTRY:
-                rung = self.RUNG_REGISTRY[rung_name](self.core)
+                rung = self.RUNG_REGISTRY[rung_name](
+                    core_gameplay_ref=self.core,
+                    engine_registry=self._engine_registry
+                )
                 rung.priority_override = priority
                 self.rungs.append(rung)
             else:
@@ -2393,12 +2485,8 @@ class CoreGameplayAdapter:
             # Recent actions
             context['recent_actions'] = getattr(self.core, '_recent_actions', [])[-10:]
             
-            # CODS context
-            if hasattr(self.core, 'cods_engine') and self.core.cods_engine:
-                context['cods_context'] = {
-                    'engine': self.core.cods_engine,
-                    'game_context': getattr(self.core, '_cods_game_context', None),
-                }
+            # Game type for primitive suggester
+            context['game_type'] = context.get('game_id', '').split('-')[0] if context.get('game_id') else None
             
             # Self-model
             if hasattr(self.core, 'agent_self_model') and self.core.agent_self_model:

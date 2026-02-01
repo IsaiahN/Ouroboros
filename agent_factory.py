@@ -18,7 +18,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Callable
 from database_interface import DatabaseInterface
-from sensation_engine import SensationEngine
+from engines.consciousness.sensation_engine import SensationEngine
 
 logger = logging.getLogger(__name__)
 

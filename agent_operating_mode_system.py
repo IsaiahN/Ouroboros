@@ -34,7 +34,7 @@ from database_interface import DatabaseInterface
 
 # IThread integration for centralized wA/wB management
 try:
-    from i_thread import IThread
+    from engines.consciousness.i_thread import IThread
     ITHREAD_AVAILABLE = True
 except ImportError:
     ITHREAD_AVAILABLE = False

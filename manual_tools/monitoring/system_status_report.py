@@ -83,11 +83,11 @@ def main():
     print(f"   Games played: {recent_games[0]['count']}")
     
     # System Health
-    print(f"\n🏥 SYSTEM HEALTH")
+    print(f"\n[HEALTH] SYSTEM HEALTH")
     
     # Check code integration
     try:
-        from viral_package_engine import ViralPackageEngine
+        from engines.social.viral_package_engine import ViralPackageEngine
         print(f"   [OK] viral_package_engine.py imported successfully")
     except Exception as e:
         print(f"   [FAIL] viral_package_engine.py import failed: {e}")

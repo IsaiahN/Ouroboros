@@ -59,7 +59,7 @@ class TestSynthesisWithSurprise(unittest.TestCase):
         self.mock_db = MockDatabaseInterface()
         
         # Import here to allow mocking
-        from sensation_engine import SensationEngine
+        from engines.consciousness.sensation_engine import SensationEngine
         self.engine = SensationEngine(self.mock_db)  # type: ignore[arg-type]
     
     def test_synthesis_includes_surprise_score(self):
@@ -175,7 +175,7 @@ class TestTetrahedralSensation(unittest.TestCase):
     
     def setUp(self):
         self.mock_db = MockDatabaseInterface()
-        from sensation_engine import SensationEngine
+        from engines.consciousness.sensation_engine import SensationEngine
         self.engine = SensationEngine(self.mock_db)  # type: ignore[arg-type]
     
     def test_tetrahedral_returns_both_streams(self):
@@ -248,7 +248,7 @@ class TestConsciousnessIntensity(unittest.TestCase):
     
     def setUp(self):
         self.mock_db = MockDatabaseInterface()
-        from sensation_engine import SensationEngine
+        from engines.consciousness.sensation_engine import SensationEngine
         self.engine = SensationEngine(self.mock_db)  # type: ignore[arg-type]
     
     def test_automatic_intensity(self):
@@ -297,8 +297,8 @@ class TestStreamDocumentation(unittest.TestCase):
     
     def test_module_docstring_mentions_streams(self):
         """Sensation engine docstring should document Two Streams."""
-        from sensation_engine import SensationEngine
-        import sensation_engine
+        from engines.consciousness.sensation_engine import SensationEngine
+        import engines.consciousness.sensation_engine as sensation_engine
         
         docstring = sensation_engine.__doc__
         
