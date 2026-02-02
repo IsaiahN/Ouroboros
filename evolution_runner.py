@@ -211,37 +211,48 @@ class EvolutionRunner:
         actions_taken = 0
         action_sequence = []
         last_obs = None
+        prev_levels = 0
+
+        # Get initial observation and available actions
+        initial_obs = env.observation_space
+        available_actions = getattr(initial_obs, 'available_actions', [1, 2, 3, 4])
+        win_levels = getattr(initial_obs, 'win_levels', 7)
+
+        if self.verbose:
+            print(f"    Game: {game_id} | Available actions: {available_actions} | Win at: {win_levels} levels")
 
         # Game loop
         while actions_taken < self.max_actions:
             if not self.running:
                 break
 
-            # Get current observation
-            obs = env.observation_space
-            if obs is None:
-                # First step - just take a random action to get started
-                action = random.choice([GameAction.ACTION1, GameAction.ACTION2,
-                                       GameAction.ACTION3, GameAction.ACTION4])
-            else:
-                # Build context for decision system
-                context = {
-                    'game_id': game_id,
-                    'agent_id': agent.agent_id,
-                    'actions_taken': actions_taken,
-                    'state': str(obs.state),
-                    'frame_data': obs,
-                }
+            # Get current observation from last step (or initial)
+            obs = last_obs if last_obs else initial_obs
 
-                # Get action from decision system
-                try:
-                    result = self.decision_system.decide(context, {})
-                    action_num = result.action if result else random.randint(1, 7)
-                    action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
-                except Exception:
-                    # Fallback to random
-                    action = random.choice([GameAction.ACTION1, GameAction.ACTION2,
-                                           GameAction.ACTION3, GameAction.ACTION4])
+            # Build context for decision system with available_actions
+            context = {
+                'game_id': game_id,
+                'agent_id': agent.agent_id,
+                'actions_taken': actions_taken,
+                'state': str(obs.state) if obs else 'UNKNOWN',
+                'frame_data': obs,
+                'available_actions': available_actions,
+                'levels_completed': getattr(obs, 'levels_completed', 0),
+                'win_levels': win_levels,
+            }
+
+            # Get action from decision system
+            try:
+                result = self.decision_system.decide(context, {})
+                action_num = result.action if result else random.choice(available_actions)
+                # Validate action is in available set
+                if action_num not in available_actions:
+                    action_num = random.choice(available_actions)
+                action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
+            except Exception:
+                # Fallback to random from available actions only
+                action_num = random.choice(available_actions)
+                action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
 
             # Take action
             try:
@@ -250,12 +261,17 @@ class EvolutionRunner:
                 action_sequence.append(action.name)
                 last_obs = obs
 
+                # Track level progress
+                current_levels = getattr(obs, 'levels_completed', 0) or 0
+                level_up = current_levels > prev_levels
+                prev_levels = current_levels
+
                 # Verbose output
                 if self.verbose:
-                    score = getattr(obs, 'score', 0) or 0
-                    levels = getattr(obs, 'levels_completed', 0) or 0
+                    levels = current_levels
                     state_str = str(obs.state).replace('GameState.', '') if obs else '?'
-                    print(f"    [{actions_taken:3d}] {action.name:8s} -> score={score:.1f} levels={levels} state={state_str}")
+                    level_indicator = ' [LEVEL UP!]' if level_up else ''
+                    print(f"    [{actions_taken:3d}] {action.name:8s} -> levels={levels}/{win_levels} state={state_str}{level_indicator}")
 
                 # Check for game end
                 if obs and obs.state == GameState.WIN:
@@ -271,17 +287,17 @@ class EvolutionRunner:
                 print(f"  [ERROR] Step failed: {e}")
                 break
 
-        # Extract results
-        score = 0.0
+        # Extract results - use levels_completed as the score metric
         levels_completed = 0
-        total_levels = 1
+        total_levels = win_levels
         is_win = False
 
         if last_obs:
-            score = getattr(last_obs, 'score', 0.0) or 0.0
             levels_completed = getattr(last_obs, 'levels_completed', 0) or 0
-            total_levels = getattr(last_obs, 'total_levels', 1) or 1
             is_win = last_obs.state == GameState.WIN
+
+        # Score is based on level progress (0.0 to 1.0)
+        score = levels_completed / total_levels if total_levels > 0 else 0.0
 
         return GameResult(
             game_id=game_id,
