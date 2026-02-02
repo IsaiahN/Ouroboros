@@ -60,21 +60,6 @@ class MetacognitiveReasoningEngine:
         # Key = action (e.g., 'ACTION1'), Value = list of contradictions
         self._contradicted_actions: Dict[str, List[Dict[str, Any]]] = {}
 
-    def set_session_provenance(
-        self,
-        attempt_id: Optional[str],
-        mode: Optional[str],
-        generation: Optional[int],
-        role: Optional[str],
-    ) -> None:
-        """Record provenance for metacog inserts (DB-only, no side effects)."""
-        self._session_provenance = {
-            'attempt_id': attempt_id,
-            'mode': mode,
-            'generation': generation,
-            'role': role,
-        }
-
     def _ensure_tables(self) -> None:
         """Create metacognitive tracking tables."""
         # Track assumptions and their validity
@@ -468,12 +453,6 @@ class MetacognitiveReasoningEngine:
         logger.info(f"[METACOG] PREDICTION: If '{theory}' then {action} should cause '{predicted_outcome}'")
         return prediction_id
 
-    def peek_prediction(self) -> Optional[str]:
-        """Lightweight peek at the pending prediction outcome, if any."""
-        if not self._pending_prediction:
-            return None
-        return self._pending_prediction.get('predicted')
-
     def get_current_prediction(self) -> Optional[Dict[str, Any]]:
         """
         Get the current hypothesis being tested.
@@ -753,126 +732,14 @@ class MetacognitiveReasoningEngine:
         """Get the current working theory."""
         return self._current_theory
 
-    def get_theory_revision_history(self) -> List[Dict[str, Any]]:
-        """Get history of theory revisions this session."""
-        return self._theory_revisions.copy()
-
     # ========================================================================
-    # 4. FAILURE COMMONALITY ANALYSIS
+    # 4. FAILURE INSIGHT GENERATION (for ContextualFailureRung)
     # ========================================================================
-
-    def record_failure(
-        self,
-        action: str,
-        context: Dict[str, Any]
-    ) -> None:
-        """
-        Record a failed attempt for commonality analysis.
-
-        Args:
-            action: The action that failed
-            context: Context of failure (colors nearby, position, etc.)
-        """
-        self._failed_attempts.append({
-            'action': action,
-            'context': context,
-            'timestamp': datetime.now().isoformat()
-        })
-
-        # Full game memory - safety cap at 20000 for pathological cases only
-        if len(self._failed_attempts) > 20000:
-            self._failed_attempts = self._failed_attempts[-20000:]
-
-    def analyze_failure_commonality(
-        self,
-        agent_id: str,
-        game_type: str,
-        level_number: int,
-        min_failures: int = 3
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Analyze recent failures to find common factors.
-
-        Returns:
-            Common factor analysis if pattern found, None otherwise
-        """
-        if len(self._failed_attempts) < min_failures:
-            return None
-
-        # Analyze last N failures
-        recent_failures = self._failed_attempts[-min_failures:]
-
-        # Check for common actions
-        action_counts: Dict[str, int] = {}
-        for f in recent_failures:
-            action = f.get('action', '')
-            action_counts[action] = action_counts.get(action, 0) + 1
-
-        # Check for common context elements
-        # EXCLUDE trivial/tautological elements that don't help pattern detection
-        EXCLUDED_KEYS = {'level', 'state', 'available_actions'}
-        context_elements: Dict[str, int] = {}
-        for f in recent_failures:
-            context = f.get('context', {})
-            for key, value in context.items():
-                if key in EXCLUDED_KEYS:
-                    continue
-                element = f"{key}:{value}"
-                context_elements[element] = context_elements.get(element, 0) + 1
-
-        # Find most common factor
-        common_factor: Optional[str] = None
-        max_count = 0
-
-        for action, count in action_counts.items():
-            if count >= min_failures * 0.8 and count > max_count:
-                common_factor = f"ACTION: {action}"
-                max_count = count
-
-        for element, count in context_elements.items():
-            if count >= min_failures * 0.8 and count > max_count:
-                common_factor = f"CONTEXT: {element}"
-                max_count = count
-
-        if not common_factor:
-            return None
-
-        # Generate insight
-        insight = self._generate_failure_insight(common_factor, recent_failures)
-
-        # Store pattern
-        pattern_id = f"fail_{uuid.uuid4().hex[:12]}"
-        self.db.execute_query("""
-            INSERT INTO metacognitive_failure_patterns
-            (pattern_id, agent_id, game_type, level_number, common_factor, failure_count, example_actions, insight,
-             source_attempt_id, source_mode, last_observed_generation, decay_score, reliability, consensus)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            pattern_id, agent_id, game_type, level_number,
-            common_factor, len(recent_failures),
-            json.dumps([f['action'] for f in recent_failures]),
-            insight,
-            self._session_provenance.get('attempt_id'),
-            self._session_provenance.get('mode'),
-            self._session_provenance.get('generation') or 0,
-            0.0,
-            0.5,
-            0.0,
-        ))
-
-        logger.info(f"[METACOG] FAILURE PATTERN: {common_factor} - {insight}")
-
-        return {
-            'pattern_id': pattern_id,
-            'common_factor': common_factor,
-            'failure_count': len(recent_failures),
-            'insight': insight
-        }
 
     def _generate_failure_insight(
         self,
         common_factor: str,
-        failures: List[Dict[str, Any]]
+        _failures: List[Dict[str, Any]]  # Available for enhanced insight generation
     ) -> str:
         """Generate an insight from failure pattern."""
         if 'ACTION:' in common_factor:
@@ -1084,23 +951,6 @@ class MetacognitiveReasoningEngine:
         eliminated = set(self.get_eliminated_actions(game_type, level_number))
         return [a for a in all_actions if a not in eliminated]
 
-    def get_elimination_summary(
-        self,
-        game_type: str,
-        level_number: int
-    ) -> str:
-        """Get human-readable elimination summary."""
-        eliminated = self.get_eliminated_actions(game_type, level_number)
-        remaining = self.get_remaining_actions(game_type, level_number)
-
-        if not eliminated:
-            return "No actions eliminated yet - all options open"
-
-        return (
-            f"Eliminated {len(eliminated)} actions ({', '.join(eliminated)}). "
-            f"Remaining options: {', '.join(remaining)}"
-        )
-
     # ========================================================================
     # 6. POST-WIN REFLECTION
     # ========================================================================
@@ -1245,17 +1095,6 @@ class MetacognitiveReasoningEngine:
     # SESSION MANAGEMENT
     # ========================================================================
 
-    def reset_session(self) -> None:
-        """Reset session state for new game."""
-        self._current_assumptions = []
-        self._pending_prediction = None
-        self._failed_attempts = []
-        self._eliminated_actions = set()
-        self._theory_revisions = []
-        self._current_theory = None
-
-        logger.debug("[METACOG] Session reset for new game")
-
     def get_metacognitive_summary(self) -> Dict[str, Any]:
         """Get summary of current metacognitive state."""
         untested = [a for a in self._current_assumptions if not a.get('tested')]
@@ -1270,52 +1109,4 @@ class MetacognitiveReasoningEngine:
             'failures_recorded': len(self._failed_attempts),
             'actions_eliminated': len(self._eliminated_actions),
             'theory_revisions': len(self._theory_revisions)
-        }
-
-    def get_q8_metacognitive_context(
-        self,
-        agent_id: str,
-        game_type: str,
-        level_number: int
-    ) -> Dict[str, Any]:
-        """
-        Build Q8 context for reasoning logs.
-
-        Q8: What am I assuming? What have I proven/disproven? What's eliminated?
-
-        Returns:
-            Q8 context dictionary
-        """
-        summary = self.get_metacognitive_summary()
-        eliminated = self.get_eliminated_actions(game_type, level_number)
-        remaining = self.get_remaining_actions(game_type, level_number)
-        disproven = self.get_disproven_assumptions(game_type, level_number)
-        insights = self.get_relevant_insights(game_type, level_number)
-
-        # Build insight text
-        if self._current_theory:
-            theory_insight = f"Working theory: {self._current_theory}"
-        else:
-            theory_insight = "No working theory yet - exploring"
-
-        if eliminated:
-            elimination_insight = f"Eliminated {len(eliminated)} actions, {len(remaining)} remain"
-        else:
-            elimination_insight = "All actions still viable"
-
-        if disproven:
-            assumption_insight = f"Disproven {len(disproven)} assumptions"
-        else:
-            assumption_insight = "No assumptions disproven yet"
-
-        return {
-            'Q8': f"{theory_insight}. {elimination_insight}. {assumption_insight}.",
-            'current_theory': self._current_theory,
-            'theory_revisions': len(self._theory_revisions),
-            'eliminated_actions': eliminated,
-            'remaining_actions': remaining,
-            'disproven_assumptions': [d['assumption_text'] for d in disproven],
-            'relevant_insights': [i['key_insight'] for i in insights[:3]],
-            'pending_prediction': self._pending_prediction is not None,
-            'confidence': min(0.9, 0.3 + len(self._theory_revisions) * 0.1 + len(eliminated) * 0.05)
         }

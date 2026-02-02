@@ -51,9 +51,11 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import json
 import logging
+import math
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
@@ -129,7 +131,7 @@ class KnowledgeProvenance:
     detection_source: str = "unknown"  # e.g., 'action_traces', 'winning_sequences', 'hypothesis'
     sample_size: int = 0               # How many data points support this
     agent_diversity: int = 0           # How many different agents/sessions contributed
-    temporal_spread_hours: float = 0.0 # How spread out in time (recent vs ancient)
+    temporal_spread_generations: float = 0.0  # Generation spread of observations (hardware-agnostic)
 
     # Validation metadata
     validation_type: str = "frequency"  # 'frequency', 'outcome_based', 'win_validated', 'cross_game'
@@ -157,8 +159,8 @@ class KnowledgeProvenance:
         # Diversity bonus: knowledge from many sources is more reliable
         diversity_factor = min(1.0, self.agent_diversity / 5.0)
 
-        # Temporal spread bonus: patterns that persist over time are more valid
-        temporal_factor = min(1.0, self.temporal_spread_hours / 24.0)  # Cap at 1 day
+        # Temporal spread bonus: patterns observed across many generations are more valid
+        temporal_factor = min(1.0, self.temporal_spread_generations / 20.0)  # Cap at 20 gens
 
         # Resonance bonus: cross-game patterns are structural truths
         resonance_factor = self.resonance_score * 0.5
@@ -183,7 +185,7 @@ class KnowledgeProvenance:
             'detection_source': self.detection_source,
             'sample_size': self.sample_size,
             'agent_diversity': self.agent_diversity,
-            'temporal_spread_hours': self.temporal_spread_hours,
+            'temporal_spread_generations': self.temporal_spread_generations,
             'validation_type': self.validation_type,
             'positive_outcomes': self.positive_outcomes,
             'negative_outcomes': self.negative_outcomes,
@@ -1002,29 +1004,32 @@ class FrontierTopologyRung(DecisionRung):
             confidence = coverage * 0.6 + sample_confidence * 0.4
 
             # Build provenance - track HOW this knowledge became knowable
-            temporal_hours = 0.0
-            if first_seen and last_seen:
-                try:
-                    from datetime import datetime
+            # Generation spread: if we have generation data, use it; else estimate from timestamps
+            temporal_generations = 0.0
 
-                    # Handle string or datetime
-                    if isinstance(first_seen, str):
-                        first_dt = datetime.fromisoformat(first_seen.replace('Z', '+00:00'))
-                    else:
-                        first_dt = first_seen
-                    if isinstance(last_seen, str):
-                        last_dt = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
-                    else:
-                        last_dt = last_seen
-                    temporal_hours = (last_dt - first_dt).total_seconds() / 3600.0
-                except Exception:
-                    pass
+            # Try to get generation spread from action_traces if available
+            try:
+                gen_results = db.execute_query("""
+                    SELECT MIN(generation) as min_gen, MAX(generation) as max_gen
+                    FROM action_traces
+                    WHERE frame_hash = ?
+                      AND game_id LIKE ?
+                      AND level_number = ?
+                      AND generation IS NOT NULL
+                """, (frame_hash, f"{game_type}%", level))
+
+                if gen_results and gen_results[0].get('min_gen') is not None:
+                    min_gen = gen_results[0]['min_gen']
+                    max_gen = gen_results[0]['max_gen']
+                    temporal_generations = float(max_gen - min_gen)
+            except Exception:
+                pass  # Generation column may not exist yet
 
             provenance = KnowledgeProvenance(
                 detection_source='action_traces',
                 sample_size=total_data_points,
                 agent_diversity=len(unique_sessions),  # Unique sessions as proxy for diversity
-                temporal_spread_hours=temporal_hours,
+                temporal_spread_generations=temporal_generations,
                 validation_type='outcome_based' if total_positive > 0 else 'frequency',
                 positive_outcomes=total_positive,
                 negative_outcomes=total_negative,
@@ -1884,7 +1889,7 @@ class ResonanceDetectorRung(DecisionRung):
                             detection_source='resonance_patterns',
                             sample_size=role_diversity * len(game_types),
                             agent_diversity=role_diversity,  # Different ROLES = different cognitive biases
-                            temporal_spread_hours=0.0,  # Not tracked for resonance
+                            temporal_spread_generations=0.0,  # Not tracked for resonance
                             validation_type='cross_role_convergence',  # The gold standard
                             positive_outcomes=role_diversity,  # Each role validated
                             negative_outcomes=0,
@@ -2167,6 +2172,630 @@ class NetworkExplorationStatsRung(DecisionRung):
 
 
 # =============================================================================
+# WIRED METACOGNITION RUNGS (Feb 2026)
+# =============================================================================
+# These rungs wire previously-unused methods from engines/cognition/ and
+# engines/consciousness/ into the decision system.
+
+class RuleTransferRung(DecisionRung):
+    """Apply learned rules from other games - EXPLOITATION
+
+    Wires: engines/cognition/rule_induction.py:
+        - get_applicable_rules()
+        - update_rule_success()  # Feedback loop
+
+    Queries the learned_rules table for rules that match the current game frame.
+    Enables cross-game knowledge transfer where patterns discovered in one game
+    can guide action selection in structurally similar games.
+
+    Feedback Loop: After action outcome, calls update_rule_success() to adjust
+    rule confidence. Successful rules gain confidence (+0.05), failed rules lose (-0.1).
+    """
+    name = "rule_transfer"
+    category = "exploitation"
+    default_priority = 25  # After hypothesis, before network wisdom
+    confidence_threshold = 0.5
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._rule_engine: Optional[Any] = None
+        # Track active rule for feedback loop
+        self._active_rule_id: Optional[str] = None
+        self._active_rule_game: Optional[str] = None
+
+    def _get_rule_engine(self) -> Optional[Any]:
+        """Lazy-load rule induction engine."""
+        if self._rule_engine is None:
+            try:
+                from database_interface import DatabaseInterface
+                from engines.cognition.rule_induction import RuleInductionEngine
+                db = DatabaseInterface()
+                self._rule_engine = RuleInductionEngine(db)
+            except ImportError as e:
+                logger.debug(f"[RULE-TRANSFER] Failed to load RuleInductionEngine: {e}")
+        return self._rule_engine
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        engine = self._get_rule_engine()
+        if engine is None:
+            return RungResult()
+
+        try:
+            frame = getattr(game_state, 'frame', None)
+            if frame is None:
+                return RungResult()
+
+            agent_id = context.get('agent_id')
+            min_confidence = self.confidence_threshold
+
+            # Get rules that match current game frame
+            applicable_rules = engine.get_applicable_rules(
+                current_frame=frame,
+                agent_id=agent_id,
+                min_confidence=min_confidence
+            )
+
+            if not applicable_rules:
+                return RungResult()
+
+            # Use highest-confidence rule
+            best_rule, confidence = applicable_rules[0]
+            action_template = best_rule.get('action_template', {})
+            suggested_action = action_template.get('action')
+
+            if not suggested_action:
+                return RungResult()
+
+            # Track rule for feedback loop (instance-level, not context-level)
+            self._active_rule_id = best_rule.get('rule_id')
+            self._active_rule_game = context.get('game_type', '')
+
+            return RungResult(
+                action=suggested_action,
+                confidence=confidence,
+                reason=f"Rule transfer: {best_rule.get('rule_type', 'unknown')} from {best_rule.get('source_game', 'network')}",
+                metadata={
+                    'rule_id': best_rule.get('rule_id'),
+                    'rule_type': best_rule.get('rule_type'),
+                    'source_game': best_rule.get('source_game'),
+                    'match_confidence': confidence,
+                    'success_count': best_rule.get('success_count', 0),
+                }
+            )
+        except Exception as e:
+            return RungResult(reason=f"Rule transfer failed: {e}")
+
+    def record_outcome(self, was_accepted: bool, success: bool = False) -> None:
+        """Update rule success/failure after action outcome.
+
+        Wires: engines/cognition/rule_induction.py:update_rule_success()
+        This closes the feedback loop - rules that work gain confidence,
+        rules that fail lose confidence.
+        """
+        super().record_outcome(was_accepted)
+
+        # If rule was used and we have outcome, update the rule
+        if was_accepted and self._active_rule_id and self._rule_engine is not None:
+            try:
+                self._rule_engine.update_rule_success(
+                    rule_id=self._active_rule_id,
+                    success=success,
+                    target_game_id=self._active_rule_game or 'unknown'
+                )
+            except Exception:
+                pass  # Don't fail silently, but don't break gameplay
+            finally:
+                # Clear active rule after feedback
+                self._active_rule_id = None
+                self._active_rule_game = None
+
+class TheoryContradictionRung(DecisionRung):
+    """Filter actions that contradict current working theory - FILTER
+
+    Wires: engines/cognition/metacognition.py:get_contradicted_actions()
+
+    When metacognition's theory revision marks actions as contradicted
+    (failed prediction -> action disproven), this rung applies negative
+    weights to those actions, preventing repeated mistakes.
+    """
+    name = "theory_contradiction"
+    category = "filter"
+    default_priority = 17  # After death_avoidance (15), before hypothesis
+    confidence_threshold = 0.3
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        me = self.engines.metacognitive_engine
+        if me is None:
+            return RungResult()
+
+        try:
+            # Get actions contradicted by failed theories
+            if not hasattr(me, 'get_contradicted_actions'):
+                return RungResult()
+
+            contradicted = me.get_contradicted_actions()
+
+            if not contradicted:
+                return RungResult()
+
+            # Build penalty weights for contradicted actions
+            weights = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+            penalized = []
+
+            for action_str, contradiction_count in contradicted.items():
+                if action_str in weights:
+                    # More contradictions = stronger penalty
+                    # 1 contradiction = 0.7, 2 = 0.5, 3+ = 0.3
+                    penalty = min(0.7, 0.2 * contradiction_count)
+                    weights[action_str] = max(0.3, 1.0 - penalty)
+                    penalized.append(f"{action_str}({contradiction_count})")
+
+            if not penalized:
+                return RungResult()
+
+            return RungResult(
+                confidence=0.5,
+                reason=f"Theory contradictions: {', '.join(penalized)}",
+                weights=weights,
+                metadata={'contradicted_actions': contradicted}
+            )
+        except Exception as e:
+            return RungResult(reason=f"Theory contradiction failed: {e}")
+
+
+class HypothesisTestingRung(DecisionRung):
+    """Test untested assumptions to validate or disprove them - HYPOTHESIS
+
+    Wires: engines/cognition/metacognition.py:
+        - get_untested_assumptions()
+        - register_assumption()
+        - challenge_assumption()
+
+    Prioritizes actions that would test currently-held assumptions.
+    E.g., if agent assumes "ACTION1 moves me up", this rung will
+    suggest ACTION1 when testing is needed.
+    """
+    name = "hypothesis_testing"
+    category = "hypothesis"
+    default_priority = 19  # After metacognitive_prediction (18)
+    confidence_threshold = 0.4
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        me = self.engines.metacognitive_engine
+        if me is None:
+            return RungResult()
+
+        try:
+            game_type = context.get('game_type', '')
+            level = context.get('level', 1)
+
+            # Get untested assumptions for this game/level
+            if not hasattr(me, 'get_untested_assumptions'):
+                return RungResult()
+
+            untested = me.get_untested_assumptions(game_type, level)
+
+            if not untested:
+                return RungResult()
+
+            # Find an assumption we can test
+            for assumption in untested:
+                assumption_text = assumption.get('assumption_text', '')
+                assumption_type = assumption.get('assumption_type', '')
+                assumption_id = assumption.get('assumption_id', '')
+
+                # Parse assumption to find testable action
+                # E.g., "ACTION1 moves me up" -> suggest ACTION1
+                import re
+                action_match = re.search(r'ACTION(\d+)', assumption_text.upper())
+
+                if action_match:
+                    action = f"ACTION{action_match.group(1)}"
+                    # Store assumption_id for challenge_assumption callback
+                    context['_testing_assumption_id'] = assumption_id
+                    context['_testing_assumption_text'] = assumption_text
+
+                    return RungResult(
+                        action=action,
+                        confidence=0.55,
+                        reason=f"Testing: {assumption_text[:50]}",
+                        metadata={
+                            'assumption_id': assumption_id,
+                            'assumption_type': assumption_type,
+                            'assumption_text': assumption_text,
+                        }
+                    )
+
+                # For non-action assumptions (e.g., "blue is goal"), no direct action
+                # but we can store for later validation
+
+            return RungResult(
+                confidence=0.1,
+                reason=f"{len(untested)} untested assumptions, none directly testable",
+                metadata={'untested_count': len(untested)}
+            )
+        except Exception as e:
+            return RungResult(reason=f"Hypothesis testing failed: {e}")
+
+
+class SelfTrustBoostRung(DecisionRung):
+    """Manage wA (self-trust) based on context - ORIENTATION
+
+    Wires: engines/consciousness/i_thread.py:
+        - boost_self_trust()
+        - restore_self_trust()
+
+    On frontier levels (no winning sequences), boosts self-trust to encourage
+    exploration over network following. When sequences become available,
+    restores normal trust balance.
+
+    This implements the Two Streams principle: trust yourself more when
+    network wisdom doesn't apply.
+    """
+    name = "self_trust_boost"
+    category = "orientation"
+    default_priority = 3  # Very early - affects all downstream decisions
+    confidence_threshold = 0.0  # Always runs, just adjusts weights
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._last_frontier_state: Dict[str, bool] = {}  # agent_id -> was_frontier
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        i_thread = self.engines.i_thread
+        if i_thread is None:
+            return RungResult()
+
+        try:
+            agent_id = context.get('agent_id', 'default')
+            is_frontier = context.get('frontier_mode', False) or context.get('is_frontier', False)
+            has_sequence = context.get('has_winning_sequence', False) or context.get('active_sequence')
+
+            # Track state transition
+            was_frontier = self._last_frontier_state.get(agent_id, False)
+            self._last_frontier_state[agent_id] = is_frontier
+
+            # Boost when entering frontier (no sequences available)
+            if is_frontier and not has_sequence and not was_frontier:
+                if hasattr(i_thread, 'boost_self_trust'):
+                    original, boosted, new_wB = i_thread.boost_self_trust(
+                        agent_id=agent_id,
+                        boost_amount=0.25,
+                        reason='frontier_exploration'
+                    )
+                    return RungResult(
+                        confidence=0.1,  # Context modifier, not action suggestion
+                        reason=f"Frontier boost: wA {original:.2f} -> {boosted:.2f}",
+                        metadata={
+                            'boost_applied': True,
+                            'original_wA': original,
+                            'boosted_wA': boosted,
+                            'trigger': 'frontier_entry'
+                        }
+                    )
+
+            # Restore when leaving frontier (sequences now available)
+            if (not is_frontier or has_sequence) and was_frontier:
+                if hasattr(i_thread, 'restore_self_trust'):
+                    restored_wA, restored_wB = i_thread.restore_self_trust(agent_id=agent_id)
+                    return RungResult(
+                        confidence=0.1,
+                        reason=f"Trust restored: wA -> {restored_wA:.2f}",
+                        metadata={
+                            'restore_applied': True,
+                            'restored_wA': restored_wA,
+                            'trigger': 'frontier_exit'
+                        }
+                    )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Self trust boost failed: {e}")
+
+
+class AssumptionFormationRung(DecisionRung):
+    """Form and register assumptions based on observed patterns - HYPOTHESIS
+
+    Wires: engines/cognition/metacognition.py:
+        - register_assumption()
+        - challenge_assumption()
+
+    Monitors gameplay to detect correlations and form testable assumptions.
+    E.g., "When I press ACTION1, the blue object moves up" -> registers assumption.
+
+    This is the WRITE side of the assumption system (HypothesisTestingRung is READ).
+    Together they form a complete hypothesis testing loop:
+    1. AssumptionFormationRung detects correlation -> register_assumption()
+    2. HypothesisTestingRung suggests action to test -> get_untested_assumptions()
+    3. After outcome -> challenge_assumption() to validate/invalidate
+    """
+    name = "assumption_formation"
+    category = "hypothesis"
+    default_priority = 16  # Before hypothesis_testing
+    confidence_threshold = 0.3
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # Track recent observations for pattern detection
+        self._recent_observations: List[Dict[str, Any]] = []
+        self._max_observations = 20
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        me = self.engines.metacognitive_engine
+        if me is None:
+            return RungResult()
+
+        try:
+            game_type = context.get('game_type', '')
+            level = context.get('level', 1)
+            agent_id = context.get('agent_id', 'default')
+            last_action = context.get('last_action')
+            frame_change = context.get('frame_change', {})
+
+            # Skip if no action taken yet
+            if not last_action:
+                return RungResult()
+
+            # Record observation
+            observation = {
+                'action': last_action,
+                'frame_change': frame_change,
+                'score_delta': context.get('score_delta', 0),
+                'game_type': game_type,
+                'level': level,
+            }
+            self._recent_observations.append(observation)
+            if len(self._recent_observations) > self._max_observations:
+                self._recent_observations.pop(0)
+
+            # Need at least 3 observations to detect patterns
+            if len(self._recent_observations) < 3:
+                return RungResult()
+
+            # Look for consistent action->outcome correlations
+            assumptions_formed = []
+            action_outcomes: Dict[str, List[Dict]] = {}
+
+            for obs in self._recent_observations:
+                action = obs.get('action', '')
+                if action:
+                    if action not in action_outcomes:
+                        action_outcomes[action] = []
+                    action_outcomes[action].append(obs)
+
+            # Check each action for consistent outcomes
+            for action, outcomes in action_outcomes.items():
+                if len(outcomes) >= 2:
+                    # Check for consistent positive score
+                    positive_scores = [o for o in outcomes if o.get('score_delta', 0) > 0]
+                    if len(positive_scores) >= 2:
+                        assumption_text = f"{action} consistently gives positive score"
+                        if hasattr(me, 'register_assumption'):
+                            assumption_id = me.register_assumption(
+                                agent_id=agent_id,
+                                game_type=game_type,
+                                level_number=level,
+                                assumption=assumption_text,
+                                assumption_type='rule'
+                            )
+                            assumptions_formed.append(assumption_text)
+
+                    # Check for consistent negative score (form avoidance assumption)
+                    negative_scores = [o for o in outcomes if o.get('score_delta', 0) < 0]
+                    if len(negative_scores) >= 2:
+                        assumption_text = f"{action} consistently causes penalty"
+                        if hasattr(me, 'register_assumption'):
+                            me.register_assumption(
+                                agent_id=agent_id,
+                                game_type=game_type,
+                                level_number=level,
+                                assumption=assumption_text,
+                                assumption_type='rule'
+                            )
+                            assumptions_formed.append(assumption_text)
+
+            if assumptions_formed:
+                return RungResult(
+                    confidence=0.3,
+                    reason=f"Formed {len(assumptions_formed)} assumptions",
+                    metadata={'assumptions': assumptions_formed}
+                )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Assumption formation failed: {e}")
+
+
+class ContextualFailureRung(DecisionRung):
+    """Track contextual failures - position/direction/object-aware - FILTER
+
+    Unlike global action elimination, tracks CONTEXTUAL failure signatures:
+    - Position region where failure occurred
+    - Direction of movement (toward/away from object)
+    - Nearby object types at time of failure
+
+    This allows "ACTION3 toward wall at (3,4)" to be avoided without
+    eliminating ACTION3 globally (which could deadlock all movement).
+
+    Failure signatures decay over time (things can change).
+    """
+    name = "contextual_failure"
+    category = "filter"
+    default_priority = 14  # Before death_avoidance
+    confidence_threshold = 0.3
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # In-memory failure signatures (per game_type, per level)
+        # Structure: {(game_type, level): [FailureSignature, ...]}
+        self._failure_signatures: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
+        self._max_signatures_per_level = 50
+        self._signature_decay_rate = 0.1  # Per evaluation cycle
+
+    def _compute_position_region(self, position: Tuple[int, int]) -> Tuple[int, int]:
+        """Bucket position into regions for fuzzy matching."""
+        # 3x3 region bucketing - positions (0,0), (0,1), (0,2) all -> region (0, 0)
+        return (position[0] // 3, position[1] // 3)
+
+    def _compute_movement_direction(self, action: str, nearby_objects: List[Dict]) -> str:
+        """Determine if action moves toward/away/parallel to nearest object."""
+        # Simplified: Map actions to directions
+        action_directions = {
+            'ACTION1': 'up', 'ACTION2': 'down',
+            'ACTION3': 'left', 'ACTION4': 'right',
+            'ACTION5': 'stay', 'ACTION7': 'special',
+        }
+        direction = action_directions.get(action, 'unknown')
+
+        if not nearby_objects:
+            return 'no_nearby_object'
+
+        # For simplicity, just return the direction - full implementation would
+        # compute vector from agent to nearest object and compare
+        return f"{direction}_near_object"
+
+    def record_failure(
+        self,
+        game_type: str,
+        level: int,
+        position: Tuple[int, int],
+        action: str,
+        nearby_objects: List[Dict[str, Any]],
+        outcome: str = 'death'
+    ) -> None:
+        """Record a contextual failure signature."""
+        key = (game_type, level)
+
+        if key not in self._failure_signatures:
+            self._failure_signatures[key] = []
+
+        signature = {
+            'game_type': game_type,
+            'level': level,
+            'position_region': self._compute_position_region(position),
+            'action': action,
+            'movement_context': self._compute_movement_direction(action, nearby_objects),
+            'nearby_colors': [o.get('color') for o in nearby_objects[:3]],
+            'outcome': outcome,
+            'confidence': 0.8,  # Initial confidence
+            'created_at': datetime.now().isoformat(),
+        }
+
+        self._failure_signatures[key].append(signature)
+
+        # Prune old signatures
+        if len(self._failure_signatures[key]) > self._max_signatures_per_level:
+            # Remove lowest confidence signatures
+            self._failure_signatures[key].sort(key=lambda s: s['confidence'], reverse=True)
+            self._failure_signatures[key] = self._failure_signatures[key][:self._max_signatures_per_level]
+
+    def _decay_signatures(self, key: Tuple[str, int]) -> None:
+        """Apply decay to signatures, removing those below threshold."""
+        if key not in self._failure_signatures:
+            return
+
+        decayed = []
+        for sig in self._failure_signatures[key]:
+            sig['confidence'] -= self._signature_decay_rate
+            if sig['confidence'] > 0.2:  # Keep if still confident
+                decayed.append(sig)
+
+        self._failure_signatures[key] = decayed
+
+    def _match_signature(
+        self,
+        action: str,
+        position: Tuple[int, int],
+        nearby_objects: List[Dict],
+        signatures: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Check if current context matches any failure signature."""
+        current_region = self._compute_position_region(position)
+        current_context = self._compute_movement_direction(action, nearby_objects)
+        current_colors = set(o.get('color') for o in nearby_objects[:3])
+
+        for sig in signatures:
+            # Must match action
+            if sig['action'] != action:
+                continue
+
+            # Must match position region
+            if sig['position_region'] != current_region:
+                continue
+
+            # Check color overlap (at least one matching nearby color)
+            sig_colors = set(sig.get('nearby_colors', []))
+            if sig_colors and current_colors and not sig_colors.intersection(current_colors):
+                continue
+
+            # Match found
+            return sig
+
+        return None
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        try:
+            game_type = context.get('game_type', '')
+            level = context.get('level', 1)
+            position = context.get('agent_position', (0, 0))
+            nearby_objects = context.get('nearby_objects', [])
+
+            key = (game_type, level)
+
+            # Apply decay each evaluation
+            self._decay_signatures(key)
+
+            signatures = self._failure_signatures.get(key, [])
+            if not signatures:
+                return RungResult()
+
+            # Record failure if last action caused death/penalty
+            if context.get('last_outcome') == 'death' or context.get('score_delta', 0) < 0:
+                last_action = context.get('last_action')
+                last_position = context.get('last_position', position)
+                if last_action:
+                    self.record_failure(
+                        game_type=game_type,
+                        level=level,
+                        position=last_position,
+                        action=last_action,
+                        nearby_objects=nearby_objects,
+                        outcome='death' if context.get('last_outcome') == 'death' else 'penalty'
+                    )
+
+            # Check each action for matching failure signatures
+            weights = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+            penalized_actions = []
+
+            for action_num in range(1, 8):
+                action = f'ACTION{action_num}'
+                match = self._match_signature(action, position, nearby_objects, signatures)
+
+                if match:
+                    # Penalty proportional to signature confidence
+                    penalty = match['confidence'] * 0.5  # Max 50% weight reduction
+                    weights[action] = max(0.3, 1.0 - penalty)
+                    penalized_actions.append(
+                        f"{action}@{match['position_region']}({match['confidence']:.1f})"
+                    )
+
+            if penalized_actions:
+                return RungResult(
+                    confidence=0.4,
+                    reason=f"Contextual failures: {', '.join(penalized_actions[:3])}",
+                    weights=weights,
+                    metadata={
+                        'matched_signatures': len(penalized_actions),
+                        'total_signatures': len(signatures),
+                    }
+                )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Contextual failure check failed: {e}")
+
+
+# =============================================================================
 # ORDERING PRESETS
 # =============================================================================
 
@@ -2190,14 +2819,15 @@ ORDERING_PRESETS = {
         ('smart_action_selection', 99),
     ],
 
-    # LLM-optimal - understanding first (all 42 rungs)
+    # LLM-optimal - understanding first (all 48 rungs including wired metacognition)
     'llm_optimal': [
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 2),
-        ('imagination_budget', 3),
-        ('breakthrough_budget', 4),
-        ('regulatory_signal', 5),
-        ('survey', 6),
+        ('self_trust_boost', 3),  # Manage wA based on frontier/replay context
+        ('imagination_budget', 4),
+        ('breakthrough_budget', 5),
+        ('regulatory_signal', 6),
+        ('survey', 7),
         ('network_exploration_stats', 7),
         ('scientific_method', 10),
         ('questioning_engine', 12),
@@ -2212,9 +2842,12 @@ ORDERING_PRESETS = {
         ('network_wisdom', 30),
         ('death_avoidance', 32),
         ('terminal_pattern', 34),
+        ('theory_contradiction', 35),  # Filter actions contradicted by failed theories
         ('pariah_avoidance', 36),
         ('three_layer_filter', 38),
+        ('hypothesis_testing', 39),  # Test untested assumptions
         ('three_try_sequence', 40),
+        ('rule_transfer', 41),  # Apply rules from other games
         ('discovery_exploitation', 42),
         ('embedding_suggestion', 44),
         ('multi_stage_matching', 46),
@@ -2256,11 +2889,12 @@ ORDERING_PRESETS = {
         ('smart_action_selection', 99),
     ],
 
-    # Full 42-rung comprehensive ordering
+    # Full 48-rung comprehensive ordering (includes wired metacognition rungs)
     'comprehensive': [
         # EMERGENCY (Priority 1-5)
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 2),
+        ('self_trust_boost', 3),  # Manage wA based on context
 
         # ORIENTATION - Understanding the world (Priority 5-20)
         ('imagination_budget', 5),
@@ -2273,15 +2907,19 @@ ORDERING_PRESETS = {
         ('frustration_detection', 13),
 
         # FILTER - Modify action weights (Priority 15-25)
+        ('contextual_failure', 14),   # Context-aware failure avoidance (before death_avoidance)
         ('death_avoidance', 15),
         ('terminal_pattern', 16),
-        ('pariah_avoidance', 17),
-        ('three_layer_filter', 18),
+        ('theory_contradiction', 17),  # Filter contradicted actions
+        ('pariah_avoidance', 18),
+        ('three_layer_filter', 19),
 
         # HYPOTHESIS - Form and test theories (Priority 25-40)
+        ('assumption_formation', 24), # Form assumptions from observations
         ('scientific_method', 25),
         ('theory_gate', 26),
         ('metacognitive_prediction', 27),
+        ('hypothesis_testing', 28),  # Test untested assumptions
         ('deliberation_system', 28),
         ('two_streams', 29),
         ('i_thread', 30),
@@ -2290,11 +2928,12 @@ ORDERING_PRESETS = {
 
         # EXPLOITATION - Use known knowledge (Priority 40-80)
         ('three_try_sequence', 40),
-        ('discovery_exploitation', 41),
-        ('embedding_suggestion', 42),
-        ('multi_stage_matching', 43),
-        ('replay_learning', 44),
-        ('primitive_suggester', 45),
+        ('rule_transfer', 41),  # Apply rules from other games
+        ('discovery_exploitation', 42),
+        ('embedding_suggestion', 43),
+        ('multi_stage_matching', 44),
+        ('replay_learning', 45),
+        ('primitive_suggester', 46),
         ('network_wisdom', 47),
         ('abstraction_templates', 48),
         ('few_shot_invariants', 49),
@@ -2364,16 +3003,21 @@ ORDERING_PRESETS = {
         ('smart_action_selection', 99),
     ],
 
-    # Exploration-heavy for frontier games
+    # Exploration-heavy for frontier games (includes trust boost)
     'frontier_exploration': [
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 2),
+        ('self_trust_boost', 3),  # Boost wA on frontier entry
         ('frontier_checkpoint', 4),  # Replay best known progress on frontier
         ('survey', 5),
         ('network_exploration_stats', 8),
         ('exploration_phase', 10),
+        ('assumption_formation', 11),  # Form assumptions during exploration
+        ('hypothesis_testing', 12),  # Test assumptions during exploration
+        ('contextual_failure', 13),  # Avoid contextual failures (not global)
         ('questioning_engine', 15),
         ('scientific_method', 20),
+        ('rule_transfer', 22),  # Apply rules from similar games
         ('grid_exploration', 25),
         ('death_avoidance', 40),  # Lower priority on frontier
         ('discovery_exploitation', 45),
@@ -2391,7 +3035,7 @@ class DecisionRungSystem:
     Modular action decision system with swappable rung orderings.
     """
 
-    # Registry of all available rungs (All 42 + frontier_checkpoint + prior_lessons = 44)
+    # Registry of all available rungs (46 + assumption_formation + contextual_failure = 48)
     RUNG_REGISTRY: Dict[str, type] = {
         # Core 15 rungs (original + prior_lessons)
         'survey': SurveyRung,
@@ -2442,6 +3086,14 @@ class DecisionRungSystem:
         'imagination_budget': ImaginationBudgetRung,
         'completion_prediction': CompletionPredictionRung,
         'network_exploration_stats': NetworkExplorationStatsRung,
+
+        # Wired metacognition rungs (Feb 2026) - previously-unused methods now integrated
+        'rule_transfer': RuleTransferRung,           # Cross-game rule application
+        'theory_contradiction': TheoryContradictionRung,  # Filter contradicted actions
+        'hypothesis_testing': HypothesisTestingRung,  # Test untested assumptions
+        'self_trust_boost': SelfTrustBoostRung,      # Manage wA based on context
+        'assumption_formation': AssumptionFormationRung,  # Form testable assumptions
+        'contextual_failure': ContextualFailureRung,  # Context-aware failure avoidance
     }
 
     def __init__(self,
@@ -2476,6 +3128,40 @@ class DecisionRungSystem:
         # Last decision metadata (for checkpoint handoff to context builder)
         self.last_decision_metadata: Dict[str, Any] = {}
 
+        # Track winning rung for feedback loop (so we can report outcome back)
+        self._last_winning_rung: Optional[DecisionRung] = None
+
+        # Store last outcome context for rungs that need extra details
+        self._last_outcome_context: Dict[str, Any] = {}
+
+        # =====================================================================
+        # TEMPORAL INTEGRATION - Multi-scale experience integration
+        # Maps existing categories to modulation categories:
+        #   exploration: hypothesis, orientation (trying new things)
+        #   exploitation: exploitation (using known strategies)
+        #   safety: filter, emergency (avoiding harm)
+        #   neutral: fallback, metacognition (not modulated)
+        # =====================================================================
+        self._temporal_integrator = None  # Lazy-loaded
+        self._category_modulation_map = {
+            # Exploration-like categories (suppressed when struggling)
+            'hypothesis': 'exploration',
+            'orientation': 'exploration',
+            # Exploitation categories (boosted when struggling)
+            'exploitation': 'exploitation',
+            # Safety categories (boosted at extremes)
+            'filter': 'safety',
+            'emergency': 'safety',
+            # Neutral (not modulated)
+            'fallback': 'neutral',
+            'metacognition': 'neutral',
+            'unknown': 'neutral',
+        }
+
+        # Current temporal context (set by caller)
+        self._current_generation: int = 0
+        self._current_action_in_generation: int = 0
+
         # Load default ordering
         self.load_ordering('efficiency')
 
@@ -2494,6 +3180,116 @@ class DecisionRungSystem:
             self._engine_registry = EngineRegistry()
 
         return self._engine_registry
+
+    @property
+    def temporal_integrator(self):
+        """Lazy-load temporal integrator for multi-scale experience integration."""
+        if self._temporal_integrator is None:
+            try:
+                from engines.memory.temporal_integrator import get_temporal_integrator
+
+                # Try to get DB from engine registry
+                db = None
+                if self._engine_registry is not None:
+                    try:
+                        db = self._engine_registry._get_db_interface()
+                    except Exception:
+                        pass
+                self._temporal_integrator = get_temporal_integrator(db)
+            except ImportError:
+                logger.debug("[RUNG-SYSTEM] TemporalIntegrator not available")
+                self._temporal_integrator = None
+        return self._temporal_integrator
+
+    def set_temporal_context(
+        self,
+        generation: int,
+        action_in_generation: int
+    ) -> None:
+        """
+        Set current temporal context for decay calculations.
+
+        Call this before decide() with the current generation (Big TIME)
+        and action count within the generation.
+
+        Args:
+            generation: Current generation number (fundamental time unit)
+            action_in_generation: Action count within this generation
+        """
+        self._current_generation = generation
+        self._current_action_in_generation = action_in_generation
+
+    def record_outcome(
+        self,
+        agent_id: str,
+        game_type: str,
+        outcome_value: float
+    ) -> None:
+        """
+        Record an action outcome for temporal integration.
+
+        Call this after each action with the signed outcome:
+        - +1.0: Strong positive (score increase, level complete)
+        - +0.5: Weak positive (progress without score)
+        - 0.0: Neutral (no change)
+        - -0.5: Weak negative (bad position, wasted action)
+        - -1.0: Strong negative (death, game over)
+
+        The temporal integrator uses this to modulate rung priorities
+        based on recent experience at multiple timescales.
+        """
+        if self.temporal_integrator is not None:
+            self.temporal_integrator.record_outcome(
+                agent_id=agent_id,
+                game_type=game_type,
+                generation=self._current_generation,
+                action_in_generation=self._current_action_in_generation,
+                outcome_value=outcome_value
+            )
+
+    def _get_category_modulation(self, agent_id: str, game_type: str) -> Dict[str, float]:
+        """
+        Get rung category priority modulation from temporal integration.
+
+        Returns multipliers for each category based on recent experience.
+        When recent outcomes are negative, exploration is suppressed and
+        exploitation is boosted (and vice versa).
+        """
+        if self.temporal_integrator is None:
+            return {}  # No modulation if integrator not available
+
+        return self.temporal_integrator.get_rung_modulation(
+            agent_id=agent_id,
+            game_type=game_type,
+            current_generation=self._current_generation,
+            current_action=self._current_action_in_generation
+        )
+
+    def _get_modulated_priority(self, rung: DecisionRung, modulation: Dict[str, float]) -> float:
+        """
+        Get a rung's priority adjusted by temporal modulation.
+
+        Maps rung.category to modulation category and applies multiplier.
+        Lower values = higher priority (fires earlier in ladder).
+        """
+        base_priority = rung.get_priority()
+
+        if not modulation:
+            return base_priority
+
+        # Map rung category to modulation category
+        mod_category = self._category_modulation_map.get(rung.category, 'neutral')
+
+        if mod_category == 'neutral':
+            return base_priority
+
+        multiplier = modulation.get(mod_category, 1.0)
+
+        # Invert for priority (higher multiplier = lower priority number = fires earlier)
+        # Actually: higher multiplier = MORE likely to fire
+        # In weighted mode: multiply confidence by multiplier
+        # In ladder mode: divide priority by multiplier (lower = earlier)
+        return base_priority / multiplier
 
     def load_ordering(self, preset_name: str) -> None:
         """Load a preset ordering or custom config"""
@@ -2580,11 +3376,32 @@ class DecisionRungSystem:
             return self._decide_ladder(game_state, context)
 
     def _decide_ladder(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
-        """First confident answer wins"""
+        """First confident answer wins, with temporal modulation of rung priorities."""
         accumulated_weights: Dict[str, float] = {f'ACTION{i}': 1.0 for i in range(1, 8)}
         self.last_decision_metadata = {}  # Reset metadata
+        self._last_winning_rung = None  # Reset for feedback loop
 
-        for rung in self.rungs:
+        # Get temporal modulation for rung priority adjustment
+        agent_id = context.get('agent_id', 'unknown')
+        game_type = context.get('game_type', 'unknown')
+        modulation = self._get_category_modulation(agent_id, game_type)
+
+        # Inject exploration appetite into context for rungs that want it
+        if self.temporal_integrator is not None:
+            context['exploration_appetite'] = self.temporal_integrator.get_exploration_appetite(
+                agent_id=agent_id,
+                game_type=game_type,
+                current_generation=self._current_generation,
+                current_action=self._current_action_in_generation
+            )
+
+        # Sort rungs by modulated priority (lower = fires earlier)
+        sorted_rungs = sorted(
+            self.rungs,
+            key=lambda r: self._get_modulated_priority(r, modulation)
+        )
+
+        for rung in sorted_rungs:
             if not rung.enabled:
                 continue
 
@@ -2598,6 +3415,7 @@ class DecisionRungSystem:
             # Check if this rung has a confident suggestion
             if result.has_suggestion(rung.confidence_threshold):
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
+                self._last_winning_rung = rung  # Track for feedback
                 rung.record_outcome(was_accepted=True)
                 # Capture metadata for checkpoint handoff
                 self.last_decision_metadata = result.metadata or {}
@@ -2607,10 +3425,28 @@ class DecisionRungSystem:
         return self._weighted_random_choice(accumulated_weights), "Weighted fallback after ladder"
 
     def _decide_weighted(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
-        """All rungs vote, weighted sum decides"""
+        """All rungs vote, weighted sum decides, with temporal modulation."""
         action_votes: Dict[str, float] = {f'ACTION{i}': 0.0 for i in range(1, 8)}
         reasons: List[str] = []
         self.last_decision_metadata = {}  # Reset metadata
+        self._last_winning_rung = None  # Reset for feedback loop
+
+        # Get temporal modulation for vote weight adjustment
+        agent_id = context.get('agent_id', 'unknown')
+        game_type = context.get('game_type', 'unknown')
+        modulation = self._get_category_modulation(agent_id, game_type)
+
+        # Inject exploration appetite into context for rungs that want it
+        if self.temporal_integrator is not None:
+            context['exploration_appetite'] = self.temporal_integrator.get_exploration_appetite(
+                agent_id=agent_id,
+                game_type=game_type,
+                current_generation=self._current_generation,
+                current_action=self._current_action_in_generation
+            )
+
+        # Track which rung contributed most to final decision
+        rung_contributions: Dict[str, Tuple[DecisionRung, float, str]] = {}  # action -> (rung, weight, name)
 
         for rung in self.rungs:
             if not rung.enabled:
@@ -2620,9 +3456,19 @@ class DecisionRungSystem:
 
             if result.action:
                 # Weight by confidence and rung priority (lower priority = higher weight)
-                weight = result.confidence * (100 - rung.get_priority()) / 100
+                base_weight = result.confidence * (100 - rung.get_priority()) / 100
+
+                # Apply temporal modulation to weight
+                mod_category = self._category_modulation_map.get(rung.category, 'neutral')
+                mod_multiplier = modulation.get(mod_category, 1.0) if modulation else 1.0
+                weight = base_weight * mod_multiplier
+
                 action_votes[result.action] = action_votes.get(result.action, 0) + weight
                 reasons.append(f"{rung.name}:{result.action}({weight:.2f})")
+
+                # Track strongest contributor per action
+                if result.action not in rung_contributions or weight > rung_contributions[result.action][1]:
+                    rung_contributions[result.action] = (rung, weight, rung.name)
 
             # Add explicit weights
             if result.weights:
@@ -2631,6 +3477,12 @@ class DecisionRungSystem:
 
         # Pick highest voted action
         best_action = max(action_votes, key=lambda k: action_votes[k])
+
+        # Track the strongest contributor to winning action
+        if best_action in rung_contributions:
+            self._last_winning_rung = rung_contributions[best_action][0]
+            self._last_winning_rung.record_outcome(was_accepted=True)
+
         return best_action, f"Weighted vote: {best_action} ({action_votes[best_action]:.2f}) from [{', '.join(reasons[:3])}]"
 
     def _decide_phased(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
@@ -2656,6 +3508,7 @@ class DecisionRungSystem:
         """Run all rungs in parallel, pick highest confidence"""""
         best_result: Optional[RungResult] = None
         best_rung: Optional[DecisionRung] = None
+        self._last_winning_rung = None  # Reset for feedback loop
 
         for rung in self.rungs:
             if not rung.enabled:
@@ -2669,6 +3522,8 @@ class DecisionRungSystem:
 
         if best_result and best_rung:
             self.rung_wins[best_rung.name] = self.rung_wins.get(best_rung.name, 0) + 1
+            self._last_winning_rung = best_rung  # Track for feedback
+            best_rung.record_outcome(was_accepted=True)
             return best_result.action or 'ACTION1', f"[{best_rung.name}] {best_result.reason}"
 
         return 'ACTION1', "No suggestions from any rung"
@@ -2683,6 +3538,78 @@ class DecisionRungSystem:
             if r <= cumulative:
                 return action
         return 'ACTION1'
+
+    # =========================================================================
+    # OUTCOME FEEDBACK - Report results back to winning rung
+    # =========================================================================
+
+    def report_outcome(
+        self,
+        action: str,
+        success: bool,
+        is_death: bool = False,
+        score_delta: float = 0.0,
+        context: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Report the actual outcome of the last decision back to the winning rung.
+
+        This closes the feedback loop - rungs can learn whether their suggestions
+        actually worked. Called by GameLoop after action execution.
+
+        Args:
+            action: The action that was executed (for verification)
+            success: Whether the action achieved positive result (score/progress)
+            is_death: Whether the action caused death/failure
+            score_delta: How much the score changed
+            context: Optional additional context (position, level, etc.)
+
+        Wires to:
+            - RuleTransferRung.record_outcome() -> update_rule_success()
+            - AssumptionFormationRung (future: challenge_assumption)
+            - HypothesisTestingRung (future: mark_assumption_tested)
+            - TemporalIntegrator.record_outcome() -> multi-scale experience integration
+        """
+        if self._last_winning_rung is None:
+            return
+
+        # Store outcome context for rungs that need extra details
+        self._last_outcome_context = {
+            'action': action,
+            'success': success,
+            'is_death': is_death,
+            'score_delta': score_delta,
+            'context': context or {}
+        }
+
+        try:
+            # Call the rung's record_outcome with actual success
+            self._last_winning_rung.record_outcome(
+                was_accepted=True,
+                success=success
+            )
+        except TypeError:
+            # Rung doesn't support success parameter - use base signature
+            pass
+        except Exception:
+            # Don't break gameplay on feedback errors
+            pass
+
+        # Feed temporal integrator for multi-scale experience tracking
+        # Convert outcome to signed value: death=-1.0, success=+score_delta or +0.5, fail=-0.3
+        if is_death:
+            outcome_value = -1.0
+        elif success:
+            # Use score_delta if meaningful, otherwise weak positive
+            outcome_value = min(1.0, max(0.1, score_delta)) if score_delta > 0 else 0.5
+        else:
+            outcome_value = -0.3  # Weak negative for non-success non-death
+
+        ctx = context or {}
+        self.record_outcome(
+            agent_id=ctx.get('agent_id', 'unknown'),
+            game_type=ctx.get('game_type', 'unknown'),
+            outcome_value=outcome_value
+        )
 
     # =========================================================================
     # EMERGENCY RUNGS - Always checked first regardless of strategy

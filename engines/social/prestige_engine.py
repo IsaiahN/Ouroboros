@@ -1,7 +1,3 @@
-import os
-
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
-
 """
 Prestige Engine - Phase 1 of Roadmap
 =====================================
@@ -31,7 +27,6 @@ import os
 
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-import json
 import logging
 import uuid
 from datetime import datetime

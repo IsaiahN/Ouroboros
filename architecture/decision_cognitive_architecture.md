@@ -70,7 +70,7 @@ The BitterTruth-AI system uses a modular, layered architecture to make action de
 - `KnowledgeProvenance` - Tracks HOW knowledge became knowable (epistemological provenance)
 - `DecisionRungSystem` - Orchestrates rung execution with strategy selection
 
-**Current Rung Count**: 44 rungs across 6 categories
+**Current Rung Count**: 48 rungs across 6 categories
 
 ### 2. Cognitive Stage System (`engines/cognition/cognitive_stages.py`)
 
@@ -126,7 +126,7 @@ class KnowledgeProvenance:
     detection_source: str = "unknown"     # 'action_traces', 'winning_sequences', etc.
     sample_size: int = 0                  # Data points supporting this
     agent_diversity: int = 0              # Different agents that contributed
-    temporal_spread_hours: float = 0.0    # Time spread of observations
+    temporal_spread_generations: float = 0.0  # Generation spread of observations (hardware-agnostic)
     validation_type: str = "frequency"    # 'frequency', 'outcome_based', 'win_validated', 'cross_game'
     positive_outcomes: int = 0            # Actions leading to good results
     negative_outcomes: int = 0            # Actions leading to deaths
@@ -214,15 +214,17 @@ The system supports five strategies for combining rung outputs:
 
 ### Ordering Presets
 
-Seven built-in orderings optimized for different scenarios:
+Nine built-in orderings optimized for different scenarios:
 
 1. **efficiency** (15 rungs) - Fast, production default
-2. **llm_optimal** (40 rungs) - Understanding-first, all features
+2. **llm_optimal** (44 rungs) - Understanding-first, all features
 3. **human_brain** (18 rungs) - Parallel attention + fear interrupt
-4. **comprehensive** (42 rungs) - Full coverage, organized by category
+4. **comprehensive** (46 rungs) - Full coverage, organized by category
 5. **minimal** (6 rungs) - Fastest possible
-6. **frontier_exploration** (12 rungs) - Heavy exploration for unbeaten games
-7. **phased_\*** (3 variants) - Phase-specific subsets
+6. **frontier_exploration** (17 rungs) - Heavy exploration for unbeaten games
+7. **phased_orientation** (11 rungs) - Phase-specific orientation
+8. **phased_hypothesis** (11 rungs) - Phase-specific hypothesis testing
+9. **phased_exploitation** (13 rungs) - Phase-specific exploitation
 
 ---
 
@@ -527,71 +529,77 @@ class CognitiveCore:
 
 ## Rung Reference
 
-### Category: EMERGENCY (Priority 1-5)
+### Category: EMERGENCY (Priority 1-3)
 
 | Rung | Priority | Purpose |
 |------|----------|---------|
 | `infinite_loop_breaker` | 1 | Break stuck loops after 15+ repeated actions |
-| `coordinate_oscillation` | 2-3 | Detect bouncing between coordinates |
+| `coordinate_oscillation` | 3 | Detect bouncing between coordinates |
 
-### Category: ORIENTATION (Priority 5-20)
+### Category: ORIENTATION (Priority 3-47)
 
 | Rung | Priority | Purpose |
 |------|----------|---------|
+| `self_trust_boost` | 3 | Manage wA (self-trust) on frontier entry/exit |
 | `imagination_budget` | 4 | Allocate compute based on novelty |
+| `survey` | 5 | What's salient in this frame? |
 | `breakthrough_budget` | 6 | Dynamic action allocation for breakthrough potential |
 | `regulatory_signal` | 7 | Network homeostasis signals |
-| `survey` | 8 | What's salient in this frame? |
 | `network_exploration_stats` | 9 | Coverage tracking, coldspot identification |
 | `questioning_engine` | 10 | What don't I understand? |
-| `exploration_phase` | 12-22 | Phase-based exploration forcing |
 | `frustration_detection` | 13 | Detect stuck agents, trigger network signals |
+| `exploration_phase` | 22 | Phase-based exploration forcing |
+| `grid_exploration` | 47 | Systematic 8x8 grid walking |
 
-### Category: FILTER (Priority 15-25)
+### Category: FILTER (Priority 14-55)
 
 | Rung | Priority | Purpose |
 |------|----------|---------|
+| `terminal_pattern` | 14 | Recognize approaching terminal states |
+| `contextual_failure` | 14 | Context-aware failure avoidance (position/direction) |
 | `death_avoidance` | 15 | Avoid actions that led to death |
 | `prior_lessons` | 16 | Apply graduated weights from game_lessons_learned |
 | `pariah_avoidance` | 17 | Avoid network-marked bad patterns |
-| `terminal_pattern` | 14-17 | Recognize approaching terminal states |
-| `three_layer_filter` | 18-55 | Meta-learning filter preventing waste |
+| `theory_contradiction` | 17 | Filter actions contradicted by failed theories |
+| `three_layer_filter` | 55 | Meta-learning filter preventing waste |
 
-### Category: HYPOTHESIS (Priority 25-40)
-
-| Rung | Priority | Purpose |
-|------|----------|---------|
-| `scientific_method` | 10-25 | Theory formation and testing |
-| `theory_gate` | 24-32 | Working theory validation |
-| `metacognitive_prediction` | 18-27 | Make predictions, learn from errors |
-| `deliberation_system` | 22-29 | TRM-inspired iterative refinement |
-| `two_streams` | 16-35 | Stream A vs Stream B conflict detection |
-| `i_thread` | 18-31 | Persistent identity, stream weighting |
-| `sensation_engine` | 26-33 | Emotional context for actions |
-| `resonance_detector` | 28-34 | Cross-role pattern discovery |
-
-### Category: EXPLOITATION (Priority 40-80)
+### Category: HYPOTHESIS (Priority 12-34)
 
 | Rung | Priority | Purpose |
 |------|----------|---------|
-| `frontier_checkpoint` | 4-6 | Replay best frontier progress |
-| `three_try_sequence` | 5-40 | Try ranked sequences before exploration |
-| `discovery_exploitation` | 10-42 | Exploit recent discoveries |
-| `embedding_suggestion` | 20-44 | Cross-game neural similarity |
-| `multi_stage_matching` | 42-46 | Cascading sequence matching |
-| `replay_learning` | 43-48 | Learn during sequence replay |
-| `primitive_suggester` | 35-50 | Seed primitive to action mapping |
-| `network_wisdom` | 30-47 | Historical action traces from network |
-| `abstraction_templates` | 45-48 | Pattern templates from wins |
-| `few_shot_invariants` | 46-49 | Relational bias from few examples |
-| `subgoal_planning` | 38-50 | Decompose into subgoals |
-| `visual_analyzer` | 36-51 | Priority targets for clicks |
-| `network_object_inventory` | 37-52 | Query network about objects |
-| `near_miss_analyzer` | 48-53 | Learn from high-score failures |
-| `completion_prediction` | 39-54 | Estimate steps to completion |
-| `frontier_topology` | 25-68 | Network-level topology aggregation |
-| `map_intel_collision` | 24-70 | Obstacle avoidance |
-| `grid_exploration` | 47-74 | Systematic 8x8 grid walking |
+| `scientific_method` | 12 | Theory formation and testing |
+| `assumption_formation` | 16 | Form testable assumptions from observations |
+| `metacognitive_prediction` | 18 | Make predictions, learn from errors |
+| `hypothesis_testing` | 19 | Test untested assumptions to validate/disprove |
+| `deliberation_system` | 29 | TRM-inspired iterative refinement |
+| `two_streams` | 30 | Stream A vs Stream B conflict detection |
+| `i_thread` | 31 | Persistent identity, stream weighting |
+| `theory_gate` | 32 | Working theory validation |
+| `sensation_engine` | 33 | Emotional context for actions |
+| `resonance_detector` | 34 | Cross-role pattern discovery |
+
+### Category: EXPLOITATION (Priority 6-48)
+
+| Rung | Priority | Purpose |
+|------|----------|---------|
+| `frontier_checkpoint` | 6 | Replay best frontier progress |
+| `three_try_sequence` | 8 | Try ranked sequences before exploration |
+| `discovery_exploitation` | 20 | Exploit recent discoveries |
+| `map_intel_collision` | 24 | Obstacle avoidance |
+| `embedding_suggestion` | 25 | Cross-game neural similarity |
+| `rule_transfer` | 25 | Apply learned rules from other games (with feedback loop) |
+| `frontier_topology` | 28 | Network-level topology aggregation |
+| `network_wisdom` | 35 | Historical action traces from network |
+| `visual_analyzer` | 36 | Priority targets for clicks |
+| `network_object_inventory` | 37 | Query network about objects |
+| `subgoal_planning` | 38 | Decompose into subgoals |
+| `completion_prediction` | 39 | Estimate steps to completion |
+| `primitive_suggester` | 40 | Seed primitive to action mapping |
+| `multi_stage_matching` | 42 | Cascading sequence matching |
+| `replay_learning` | 43 | Learn during sequence replay |
+| `abstraction_templates` | 45 | Pattern templates from wins |
+| `few_shot_invariants` | 46 | Relational bias from few examples |
+| `near_miss_analyzer` | 48 | Learn from high-score failures |
 
 ### Category: FALLBACK (Priority 99)
 

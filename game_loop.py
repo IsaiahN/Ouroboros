@@ -250,6 +250,9 @@ class GameLoop:
         # Get decision metadata for checkpoint handoff
         decision_metadata = self._get_decision_metadata()
 
+        # Report outcome back to decision system (closes feedback loop)
+        self._report_outcome_to_decision_system(action, outcome, context)
+
         # Update context builder (with decision metadata for checkpoint tracking)
         self._context_builder.update(action.name, outcome, decision_metadata)
 
@@ -267,6 +270,46 @@ class GameLoop:
         if hasattr(self._decision_system, 'last_decision_metadata'):
             return self._decision_system.last_decision_metadata
         return None
+
+    def _report_outcome_to_decision_system(
+        self,
+        action: Any,
+        outcome: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Report action outcome back to decision system for rung learning.
+
+        Closes the feedback loop: rungs suggested an action, now they learn
+        whether it actually worked. This enables:
+        - RuleTransferRung to update rule success rates
+        - AssumptionFormationRung to validate/challenge assumptions
+        - ContextualFailureRung to track failure patterns
+
+        Args:
+            action: The action that was executed
+            outcome: The ActionOutcome from outcome processor
+            context: The decision context (position, level, etc.)
+        """
+        if not hasattr(self._decision_system, 'report_outcome'):
+            return
+
+        try:
+            # Determine success: score gain OR level completion
+            success = (
+                getattr(outcome, 'score_delta', 0) > 0 or
+                getattr(outcome, 'is_level_complete', False)
+            )
+
+            self._decision_system.report_outcome(
+                action=action.name if hasattr(action, 'name') else str(action),
+                success=success,
+                is_death=getattr(outcome, 'is_death', False),
+                score_delta=getattr(outcome, 'score_delta', 0.0),
+                context=context
+            )
+        except Exception:
+            # Don't break gameplay on feedback errors
+            pass
 
     def _build_loop_state(self) -> LoopState:
         """Build the current loop state."""

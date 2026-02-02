@@ -28,19 +28,16 @@ Rule 10: Leverage existing systems
 import logging
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from database_interface import DatabaseInterface
 from engines.consciousness.i_thread_types import (
-    DEFAULT_LEARNING_RATE,
     DeliberationResult,
     GutInstinctResult,
-    MortalityState,
     ReasoningLog,
 )
 
-if TYPE_CHECKING:
-    from engines.reasoning.symbolic_reasoning_engine import WorldModel
+# WorldModel used in type hints below but imported directly where needed
 
 logger = logging.getLogger(__name__)
 
@@ -394,8 +391,8 @@ class DeliberationEngine:
         agent_id: str,
         w_a: float,
         w_b: float,
-        world_model: Optional['WorldModel'] = None,
-        current_frame: Optional[List[List[int]]] = None
+        world_model: Optional[Any] = None,  # WorldModel for counterfactual simulation
+        _current_frame: Optional[List[List[int]]] = None  # Reserved for pattern matching
     ) -> DeliberationResult:
         """
         Conduct careful, effortful deliberation (System 2).
@@ -415,7 +412,7 @@ class DeliberationEngine:
             agent_id: Agent performing deliberation
             w_a, w_b: Stream weights
             world_model: WorldModel instance for counterfactual simulation
-            current_frame: Current game frame for pattern matching
+            _current_frame: Reserved for future pattern matching (unused)
 
         Returns:
             DeliberationResult with reasoned decision
@@ -1227,46 +1224,3 @@ class DeliberationEngine:
             ))
         except Exception as e:
             logger.warning(f"Failed to store reasoning log: {e}")
-
-    def update_outcome(
-        self,
-        log_id: str,
-        outcome: str,
-        score_change: float
-    ) -> None:
-        """Update reasoning log with action outcome."""
-        try:
-            self.db.execute_query("""
-                UPDATE action_reasoning_logs
-                SET outcome = ?, score_change = ?
-                WHERE log_id = ?
-            """, (outcome, score_change, log_id))
-        except Exception as e:
-            logger.warning(f"Failed to update reasoning log outcome: {e}")
-
-    def get_recent_reasoning_logs(
-        self,
-        agent_id: str,
-        game_type: Optional[str] = None,
-        limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        """Retrieve recent reasoning logs for analysis."""
-        try:
-            if game_type:
-                results = self.db.execute_query("""
-                    SELECT * FROM action_reasoning_logs
-                    WHERE agent_id = ? AND game_type = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                """, (agent_id, game_type, limit))
-            else:
-                results = self.db.execute_query("""
-                    SELECT * FROM action_reasoning_logs
-                    WHERE agent_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                """, (agent_id, limit))
-
-            return [dict(r) for r in results] if results else []
-        except Exception:
-            return []

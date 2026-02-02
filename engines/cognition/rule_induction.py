@@ -648,25 +648,3 @@ class RuleInductionEngine:
                 ))
             except Exception as e:
                 logger.debug("Failed to log transfer attempt", error=str(e))
-
-    def get_rule_stats(self) -> Dict[str, Any]:
-        """Get statistics about learned rules."""
-        self._ensure_schema()
-        try:
-            total = self.db.execute_query(
-                "SELECT COUNT(*) as cnt FROM learned_rules"
-            )
-            transferred = self.db.execute_query(
-                "SELECT COUNT(*) as cnt FROM learned_rules WHERE transferred_successfully = TRUE"
-            )
-            high_conf = self.db.execute_query(
-                "SELECT COUNT(*) as cnt FROM learned_rules WHERE confidence > 0.7"
-            )
-
-            return {
-                'total_rules': total[0]['cnt'] if total else 0,
-                'transferred_successfully': transferred[0]['cnt'] if transferred else 0,
-                'high_confidence': high_conf[0]['cnt'] if high_conf else 0
-            }
-        except Exception as e:
-            return {'error': str(e)}

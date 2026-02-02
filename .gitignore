@@ -4,6 +4,9 @@
 #serena
 .serena
 
+# Deprecated code - archived, not tracked
+deprecated/
+
 # Python
 __pycache__/
 *.py[cod]

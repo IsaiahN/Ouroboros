@@ -35,10 +35,9 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: No pycache
 
 import logging
 import uuid
-from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from database_interface import DatabaseInterface
 
@@ -51,24 +50,12 @@ from engines.consciousness.deliberation_engine import (
 # Extracted types (Jan 2026 refactor) - import will shadow local definitions
 from engines.consciousness.i_thread_types import (
     CONFLICT_THRESHOLD,
-    DEATH_PERSONAS,
-    DEATH_PHILOSOPHIES,
-    DEFAULT_LEARNING_RATE,
     HIGH_CONFLICT_THRESHOLD,
     ROLE_DEFAULT_WEIGHTS,
-    ROLE_TENSION_PROFILES,
-    THINKING_BUDGET_CONFIG,
-    AgentNarrative,
     ConflictResult,
-    DeathPersona,
-    DeathType,
     DeliberationResult,
-    EpisodicMemory,
     GutInstinctResult,
     IThreadState,
-    MortalityState,
-    MultiConflictResult,
-    NoveltyConfig,
     ReasoningLog,
     StreamProposal,
     SynthesisResult,
@@ -856,258 +843,6 @@ class IThread:
         return restore_wA, restore_wB
 
     # =========================================================================
-    # NOVELTY DETECTION AND wA BOOSTING
-    # =========================================================================
-    # When network wisdom doesn't apply (novel situation), boost self-trust.
-    # This implements fluid adaptation from core_gameplay.
-    # =========================================================================
-
-    def apply_novelty_boost(
-        self,
-        state: IThreadState,
-        novelty_config: Optional[NoveltyConfig] = None
-    ) -> IThreadState:
-        """
-        Apply novelty boost to wA when in a novel situation.
-
-        When prediction accuracy is low (network wisdom doesn't apply),
-        the agent should trust its own experience more.
-
-        Args:
-            state: Current I-Thread state
-            novelty_config: Optional configuration (uses defaults if None)
-
-        Returns:
-            Updated IThreadState with boosted wA (or unchanged if no boost needed)
-        """
-        if novelty_config is None:
-            novelty_config = NoveltyConfig()
-
-        if not state.novelty_boost_active:
-            return state
-
-        # Store original values before boost
-        original_w_a = state.w_a
-
-        # Apply boost with cap
-        boosted_w_a = min(novelty_config.max_wA, state.w_a + novelty_config.boost_amount)
-        boosted_w_b = 1.0 - boosted_w_a
-
-        # Update state
-        state.w_a = boosted_w_a
-        state.w_b = boosted_w_b
-        state.novelty_boost_applied = True
-        state.original_w_a = original_w_a
-
-        logger.debug(
-            f"[I-THREAD] Novelty boost applied: wA {original_w_a:.2f} -> {boosted_w_a:.2f}"
-        )
-
-        return state
-
-    def set_novelty_active(
-        self,
-        agent_id: str,
-        is_active: bool,
-        prediction_accuracy: Optional[float] = None,
-        sample_count: int = 0
-    ):
-        """
-        Set novelty detection state for an agent.
-
-        Called by core_gameplay when prediction accuracy drops below threshold,
-        indicating that network wisdom doesn't apply to the current situation.
-
-        Args:
-            agent_id: Agent identifier
-            is_active: Whether novelty boost should be active
-            prediction_accuracy: Optional - current prediction accuracy (for logging)
-            sample_count: Number of samples used to compute accuracy
-        """
-        state = self.get_state(agent_id)
-        state.novelty_boost_active = is_active
-
-        if is_active and prediction_accuracy is not None:
-            logger.debug(
-                f"[I-THREAD] Novelty detected for {agent_id[:8]}: "
-                f"accuracy={prediction_accuracy:.2f} ({sample_count} samples)"
-            )
-
-    # =========================================================================
-    # STREAM PROPOSAL BUILDING
-    # =========================================================================
-    # Consolidates proposal building from multiple sources into IThread.
-    # This was previously scattered in core_gameplay._select_action()
-    # =========================================================================
-
-    def build_stream_proposals(
-        self,
-        last_discovery: Optional[Dict] = None,
-        contradicted_actions: Optional[Dict[str, int]] = None,
-        network_hypotheses: Optional[List[Dict]] = None,
-        peer_failures: Optional[List[Dict]] = None,
-        persona_proposals: Optional[List[Dict]] = None
-    ) -> Tuple[List[StreamProposal], List[StreamProposal]]:
-        """
-        Build Stream A and Stream B proposals from all cognitive sources.
-
-        Stream A (Private Experience):
-        - Recent discoveries from self-exploration
-        - Contradicted actions (negative evidence from personal experience)
-        - Explorer/pioneer persona proposals
-
-        Stream B (Network Wisdom):
-        - Network control hypotheses (validated by CODS/Oracle)
-        - Peer failure avoidance (learn from others' mistakes)
-        - Optimizer/validator persona proposals
-
-        Args:
-            last_discovery: Dict with 'action', 'reliability_score' from self-exploration
-            contradicted_actions: Dict mapping action -> contradiction count
-            network_hypotheses: List of network hypothesis dicts with 'action_response_map'
-            peer_failures: List of peer failure dicts with 'action', 'confidence'
-            persona_proposals: List of persona proposal dicts with 'action', 'confidence', 'persona_type'
-
-        Returns:
-            Tuple of (stream_a_proposals, stream_b_proposals)
-        """
-        stream_a: List[StreamProposal] = []
-        stream_b: List[StreamProposal] = []
-
-        # Stream A: Recent discovery from self-exploration
-        if last_discovery and last_discovery.get('action'):
-            stream_a.append(StreamProposal(
-                action=last_discovery['action'],
-                confidence=last_discovery.get('reliability_score', 0.3),
-                source='discovery',
-                reasoning=last_discovery.get('reasoning')
-            ))
-
-        # Stream A: Contradicted actions (NEGATIVE proposals - avoid these)
-        if contradicted_actions:
-            for action, count in contradicted_actions.items():
-                if count >= 2:  # Only if contradicted multiple times
-                    stream_a.append(StreamProposal(
-                        action=action,
-                        confidence=-min(0.5, count * 0.1),  # Negative = avoid
-                        source='contradicted',
-                        reasoning=f'Contradicted {count} times'
-                    ))
-
-        # Stream B: Network hypotheses
-        if network_hypotheses:
-            for hyp in network_hypotheses:
-                action_map = hyp.get('action_response_map', {})
-                reliability = hyp.get('reliability', 0.3)
-                for action, response in action_map.items():
-                    if response.get('is_positive'):
-                        stream_b.append(StreamProposal(
-                            action=action,
-                            confidence=reliability,
-                            source='network_hypothesis',
-                            reasoning=hyp.get('description', 'Network recommendation')
-                        ))
-
-        # Stream B: Peer failures (NEGATIVE proposals for network)
-        if peer_failures:
-            for failure in peer_failures:
-                stream_b.append(StreamProposal(
-                    action=failure['action'],
-                    confidence=-failure.get('confidence', 0.3),  # Negative = avoid
-                    source='peer_failure',
-                    reasoning=f'Peer failed with this action'
-                ))
-
-        # Persona proposals go to appropriate streams
-        if persona_proposals:
-            for prop in persona_proposals:
-                persona_type = prop.get('persona_type', 'unknown')
-                proposal = StreamProposal(
-                    action=prop['action'],
-                    confidence=prop.get('confidence', 0.3),
-                    source=f'persona_{persona_type}',
-                    reasoning=prop.get('reasoning')
-                )
-
-                # Route based on persona type
-                if persona_type in ('explorer', 'pioneer', 'self'):
-                    stream_a.append(proposal)
-                elif persona_type in ('optimizer', 'validator', 'network'):
-                    stream_b.append(proposal)
-                else:
-                    # Unknown persona - add to both
-                    stream_a.append(proposal)
-                    stream_b.append(proposal)
-
-        return stream_a, stream_b
-
-    # =========================================================================
-    # MULTI-CONFLICT DETECTION (Multiple actions per stream)
-    # =========================================================================
-
-    def detect_multi_conflict(
-        self,
-        stream_a_proposals: List[StreamProposal],
-        stream_b_proposals: List[StreamProposal]
-    ) -> MultiConflictResult:
-        """
-        Detect conflict between multiple Stream A and Stream B proposals.
-
-        Unlike detect_conflict() which compares single proposals,
-        this handles the realistic case of multiple proposals per stream.
-
-        Conflict exists when:
-        - Stream A proposes actions that Stream B doesn't (and vice versa)
-        - Both streams have positive-confidence actions that differ
-
-        Args:
-            stream_a_proposals: List of Stream A proposals
-            stream_b_proposals: List of Stream B proposals
-
-        Returns:
-            MultiConflictResult with conflict analysis
-        """
-        # Extract positive-confidence actions from each stream
-        stream_a_actions = {
-            p.action for p in stream_a_proposals
-            if p.confidence > 0 and p.action
-        }
-        stream_b_actions = {
-            p.action for p in stream_b_proposals
-            if p.confidence > 0 and p.action
-        }
-
-        # Calculate overlap and conflict
-        overlap = stream_a_actions & stream_b_actions
-        conflict_a = stream_a_actions - stream_b_actions  # Actions unique to A
-        conflict_b = stream_b_actions - stream_a_actions  # Actions unique to B
-        conflict_actions = conflict_a | conflict_b
-
-        # Conflict exists if both streams have actions and they differ
-        has_conflict = bool(stream_a_actions) and bool(stream_b_actions) and stream_a_actions != stream_b_actions
-
-        # Determine consciousness intensity based on conflict severity
-        if not has_conflict:
-            intensity = 'automatic'
-        elif len(overlap) > len(conflict_actions):
-            intensity = 'deliberative'  # Some agreement exists
-        else:
-            intensity = 'vivid'  # Strong disagreement
-
-        # Synthesis should be enabled when conflict exists
-        synthesis_enabled = has_conflict
-
-        return MultiConflictResult(
-            has_conflict=has_conflict,
-            stream_a_actions=stream_a_actions,
-            stream_b_actions=stream_b_actions,
-            overlap_actions=overlap,
-            conflict_actions=conflict_actions,
-            consciousness_intensity=intensity,
-            synthesis_enabled=synthesis_enabled
-        )
-
-    # =========================================================================
     # QUERY HELPERS (Private Methods)
     # =========================================================================
 
@@ -1490,49 +1225,6 @@ class IThread:
             ))
         except Exception as e:
             logger.warning(f"Failed to store reasoning log: {e}")
-
-    def update_outcome(
-        self,
-        log_id: str,
-        outcome: str,
-        score_change: float
-    ) -> None:
-        """Update reasoning log with action outcome."""
-        try:
-            self.db.execute_query("""
-                UPDATE action_reasoning_logs
-                SET outcome = ?, score_change = ?
-                WHERE log_id = ?
-            """, (outcome, score_change, log_id))
-        except Exception as e:
-            logger.warning(f"Failed to update reasoning log outcome: {e}")
-
-    def get_recent_reasoning_logs(
-        self,
-        agent_id: str,
-        game_type: Optional[str] = None,
-        limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        """Retrieve recent reasoning logs for analysis."""
-        try:
-            if game_type:
-                results = self.db.execute_query("""
-                    SELECT * FROM action_reasoning_logs
-                    WHERE agent_id = ? AND game_type = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                """, (agent_id, game_type, limit))
-            else:
-                results = self.db.execute_query("""
-                    SELECT * FROM action_reasoning_logs
-                    WHERE agent_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                """, (agent_id, limit))
-
-            return [dict(r) for r in results] if results else []
-        except Exception:
-            return []
 
 
 # =============================================================================
