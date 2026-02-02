@@ -72,26 +72,32 @@ class AdaptiveActionLimits:
     - Struggling agents get LESS time to speed up evolution cycles
     - Hard floor: 200 actions per level minimum
     - Adjusts every generation based on comprehensive success metrics
+    - OFFLINE MODE: Games run much faster without network latency, so
+      more exploration per game is valuable - apply offline multiplier
     """
 
-    def __init__(self, db: DatabaseInterface):
+    def __init__(self, db: DatabaseInterface, offline_mode: bool = False):
         self.db = db
+        self.offline_mode = offline_mode
 
-        # Hard constraints
-        self.MIN_ACTIONS_PER_LEVEL = 150  # Hard floor (never go below)
-        self.MAX_ACTIONS_PER_LEVEL = 300  # Ceiling (REDUCED: 3000→300, force efficiency)
-        self.MIN_TOTAL_ACTIONS = 800     # Minimum total
-        self.MAX_TOTAL_ACTIONS = 2000    # Maximum total (REDUCED: 10000→2000, fail fast not stuck loops)
+        # ========================================================================
+        # OFFLINE MODE MULTIPLIER
+        # Offline games run 10-100x faster (no network latency), so we can afford
+        # more actions per game while still maintaining evolutionary pressure.
+        # This multiplier applies to all limits when running in offline mode.
+        # ========================================================================
+        self.OFFLINE_MULTIPLIER = 3.0 if offline_mode else 1.0
 
-        # BREAKTHROUGH FIX: Per-level limit was ending games prematurely
-        # Issue: 800 actions/level was too low - agents hitting limit on L0/L1 and game ending
-        # Data: Avg 417 actions used = hitting per-level limit, never reaching higher levels
-        # Solution: Increase to 2000/level so agents can actually explore L2, L3, L4+
-        # Total budget (6000) still enforces efficiency, but per-level allows exploration
+        # Hard constraints (scaled by offline multiplier)
+        self.MIN_ACTIONS_PER_LEVEL = int(200 * self.OFFLINE_MULTIPLIER)   # Hard floor
+        self.MAX_ACTIONS_PER_LEVEL = int(800 * self.OFFLINE_MULTIPLIER)   # Ceiling
+        self.MIN_TOTAL_ACTIONS = int(1000 * self.OFFLINE_MULTIPLIER)      # Minimum total
+        self.MAX_TOTAL_ACTIONS = int(4000 * self.OFFLINE_MULTIPLIER)      # Maximum total
 
-        # Starting defaults (REDUCED to force efficiency and fail fast)
-        self.current_actions_per_level = 250  # REDUCED: 2000→250 (force efficiency, prevent wandering)
-        self.current_total_actions = 1500      # REDUCED: 6000→1500 (fail fast, play more games)
+        # Starting defaults (scaled by offline multiplier)
+        # Baseline boosted 2x from previous values, then offline multiplier on top
+        self.current_actions_per_level = int(500 * self.OFFLINE_MULTIPLIER)  # Baseline: 500 (was 250)
+        self.current_total_actions = int(2500 * self.OFFLINE_MULTIPLIER)     # Baseline: 2500 (was 1500)
 
         # Adjustment parameters
         self.ADJUSTMENT_RATE = 0.15  # 15% adjustment per generation

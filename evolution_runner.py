@@ -611,8 +611,8 @@ def main():
                        help='Games per generation per agent')
     parser.add_argument('--max-generations', type=int, default=10,
                        help='Maximum generations')
-    parser.add_argument('--max-actions', type=int, default=500,
-                       help='Max actions per game')
+    parser.add_argument('--max-actions', type=int, default=None,
+                       help='Max actions per game (default: 2500, or 7500 in offline mode)')
     parser.add_argument('--game', type=str, default=None,
                        help='Target specific game (e.g., ls20)')
     parser.add_argument('--test', action='store_true',
@@ -627,12 +627,20 @@ def main():
 
     args = parser.parse_args()
 
+    # Determine max_actions based on mode if not explicitly set
+    if args.max_actions is None:
+        # Offline mode runs much faster - can afford more exploration
+        if args.mode == 'offline':
+            args.max_actions = 7500  # 2500 base * 3x offline multiplier
+        else:
+            args.max_actions = 2500  # Boosted baseline (was 500)
+
     # Test mode overrides
     if args.test:
         args.population = 1
         args.games_per_gen = 1
         args.max_generations = 1
-        args.max_actions = 100
+        args.max_actions = 300  # Boosted for meaningful test (was 100)
 
     runner = EvolutionRunner(
         mode=args.mode,

@@ -619,3 +619,115 @@ The new `record_prediction()` and `record_outcome_with_prediction_error()` metho
    - Rung system loads correct preset
    - Modulation behaves correctly
 4. Monitor confidence tracking over generations
+---
+
+## February 2, 2026 (Session 3)
+
+### Session: Action Budget Boost + Offline Mode Multiplier
+
+**Started**: ~1:45 AM
+**Last Update**: 1:52 AM
+
+---
+
+## Approach
+
+User requested boosting baseline action budgets, especially for offline mode where games run much faster (no network latency). The goal: more exploration room while preserving evolutionary pressure.
+
+**Design Philosophy**:
+1. **Offline = Fast Iteration** - Games run 10-100x faster, more moves per wall-clock time is valuable
+2. **Keep Pressure** - Still need limits to prevent infinite loops and force learning
+3. **Role Multipliers Preserved** - Pioneers still get 1.5x, Exploiters 0.8x (relative differences matter)
+4. **Simple Implementation** - Baseline 2x boost + 3x offline multiplier
+
+---
+
+## Changes Made
+
+### 1. Boosted Baseline Budgets (2x)
+
+| Parameter | Old | New |
+|-----------|-----|-----|
+| Per-level min | 150 | 200 |
+| Per-level max | 300 | 800 |
+| Per-level default | 250 | 500 |
+| Total min | 800 | 1,000 |
+| Total max | 2,000 | 4,000 |
+| Total default | 1,500 | 2,500 |
+
+### 2. Added Offline Mode Multiplier (3x)
+
+When `offline_mode=True`, all limits scale by 3x:
+
+| Parameter | Online/Normal | Offline Mode |
+|-----------|---------------|--------------|
+| Per-level min | 200 | 600 |
+| Per-level max | 800 | 2,400 |
+| Per-level default | 500 | 1,500 |
+| Total min | 1,000 | 3,000 |
+| Total max | 4,000 | 12,000 |
+| Total default | 2,500 | 7,500 |
+
+### 3. Updated CLI Defaults
+
+**evolution_runner.py**:
+- `--max-actions` now defaults based on mode:
+  - Online/Normal: 2,500 (was 500)
+  - Offline: 7,500 (was 500)
+- Test mode: 300 actions (was 100)
+
+---
+
+## Files Modified
+
+### adaptive_action_limits.py
+- Added `offline_mode: bool = False` parameter to `__init__`
+- Added `OFFLINE_MULTIPLIER = 3.0 if offline_mode else 1.0`
+- All limits now computed as `int(base * OFFLINE_MULTIPLIER)`
+- Boosted baseline values 2x
+- Updated docstring explaining offline mode rationale
+
+### evolution_runner.py
+- Changed `--max-actions` default from 500 to `None` (computed dynamically)
+- Added logic to set max_actions based on mode:
+  - Offline → 7,500
+  - Other → 2,500
+- Boosted test mode from 100 to 300 actions
+
+---
+
+## Verified
+
+```
+python evolution_runner.py --mode=offline --test --game=ls20 -v
+```
+
+Output showed:
+- Test mode runs 300 actions (boosted from 100)
+- No ACTION6 warnings
+- System runs correctly
+
+---
+
+## Current Status
+
+| Item | Status |
+|------|--------|
+| Baseline 2x boost | COMPLETE |
+| Offline 3x multiplier | COMPLETE |
+| CLI dynamic defaults | COMPLETE |
+| Test mode boost | COMPLETE |
+| Verified working | YES |
+
+---
+
+## Why This Matters
+
+**Old Problem**: 500 actions per game was too restrictive for meaningful exploration. Agents would hit limits before learning anything useful.
+
+**New Model**:
+- **Online**: 2,500 actions - enough exploration, still keeps pressure
+- **Offline**: 7,500 actions - leverage the speed advantage for deeper exploration
+- **Adaptive system** still adjusts ±15% per generation based on performance
+
+**Role multipliers preserved**: Pioneers (1.5x), Generalists (1.2x), Optimizers (1.0x), Exploiters (0.8x) still apply on top of base budgets.
