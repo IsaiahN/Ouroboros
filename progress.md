@@ -287,3 +287,133 @@ Next steps would be:
 2. Monitor adjusted_confidence() usage in decision logs
 3. Verify resonance detection populates provenance correctly
 4. Consider adding provenance tracking to other rungs (NetworkWisdomRung, TwoStreamsRung)
+
+---
+
+## February 2, 2026
+
+### Session: Action-Agnostic Decision System Fix
+
+**Started**: ~11:00 PM (Feb 1)
+**Last Update**: 12:08:33 AM
+
+---
+
+## Approach
+
+The session focused on fixing a critical bug: the decision system was returning **unavailable actions** (ACTION5, ACTION6, ACTION7) for games that only support [1, 2, 3, 4] like `ls20`.
+
+**Root Cause Identified**: Multiple rungs query the database for historical action data or receive suggestions from engines. This data could contain ACTION6/ACTION7 from OTHER games that support those actions, but when playing a game like `ls20` that only has 4 actions, the system would still return these unavailable actions.
+
+**Multi-Layer Fix Strategy**:
+1. **Rung-Level Validation**: Each rung that receives actions from external sources (DB, engines) validates before returning
+2. **Decision-Method Defense-in-Depth**: Core decision methods (`_decide_weighted`, `_decide_ladder`, etc.) filter out unavailable actions
+3. **Helper Functions**: Centralized validation utilities to ensure consistency
+
+---
+
+## Steps Completed
+
+### 1. Added Validation Helper Functions (~11:30 PM)
+
+Added new functions at module level in `decision_rung_system.py`:
+
+- `is_action_available(action, context)` - Check if an action string is in available actions
+- `validate_action(action, context)` - Return action if valid, None otherwise
+
+These complement the existing helpers:
+- `filter_available_actions(actions, context)`
+- `get_random_available_action(context)`
+- `get_available_action_weights(context, default)`
+- `get_available_actions_list(context)`
+
+### 2. Fixed 20+ Individual Rungs (~11:45 PM)
+
+Each rung that receives actions from external sources now validates before returning:
+
+| Rung | Source of Action | Fix Applied |
+|------|------------------|-------------|
+| `NetworkWisdomRung` | `wisdom.get('action')` from core | Added `is_action_available()` check |
+| `FrontierTopologyRung` | DB query on `action_traces` | Skip rows where action not available |
+| `FewShotInvariantsRung` | `invariants.get('suggested_action')` | Added validation |
+| `AbstractionTemplatesRung` | `template[action_idx]` from engine | Added validation |
+| `FrontierCheckpointRung` | `checkpoint_sequence[position]` from DB | Added validation |
+| `ThreeTrySequenceRung` | `active_sequence[position]` from context | Added validation |
+| `MultiStageMatchingRung` | `result['sequence'][0]` from pipeline | Added validation |
+| `IThreadRung` | `persona['suggested_action']` from engine | Added validation |
+| `NearMissAnalyzerRung` | `insights.get('suggested_action')` | Added validation |
+| `EmbeddingSuggestionRung` | `suggestion.get('action')` from self_model | Added validation |
+| `DiscoveryExploitationRung` | `discovery.get('action')` from core | Added validation |
+| `PrimitiveSuggesterRung` | `result.action` from primitive suggester | Added validation |
+| `SubgoalPlanningRung` | `subgoal['next_action']` from planner | Added validation |
+| `MetacognitivePredictionRung` | `prediction.get('test_action')` | Added validation |
+| `ResonanceDetectorRung` | `best.get('suggested_action')` | Added validation |
+| `DeliberationSystemRung` | `deliberation.get('consensus_action')` | Added validation |
+| `ReplayLearningRung` | `prediction.get('action')` | Added validation |
+| `CompletionPredictionRung` | `context.get('next_sequence_action')` | Added validation |
+| `DistributedRuleLearningRung` | `action_template.get('action')` | Added validation |
+
+### 3. Added Defense-in-Depth to Core Decision Methods (~12:00 AM)
+
+Updated all core decision methods to filter unavailable actions even if rungs slip through:
+
+- `_decide_ladder()` - Skips rungs returning unavailable actions
+- `_decide_weighted()` - Skips unavailable actions in voting
+- `_decide_parallel()` - Only considers results with available actions
+- `_decide_weighted_non_emergency()` - Skips unavailable in voting
+- `_decide_ladder_non_emergency()` - Skips rungs returning unavailable actions
+- `_check_emergency_rungs()` - Skips emergency results with unavailable actions
+- `_weighted_random_choice()` - Now accepts optional `context` parameter for fallback
+
+### 4. Fixed Weights Processing (~12:05 AM)
+
+Weights from rungs (used for voting) are now filtered to only include available actions.
+This prevents weights for ACTION6/ACTION7 from influencing decisions in games without those actions.
+
+---
+
+## Architecture Summary
+
+Three layers of protection ensure unavailable actions never reach the game API:
+
+1. **LAYER 1 - Rung Validation**: Each rung validates actions from external sources
+2. **LAYER 2 - Decision Method Defense**: Core methods filter any unavailable actions that slip through
+3. **LAYER 3 - Evolution Runner Safety Net**: Final check before API call
+
+---
+
+## Files Modified
+
+### decision_rung_system.py
+- Added `is_action_available()` helper function
+- Added `validate_action()` helper function
+- Fixed 20+ rungs with external action sources
+- Updated 6 core decision methods with defense-in-depth
+- Updated `_weighted_random_choice()` to accept context
+
+---
+
+## Current Status
+
+**Syntax Check**: PASSED (no errors in decision_rung_system.py)
+**Pre-commit**: Not yet run
+
+---
+
+## Current Failure/Issue
+
+**PENDING VERIFICATION** - Need to run a live evolution test on `ls20` to confirm:
+1. No more `[WARN] Action 6 not in [1, 2, 3, 4], picking random` messages
+2. Decision system only returns actions from available_actions
+3. All rungs properly filter their external data sources
+
+The fix is comprehensive (3 layers of protection), but real gameplay testing will confirm the issue is fully resolved.
+
+---
+
+## Next Steps
+
+1. Run `ls20` evolution test to verify fix
+2. Monitor terminal output for any remaining ACTION6 warnings
+3. If clean, commit changes with message: "fix: Action-agnostic decision system - validate all external action sources"
+4. Run pre-commit hooks before final commit

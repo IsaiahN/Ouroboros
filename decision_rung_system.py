@@ -51,7 +51,6 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import json
 import logging
-import math
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -103,6 +102,95 @@ def _load_primitives() -> Any:
         _seed_primitives = None
 
     return _seed_primitives
+
+
+def filter_available_actions(actions: List[str], context: Dict[str, Any]) -> List[str]:
+    """Filter action list to only those available in current game state.
+
+    Args:
+        actions: List of action strings like ['ACTION1', 'ACTION2', 'ACTION6']
+        context: Decision context containing 'available_actions' as list of ints
+
+    Returns:
+        Filtered list containing only available actions
+    """
+    available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+    if not available:
+        return actions
+
+    # Convert available ints to action strings
+    available_strs = {f'ACTION{a}' for a in available}
+
+    # Filter to only available actions
+    filtered = [a for a in actions if a in available_strs]
+
+    # If nothing left after filtering, return all available as fallback
+    if not filtered:
+        return [f'ACTION{a}' for a in available]
+
+    return filtered
+
+
+def get_random_available_action(context: Dict[str, Any]) -> str:
+    """Get a random action from available actions in context."""
+    available = context.get('available_actions', [1, 2, 3, 4])
+    return f'ACTION{random.choice(available)}'
+
+
+def get_available_action_weights(context: Dict[str, Any], default_weight: float = 1.0) -> Dict[str, float]:
+    """Get a weights dict initialized to default_weight for all available actions only.
+
+    Args:
+        context: Decision context containing 'available_actions' as list of ints
+        default_weight: Initial weight for each action (default 1.0)
+
+    Returns:
+        Dict like {'ACTION1': 1.0, 'ACTION2': 1.0, ...} for available actions only
+    """
+    available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+    return {f'ACTION{a}': default_weight for a in available}
+
+
+def get_available_actions_list(context: Dict[str, Any]) -> List[str]:
+    """Get list of available action strings from context.
+
+    Returns:
+        List like ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'] for available actions
+    """
+    available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+    return [f'ACTION{a}' for a in available]
+
+
+def is_action_available(action: Optional[str], context: Dict[str, Any]) -> bool:
+    """Check if an action string is in the available actions for this game.
+
+    Args:
+        action: Action string like 'ACTION6' or None
+        context: Decision context containing 'available_actions'
+
+    Returns:
+        True if action is available (or action is None), False otherwise
+    """
+    if action is None:
+        return True  # None is always "available" (means no suggestion)
+    if not isinstance(action, str) or not action.startswith('ACTION'):
+        return False
+    try:
+        action_num = int(action.replace('ACTION', ''))
+        available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+        return action_num in available
+    except (ValueError, TypeError):
+        return False
+
+
+def validate_action(action: Optional[str], context: Dict[str, Any]) -> Optional[str]:
+    """Validate an action and return it if available, None otherwise.
+
+    Use this to filter out unavailable actions before returning from rungs.
+    """
+    if is_action_available(action, context):
+        return action
+    return None
 
 
 class DecisionStrategy(Enum):
@@ -505,8 +593,8 @@ class PriorLessonsRung(DecisionRung):
             if not prior_lessons:
                 return RungResult()
 
-            # Initialize weights at 1.0 for all actions
-            weights = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+            # Initialize weights at 1.0 for AVAILABLE actions only
+            weights = get_available_action_weights(context, 1.0)
             lessons_applied = 0
 
             for idx, lesson in enumerate(prior_lessons[:10]):  # Max 10 lessons
@@ -588,6 +676,10 @@ class DiscoveryExploitationRung(DecisionRung):
             if not action.startswith('ACTION'):
                 return RungResult()
 
+            # CRITICAL: Validate action is available in this game
+            if not is_action_available(action, context):
+                return RungResult(reason=f"Discovery action {action} not available")
+
             if reliability >= 0.6 or validated:
                 return RungResult(
                     action=action,
@@ -628,21 +720,27 @@ class EmbeddingSuggestionRung(DecisionRung):
             )
 
             if suggestion and suggestion.get('confidence', 0) >= self.confidence_threshold:
-                return RungResult(
-                    action=suggestion.get('action'),
-                    confidence=suggestion.get('confidence', 0),
-                    reason=f"Embedding match: {suggestion.get('similar_count', 0)} similar frames",
-                    metadata={'suggestion': suggestion}
-                )
+                action = suggestion.get('action')
+                # CRITICAL: Validate action is available in this game
+                if is_action_available(action, context):
+                    return RungResult(
+                        action=action,
+                        confidence=suggestion.get('confidence', 0),
+                        reason=f"Embedding match: {suggestion.get('similar_count', 0)} similar frames",
+                        metadata={'suggestion': suggestion}
+                    )
 
             # Even below threshold, return as weighted boost
             if suggestion and suggestion.get('confidence', 0) >= 0.4:
-                return RungResult(
-                    confidence=suggestion.get('confidence', 0),
-                    weights={suggestion.get('action', 'ACTION1'): 1.0 + suggestion.get('confidence', 0) * 0.5},
-                    reason=f"Embedding boost (below threshold): conf={suggestion.get('confidence', 0):.2f}",
-                    metadata={'suggestion': suggestion}
-                )
+                suggested_action = suggestion.get('action')
+                # CRITICAL: Validate action is available in this game
+                if suggested_action and is_action_available(suggested_action, context):
+                        return RungResult(
+                            confidence=suggestion.get('confidence', 0),
+                            weights={suggested_action: 1.0 + suggestion.get('confidence', 0) * 0.5},
+                            reason=f"Embedding boost (below threshold): conf={suggestion.get('confidence', 0):.2f}",
+                            metadata={'suggestion': suggestion}
+                        )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Embedding suggestion failed: {e}")
@@ -664,8 +762,10 @@ class ScientificMethodRung(DecisionRung):
             theory_stage = sme.get_theory_stage() if hasattr(sme, 'get_theory_stage') else 'exploring'
 
             if theory_stage == 'contradicted':
-                # Force exploration/revision
-                exploration_actions = ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4']
+                # Force exploration/revision using available movement actions
+                exploration_actions = filter_available_actions(
+                    ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'], context
+                )
                 return RungResult(
                     action=random.choice(exploration_actions),
                     confidence=0.7,
@@ -673,10 +773,13 @@ class ScientificMethodRung(DecisionRung):
                     metadata={'theory_stage': theory_stage}
                 )
             elif theory_stage == 'speculating':
-                # Boost exploration
+                # Boost exploration using available movement actions
+                movement_actions = filter_available_actions(
+                    ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'], context
+                )
                 return RungResult(
                     confidence=0.3,
-                    weights={f'ACTION{i}': 1.2 for i in range(1, 5)},  # Boost movement
+                    weights={a: 1.2 for a in movement_actions},  # Boost available movement
                     reason=f"Speculating - exploration boosted",
                     metadata={'theory_stage': theory_stage}
                 )
@@ -744,17 +847,25 @@ class NetworkWisdomRung(DecisionRung):
             wisdom = self.core._get_network_action_wisdom(game_type, level)
 
             if wisdom and wisdom.get('confidence', 0) >= self.confidence_threshold:
+                suggested_action = wisdom.get('action')
+                # CRITICAL: Validate action is available in this game
+                if not is_action_available(suggested_action, context):
+                    return RungResult(reason=f"Network wisdom suggested unavailable action: {suggested_action}")
                 return RungResult(
-                    action=wisdom.get('action'),
+                    action=suggested_action,
                     confidence=wisdom.get('confidence', 0),
-                    reason=f"Network wisdom: {wisdom.get('action')} (conf={wisdom.get('confidence', 0):.2f})",
+                    reason=f"Network wisdom: {suggested_action} (conf={wisdom.get('confidence', 0):.2f})",
                     metadata={'wisdom': wisdom}
                 )
             elif wisdom and wisdom.get('is_least_bad', False):
+                suggested_action = wisdom.get('action')
+                # CRITICAL: Validate action is available in this game
+                if not is_action_available(suggested_action, context):
+                    return RungResult(reason=f"Network wisdom suggested unavailable action: {suggested_action}")
                 return RungResult(
-                    action=wisdom.get('action'),
+                    action=suggested_action,
                     confidence=wisdom.get('confidence', 0),
-                    reason=f"Least-bad network wisdom: {wisdom.get('action')}",
+                    reason=f"Least-bad network wisdom: {suggested_action}",
                     metadata={'wisdom': wisdom, 'is_least_bad': True}
                 )
             return RungResult()
@@ -808,8 +919,12 @@ class PrimitiveSuggesterRung(DecisionRung):
             result = suggester.suggest_action(frame, game_type, recent_actions)
 
             if result and result.confidence >= self.confidence_threshold:
+                action = f"ACTION{result.action}"
+                # CRITICAL: Validate action is available in this game
+                if not is_action_available(action, context):
+                    return RungResult(reason=f"Primitive suggested unavailable action: {action}")
                 return RungResult(
-                    action=f"ACTION{result.action}",
+                    action=action,
                     confidence=result.confidence,
                     reason=f"Primitive: {result.primitive} - {result.reasoning}",
                     metadata={'primitive_result': result.to_dict()}
@@ -836,12 +951,15 @@ class MetacognitivePredictionRung(DecisionRung):
             prediction = me.get_current_prediction() if hasattr(me, 'get_current_prediction') else None
 
             if prediction:
-                return RungResult(
-                    action=prediction.get('test_action'),
-                    confidence=prediction.get('confidence', 0.3),
-                    reason=f"Testing prediction: {prediction.get('hypothesis', '?')}",
-                    metadata={'prediction': prediction}
-                )
+                action = prediction.get('test_action')
+                # CRITICAL: Validate action is available in this game
+                if action and is_action_available(action, context):
+                    return RungResult(
+                        action=action,
+                        confidence=prediction.get('confidence', 0.3),
+                        reason=f"Testing prediction: {prediction.get('hypothesis', '?')}",
+                        metadata={'prediction': prediction}
+                    )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Metacognitive prediction failed: {e}")
@@ -861,7 +979,9 @@ class ExplorationPhaseRung(DecisionRung):
 
             # Discovery phase: 0-30% budget
             if budget_used < 0.3 and coverage < 0.3:
-                exploration_actions = ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION6']
+                exploration_actions = filter_available_actions(
+                    ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION6'], context
+                )
                 return RungResult(
                     action=random.choice(exploration_actions),
                     confidence=0.6,
@@ -935,8 +1055,8 @@ class FrontierTopologyRung(DecisionRung):
                 GROUP BY action_number
             """, (frame_hash, f"{game_type}%", level))
 
-            # Initialize weights with EXPLORATION BONUS for untried actions
-            weights = {f'ACTION{i}': 1.5 for i in range(1, 8)}  # Start high - untried = bonus!
+            # Initialize weights with EXPLORATION BONUS for untried actions (available only)
+            weights = get_available_action_weights(context, 1.5)  # Start high - untried = bonus!
             tried_actions: Set[str] = set()
             total_data_points = 0
             best_action = None
@@ -959,6 +1079,10 @@ class FrontierTopologyRung(DecisionRung):
                     avg_change = row['avg_score_change'] or 0
                     frame_changes = row['frame_changes'] or 0
                     total_data_points += attempts
+
+                    # CRITICAL: Skip actions that aren't available in this game
+                    if not is_action_available(action, context):
+                        continue
 
                     # Track provenance data
                     total_positive += positive
@@ -1073,15 +1197,22 @@ class SmartActionSelectionRung(DecisionRung):
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         try:
             strategy = context.get('fallback_strategy', 'balanced')
+            available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+            available_strs = {f'ACTION{a}' for a in available}
 
             if strategy == 'exploration':
-                weights = {'ACTION1': 1.2, 'ACTION2': 1.2, 'ACTION3': 1.2, 'ACTION4': 1.2,
+                all_weights = {'ACTION1': 1.2, 'ACTION2': 1.2, 'ACTION3': 1.2, 'ACTION4': 1.2,
                           'ACTION5': 0.5, 'ACTION6': 1.0, 'ACTION7': 0.3}
             elif strategy == 'exploitation':
-                weights = {'ACTION1': 0.8, 'ACTION2': 0.8, 'ACTION3': 0.8, 'ACTION4': 0.8,
+                all_weights = {'ACTION1': 0.8, 'ACTION2': 0.8, 'ACTION3': 0.8, 'ACTION4': 0.8,
                           'ACTION5': 1.5, 'ACTION6': 1.2, 'ACTION7': 1.0}
             else:  # balanced
-                weights = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+                all_weights = get_available_action_weights(context, 1.0)
+
+            # Filter to only available actions
+            weights = {k: v for k, v in all_weights.items() if k in available_strs}
+            if not weights:
+                weights = get_available_action_weights(context, 1.0)
 
             # Weighted random choice
             total = sum(weights.values())
@@ -1097,9 +1228,11 @@ class SmartActionSelectionRung(DecisionRung):
                         weights=weights
                     )
 
-            return RungResult(action='ACTION1', confidence=0.1, reason="Ultimate fallback")
+            fallback_action = get_random_available_action(context)
+            return RungResult(action=fallback_action, confidence=0.1, reason="Ultimate fallback")
         except Exception as e:
-            return RungResult(action='ACTION1', confidence=0.1, reason=f"Fallback error: {e}")
+            fallback_action = get_random_available_action(context)
+            return RungResult(action=fallback_action, confidence=0.1, reason=f"Fallback error: {e}")
 
 
 class InfiniteLoopBreakerRung(DecisionRung):
@@ -1114,8 +1247,8 @@ class InfiniteLoopBreakerRung(DecisionRung):
             stuck_count = context.get('recent_stuck_count', 0)
 
             if stuck_count >= 15:
-                # Emergency! Pick random action
-                action = random.choice(['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION6'])
+                # Emergency! Pick random action from available
+                action = get_random_available_action(context)
                 return RungResult(
                     action=action,
                     confidence=0.95,
@@ -1149,11 +1282,14 @@ class MapIntelCollisionRung(DecisionRung):
         try:
             last_no_change = getattr(self.core, '_last_action_no_change', False)
             last_action = context.get('last_action', '')
+            available = context.get('available_actions', [1, 2, 3, 4])
 
-            if not last_no_change or last_action not in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4']:
+            # Only applies to movement actions (1-4) that are available
+            movement_available = [f'ACTION{a}' for a in available if a in [1, 2, 3, 4]]
+            if not last_no_change or last_action not in movement_available:
                 return RungResult()
 
-            # Get perpendicular alternatives
+            # Get perpendicular alternatives (filtered by available)
             perpendicular_map = {
                 'ACTION1': ['ACTION3', 'ACTION4'],
                 'ACTION2': ['ACTION3', 'ACTION4'],
@@ -1162,6 +1298,8 @@ class MapIntelCollisionRung(DecisionRung):
             }
 
             alternatives = perpendicular_map.get(last_action, [])
+            # Filter to only available alternatives
+            alternatives = [a for a in alternatives if a in movement_available]
             if alternatives:
                 action = random.choice(alternatives)
                 return RungResult(
@@ -1192,7 +1330,9 @@ class TheoryGateRung(DecisionRung):
 
             if theory and theory.get('stage') == 'contradicted':
                 # Force exploration/revision
-                exploration_actions = ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION6']
+                exploration_actions = filter_available_actions(
+                    ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION6'], context
+                )
                 action = random.choice(exploration_actions)
                 return RungResult(
                     action=action,
@@ -1226,12 +1366,15 @@ class AbstractionTemplatesRung(DecisionRung):
                 if template:
                     action_idx = context.get('template_position', 0)
                     if action_idx < len(template):
-                        return RungResult(
-                            action=template[action_idx],
-                            confidence=0.6,
-                            reason=f"Following template: step {action_idx + 1}/{len(template)}",
-                            metadata={'template': template, 'position': action_idx}
-                        )
+                        action = template[action_idx]
+                        # CRITICAL: Validate action is available in this game
+                        if is_action_available(action, context):
+                            return RungResult(
+                                action=action,
+                                confidence=0.6,
+                                reason=f"Following template: step {action_idx + 1}/{len(template)}",
+                                metadata={'template': template, 'position': action_idx}
+                            )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Abstraction templates failed: {e}")
@@ -1254,7 +1397,8 @@ class FewShotInvariantsRung(DecisionRung):
                 invariants = sm.get_few_shot_control_relations()
                 if invariants and invariants.get('sample_size', 0) >= 2:
                     action = invariants.get('suggested_action')
-                    if action:
+                    # CRITICAL: Validate action is available in this game
+                    if action and is_action_available(action, context):
                         return RungResult(
                             action=action,
                             confidence=0.5,
@@ -1312,16 +1456,20 @@ class FrontierCheckpointRung(DecisionRung):
             # If checkpoint sequence is active and we have more actions to replay
             if checkpoint_sequence and checkpoint_position < len(checkpoint_sequence):
                 action = checkpoint_sequence[checkpoint_position]
-                return RungResult(
-                    action=action,
-                    confidence=0.85,
-                    reason=f"Frontier checkpoint replay: step {checkpoint_position + 1}/{len(checkpoint_sequence)}",
-                    metadata={
-                        'checkpoint_replay': True,
-                        'checkpoint_position': checkpoint_position,
-                        'checkpoint_length': len(checkpoint_sequence),
-                    }
-                )
+                # CRITICAL: Validate action is available in this game
+                if is_action_available(action, context):
+                    return RungResult(
+                        action=action,
+                        confidence=0.85,
+                        reason=f"Frontier checkpoint replay: step {checkpoint_position + 1}/{len(checkpoint_sequence)}",
+                        metadata={
+                            'checkpoint_replay': True,
+                            'checkpoint_position': checkpoint_position,
+                            'checkpoint_length': len(checkpoint_sequence),
+                        }
+                    )
+                # Action not available - skip checkpoint replay
+                return RungResult(reason=f"Checkpoint action {action} not available")
 
             # If no active checkpoint, try to load one from database
             db = self._get_db()
@@ -1338,19 +1486,21 @@ class FrontierCheckpointRung(DecisionRung):
                 if self._cached_checkpoint:
                     sequence = self._cached_checkpoint.get('action_sequence', [])
                     if sequence:
-                        # Return first action and signal that checkpoint is now active
-                        return RungResult(
-                            action=sequence[0],
-                            confidence=0.85,
-                            reason=f"Starting frontier checkpoint: {len(sequence)} actions from best progress",
-                            metadata={
-                                'checkpoint_replay': True,
-                                'checkpoint_position': 0,
-                                'checkpoint_length': len(sequence),
-                                'checkpoint_loaded': True,
-                                'checkpoint_data': self._cached_checkpoint,
-                            }
-                        )
+                        first_action = sequence[0]
+                        # CRITICAL: Validate first action is available
+                        if is_action_available(first_action, context):
+                            return RungResult(
+                                action=first_action,
+                                confidence=0.85,
+                                reason=f"Starting frontier checkpoint: {len(sequence)} actions from best progress",
+                                metadata={
+                                    'checkpoint_replay': True,
+                                    'checkpoint_position': 0,
+                                    'checkpoint_length': len(sequence),
+                                    'checkpoint_loaded': True,
+                                    'checkpoint_data': self._cached_checkpoint,
+                                }
+                            )
 
             return RungResult()
         except Exception as e:
@@ -1408,12 +1558,16 @@ class ThreeTrySequenceRung(DecisionRung):
 
             if active_sequence and sequence_position < len(active_sequence):
                 action = active_sequence[sequence_position]
-                return RungResult(
-                    action=action,
-                    confidence=0.8,
-                    reason=f"Following sequence: step {sequence_position + 1}/{len(active_sequence)}",
-                    metadata={'sequence_length': len(active_sequence), 'position': sequence_position}
-                )
+                # CRITICAL: Validate action is available in this game
+                if is_action_available(action, context):
+                    return RungResult(
+                        action=action,
+                        confidence=0.8,
+                        reason=f"Following sequence: step {sequence_position + 1}/{len(active_sequence)}",
+                        metadata={'sequence_length': len(active_sequence), 'position': sequence_position}
+                    )
+                # Action not available - skip this sequence step
+                return RungResult(reason=f"Sequence action {action} not available")
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Three-try sequence failed: {e}")
@@ -1438,12 +1592,15 @@ class MultiStageMatchingRung(DecisionRung):
             if hasattr(pipeline, 'get_sequence_with_fallback'):
                 result = pipeline.get_sequence_with_fallback(game_type, level)
                 if result and result.get('sequence'):
-                    return RungResult(
-                        action=result['sequence'][0] if result['sequence'] else None,
-                        confidence=result.get('confidence', 0.5),
-                        reason=f"Multi-stage match: {result.get('stage', 'unknown')}",
-                        metadata={'match_result': result}
-                    )
+                    first_action = result['sequence'][0] if result['sequence'] else None
+                    # CRITICAL: Validate action is available in this game
+                    if first_action and is_action_available(first_action, context):
+                        return RungResult(
+                            action=first_action,
+                            confidence=result.get('confidence', 0.5),
+                            reason=f"Multi-stage match: {result.get('stage', 'unknown')}",
+                            metadata={'match_result': result}
+                        )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Multi-stage matching failed: {e}")
@@ -1468,24 +1625,27 @@ class ThreeLayerFilterRung(DecisionRung):
             weights: Dict[str, float] = {}
             frame = game_state.frame if hasattr(game_state, 'frame') else None
             position = context.get('position', (0, 0))
+            available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
 
-            # Layer 1: Cache check
+            # Layer 1: Cache check (only for available actions)
             if hasattr(self.core, '_action_filter_layer1_cache_check'):
-                for i in range(1, 8):
+                for i in available:
                     action = f'ACTION{i}'
                     failed = self.core._action_filter_layer1_cache_check(action, position, frame)
                     weights[action] = 0.1 if failed else 1.0
 
-            # Layer 2: Object prefilter (for click actions)
+            # Layer 2: Object prefilter (for click actions, if available)
             if hasattr(self.core, '_action_filter_layer2_object_prefilter'):
-                for action in ['ACTION5', 'ACTION6', 'ACTION7']:
-                    has_object = self.core._action_filter_layer2_object_prefilter(action, position, frame)
-                    if not has_object:
-                        weights[action] = weights.get(action, 1.0) * 0.3
+                for action_num in [5, 6, 7]:
+                    if action_num in available:
+                        action = f'ACTION{action_num}'
+                        has_object = self.core._action_filter_layer2_object_prefilter(action, position, frame)
+                        if not has_object:
+                            weights[action] = weights.get(action, 1.0) * 0.3
 
-            # Layer 3: Pattern prediction
+            # Layer 3: Pattern prediction (only for available actions)
             if hasattr(self.core, '_action_filter_layer3_pattern_predict'):
-                for i in range(1, 8):
+                for i in available:
                     action = f'ACTION{i}'
                     prob = self.core._action_filter_layer3_pattern_predict(action, context)
                     if prob < 0.15:
@@ -1569,7 +1729,7 @@ class FrustrationDetectionRung(DecisionRung):
                 if frustration.get('is_frustrated', False):
                     # Force exploration when frustrated
                     return RungResult(
-                        action=random.choice(['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION6']),
+                        action=get_random_available_action(context),
                         confidence=0.65,
                         reason=f"Frustration detected: {frustration.get('reason', 'unknown')}",
                         metadata={'frustration': frustration}
@@ -1598,8 +1758,8 @@ class TerminalPatternRung(DecisionRung):
                 terminal = tpd.detect_terminal_approach(frame, context.get('last_actions', []))
                 if terminal.get('approaching_terminal', False):
                     fatal_action = terminal.get('fatal_action')
-                    weights = {f'ACTION{i}': 1.0 for i in range(1, 8)}
-                    if fatal_action:
+                    weights = get_available_action_weights(context, 1.0)
+                    if fatal_action and fatal_action in weights:
                         weights[fatal_action] = 0.05  # Near-block the fatal action
                     return RungResult(
                         confidence=0.75,
@@ -1628,16 +1788,19 @@ class SensationEngineRung(DecisionRung):
             if hasattr(se, 'get_tetrahedral_sensation'):
                 sensation = se.get_tetrahedral_sensation(context)
 
-                # Convert sensations to action biases
+                # Convert sensations to action biases (only for available movement actions)
                 weights: Dict[str, float] = {}
+                available_movement = filter_available_actions(
+                    ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'], context
+                )
                 if sensation.get('approach_score', 0) > 0.5:
-                    # Bias toward movement actions
-                    for action in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4']:
+                    # Bias toward available movement actions
+                    for action in available_movement:
                         weights[action] = 1.0 + sensation['approach_score'] * 0.3
                 if sensation.get('threat_level', 0) > 0.5:
                     # Bias away from certain directions
                     threat_direction = sensation.get('threat_direction')
-                    if threat_direction:
+                    if threat_direction and threat_direction in weights:
                         weights[threat_direction] = max(0.1, 1.0 - sensation['threat_level'])
 
                 if weights:
@@ -1675,12 +1838,15 @@ class IThreadRung(DecisionRung):
             if cull_distance < 0.2 and hasattr(ithread, 'spawn_death_persona'):
                 persona = ithread.spawn_death_persona(context.get('agent_role', 'generalist'))
                 if persona and persona.get('suggested_action'):
-                    return RungResult(
-                        action=persona['suggested_action'],
-                        confidence=0.7,
-                        reason=f"Death persona ({persona.get('name', 'unknown')}): {persona.get('reason', '')}",
-                        metadata={'persona': persona, 'cull_distance': cull_distance}
-                    )
+                    action = persona['suggested_action']
+                    # CRITICAL: Validate action is available in this game
+                    if is_action_available(action, context):
+                        return RungResult(
+                            action=action,
+                            confidence=0.7,
+                            reason=f"Death persona ({persona.get('name', 'unknown')}): {persona.get('reason', '')}",
+                            metadata={'persona': persona, 'cull_distance': cull_distance}
+                        )
 
             return RungResult(metadata={'wA': wA, 'wB': wB, 'cull_distance': cull_distance})
         except Exception as e:
@@ -1708,7 +1874,8 @@ class NearMissAnalyzerRung(DecisionRung):
                 if insights:
                     # Use insights to suggest action
                     suggested = insights.get('suggested_action')
-                    if suggested:
+                    # CRITICAL: Validate action is available in this game
+                    if suggested and is_action_available(suggested, context):
                         return RungResult(
                             action=suggested,
                             confidence=insights.get('confidence', 0.4),
@@ -1736,8 +1903,12 @@ class SubgoalPlanningRung(DecisionRung):
             if hasattr(planner, 'get_current_subgoal'):
                 subgoal = planner.get_current_subgoal()
                 if subgoal and subgoal.get('next_action'):
+                    action = subgoal['next_action']
+                    # CRITICAL: Validate action is available in this game
+                    if not is_action_available(action, context):
+                        return RungResult(reason=f"Subgoal action {action} not available")
                     return RungResult(
-                        action=subgoal['next_action'],
+                        action=action,
                         confidence=subgoal.get('confidence', 0.5),
                         reason=f"Subgoal {subgoal.get('index', '?')}/{subgoal.get('total', '?')}: {subgoal.get('description', '')}",
                         metadata={'subgoal': subgoal}
@@ -1827,6 +1998,11 @@ class VisualAnalyzerRung(DecisionRung):
             return RungResult()
 
         try:
+            # ACTION6 is typically 'click' - only suggest if available
+            available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+            if 6 not in available:
+                return RungResult()  # Click not available for this game
+
             frame = game_state.frame if hasattr(game_state, 'frame') else None
 
             if hasattr(va, 'get_priority_targets'):
@@ -1880,6 +2056,11 @@ class ResonanceDetectorRung(DecisionRung):
                     resonance_score = best.get('resonance_score', 0)
 
                     if resonance_score > 0.6:
+                        suggested_action = best.get('suggested_action')
+                        # CRITICAL: Validate action is available in this game
+                        if not is_action_available(suggested_action, context):
+                            return RungResult(reason=f"Resonance pattern suggested unavailable action: {suggested_action}")
+
                         # Build epistemological provenance
                         # Cross-role resonance is the gold standard for validation
                         role_diversity = best.get('role_diversity', 1)
@@ -1899,7 +2080,7 @@ class ResonanceDetectorRung(DecisionRung):
                         )
 
                         return RungResult(
-                            action=best.get('suggested_action'),
+                            action=suggested_action,
                             confidence=resonance_score,
                             reason=f"Resonant pattern ({role_diversity} roles, {len(game_types)} games): {best.get('theory_type', 'unknown')}",
                             metadata={
@@ -1934,16 +2115,17 @@ class CoordinateOscillationRung(DecisionRung):
                     # Try combination point or new direction
                     coords = oscillation.get('oscillating_coords', [])
                     if len(coords) >= 2:
-                        # Suggest a different action entirely
-                        current_action = context.get('last_action', 'ACTION6')
-                        alternatives = [a for a in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION5', 'ACTION7']
-                                       if a != current_action]
-                        return RungResult(
-                            action=random.choice(alternatives),
-                            confidence=0.85,
-                            reason=f"Breaking oscillation between {len(coords)} coords",
-                            metadata={'oscillation': oscillation}
-                        )
+                        # Suggest a different available action
+                        current_action = context.get('last_action', 'ACTION1')
+                        available_list = get_available_actions_list(context)
+                        alternatives = [a for a in available_list if a != current_action]
+                        if alternatives:
+                            return RungResult(
+                                action=random.choice(alternatives),
+                                confidence=0.85,
+                                reason=f"Breaking oscillation between {len(coords)} coords",
+                                metadata={'oscillation': oscillation}
+                            )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Coordinate oscillation failed: {e}")
@@ -1962,6 +2144,11 @@ class GridExplorationRung(DecisionRung):
             return RungResult()
 
         try:
+            # ACTION6 is typically 'click' - only suggest if available
+            available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+            if 6 not in available:
+                return RungResult()  # Click not available for this game
+
             if hasattr(va, 'get_grid_exploration_targets'):
                 targets = va.get_grid_exploration_targets()
                 if targets:
@@ -1992,6 +2179,11 @@ class NetworkObjectInventoryRung(DecisionRung):
         try:
             game_type = context.get('game_type', '')
             level = context.get('level', 1)
+
+            # ACTION6 is typically 'click' - only suggest if available
+            available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+            if 6 not in available:
+                return RungResult()  # Click not available for this game
 
             if hasattr(sm, 'get_network_object_inventory'):
                 inventory = sm.get_network_object_inventory(game_type, level)
@@ -2031,7 +2223,8 @@ class DeliberationSystemRung(DecisionRung):
             if deliberation:
                 if deliberation.get('convergence_achieved', False):
                     action = deliberation.get('consensus_action')
-                    if action:
+                    # CRITICAL: Validate action is available in this game
+                    if action and is_action_available(action, context):
                         return RungResult(
                             action=action,
                             confidence=deliberation.get('refinement_confidence', 0.6),
@@ -2059,12 +2252,15 @@ class ReplayLearningRung(DecisionRung):
             if hasattr(rle, 'get_current_prediction'):
                 prediction = rle.get_current_prediction()
                 if prediction and context.get('is_replay', False):
-                    return RungResult(
-                        action=prediction.get('action'),
-                        confidence=prediction.get('confidence', 0.5),
-                        reason=f"Replay prediction: {prediction.get('hypothesis', 'unknown')}",
-                        metadata={'prediction': prediction, 'is_replay': True}
-                    )
+                    action = prediction.get('action')
+                    # CRITICAL: Validate action is available in this game
+                    if action and is_action_available(action, context):
+                        return RungResult(
+                            action=action,
+                            confidence=prediction.get('confidence', 0.5),
+                            reason=f"Replay prediction: {prediction.get('hypothesis', 'unknown')}",
+                            metadata={'prediction': prediction, 'is_replay': True}
+                        )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Replay learning failed: {e}")
@@ -2121,7 +2317,8 @@ class CompletionPredictionRung(DecisionRung):
                 # If close to completion, stay on sequence
                 if match_progress > 0.8 and remaining < 10:
                     sequence_action = context.get('next_sequence_action')
-                    if sequence_action:
+                    # CRITICAL: Validate action is available in this game
+                    if sequence_action and is_action_available(sequence_action, context):
                         return RungResult(
                             action=sequence_action,
                             confidence=0.7,
@@ -2246,6 +2443,10 @@ class RuleTransferRung(DecisionRung):
             if not suggested_action:
                 return RungResult()
 
+            # CRITICAL: Validate action is available in this game
+            if not is_action_available(suggested_action, context):
+                return RungResult(reason=f"Rule suggested unavailable action: {suggested_action}")
+
             # Track rule for feedback loop (instance-level, not context-level)
             self._active_rule_id = best_rule.get('rule_id')
             self._active_rule_game = context.get('game_type', '')
@@ -2318,8 +2519,8 @@ class TheoryContradictionRung(DecisionRung):
             if not contradicted:
                 return RungResult()
 
-            # Build penalty weights for contradicted actions
-            weights = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+            # Build penalty weights for contradicted actions (available only)
+            weights = get_available_action_weights(context, 1.0)
             penalized = []
 
             for action_str, contradiction_count in contradicted.items():
@@ -2763,11 +2964,12 @@ class ContextualFailureRung(DecisionRung):
                         outcome='death' if context.get('last_outcome') == 'death' else 'penalty'
                     )
 
-            # Check each action for matching failure signatures
-            weights = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+            # Check each action for matching failure signatures (available only)
+            weights = get_available_action_weights(context, 1.0)
             penalized_actions = []
+            available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
 
-            for action_num in range(1, 8):
+            for action_num in available:
                 action = f'ACTION{action_num}'
                 match = self._match_signature(action, position, nearby_objects, signatures)
 
@@ -3377,7 +3579,8 @@ class DecisionRungSystem:
 
     def _decide_ladder(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
         """First confident answer wins, with temporal modulation of rung priorities."""
-        accumulated_weights: Dict[str, float] = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+        # Initialize weights for AVAILABLE actions only
+        accumulated_weights = get_available_action_weights(context, 1.0)
         self.last_decision_metadata = {}  # Reset metadata
         self._last_winning_rung = None  # Reset for feedback loop
 
@@ -3407,26 +3610,33 @@ class DecisionRungSystem:
 
             result = rung.evaluate(game_state, context)
 
-            # Accumulate weights from filter rungs
+            # Accumulate weights from filter rungs (only for available actions)
             if result.weights:
                 for action, weight in result.weights.items():
-                    accumulated_weights[action] = accumulated_weights.get(action, 1.0) * weight
+                    if is_action_available(action, context):
+                        accumulated_weights[action] = accumulated_weights.get(action, 1.0) * weight
 
             # Check if this rung has a confident suggestion
             if result.has_suggestion(rung.confidence_threshold):
+                # CRITICAL: Validate action is available (defense-in-depth)
+                if result.action and not is_action_available(result.action, context):
+                    # Skip this rung's suggestion - it returned an unavailable action
+                    continue
+
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
                 self._last_winning_rung = rung  # Track for feedback
                 rung.record_outcome(was_accepted=True)
                 # Capture metadata for checkpoint handoff
                 self.last_decision_metadata = result.metadata or {}
-                return result.action or 'ACTION1', f"[{rung.name}] {result.reason}"
+                return result.action or get_random_available_action(context), f"[{rung.name}] {result.reason}"
 
         # No confident answer - use accumulated weights for fallback
-        return self._weighted_random_choice(accumulated_weights), "Weighted fallback after ladder"
+        return self._weighted_random_choice(accumulated_weights, context), "Weighted fallback after ladder"
 
     def _decide_weighted(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
         """All rungs vote, weighted sum decides, with temporal modulation."""
-        action_votes: Dict[str, float] = {f'ACTION{i}': 0.0 for i in range(1, 8)}
+        # Initialize votes for AVAILABLE actions only
+        action_votes = get_available_action_weights(context, 0.0)
         reasons: List[str] = []
         self.last_decision_metadata = {}  # Reset metadata
         self._last_winning_rung = None  # Reset for feedback loop
@@ -3455,6 +3665,10 @@ class DecisionRungSystem:
             result = rung.evaluate(game_state, context)
 
             if result.action:
+                # CRITICAL: Skip unavailable actions (defense-in-depth)
+                if not is_action_available(result.action, context):
+                    continue  # Don't count votes for unavailable actions
+
                 # Weight by confidence and rung priority (lower priority = higher weight)
                 base_weight = result.confidence * (100 - rung.get_priority()) / 100
 
@@ -3470,10 +3684,11 @@ class DecisionRungSystem:
                 if result.action not in rung_contributions or weight > rung_contributions[result.action][1]:
                     rung_contributions[result.action] = (rung, weight, rung.name)
 
-            # Add explicit weights
+            # Add explicit weights (only for available actions)
             if result.weights:
                 for action, w in result.weights.items():
-                    action_votes[action] = action_votes.get(action, 0) + w * 0.1
+                    if is_action_available(action, context):
+                        action_votes[action] = action_votes.get(action, 0) + w * 0.1
 
         # Pick highest voted action
         best_action = max(action_votes, key=lambda k: action_votes[k])
@@ -3516,20 +3731,27 @@ class DecisionRungSystem:
 
             result = rung.evaluate(game_state, context)
 
-            if result.action and (best_result is None or result.confidence > best_result.confidence):
-                best_result = result
-                best_rung = rung
+            # CRITICAL: Only consider results with available actions (defense-in-depth)
+            if result.action and is_action_available(result.action, context):
+                if best_result is None or result.confidence > best_result.confidence:
+                    best_result = result
+                    best_rung = rung
 
         if best_result and best_rung:
             self.rung_wins[best_rung.name] = self.rung_wins.get(best_rung.name, 0) + 1
             self._last_winning_rung = best_rung  # Track for feedback
             best_rung.record_outcome(was_accepted=True)
-            return best_result.action or 'ACTION1', f"[{best_rung.name}] {best_result.reason}"
+            return best_result.action or get_random_available_action(context), f"[{best_rung.name}] {best_result.reason}"
 
-        return 'ACTION1', "No suggestions from any rung"
+        return get_random_available_action(context), "No suggestions from any rung"
 
-    def _weighted_random_choice(self, weights: Dict[str, float]) -> str:
-        """Make a weighted random choice"""
+    def _weighted_random_choice(self, weights: Dict[str, float], context: Optional[Dict[str, Any]] = None) -> str:
+        """Make a weighted random choice from weights dict (already filtered to available)"""
+        if not weights:
+            # Ultimate fallback - use context-aware random if available
+            if context:
+                return get_random_available_action(context)
+            return 'ACTION1'  # Absolute last resort
         total = sum(max(0.05, w) for w in weights.values())  # Minimum 0.05
         r = random.random() * total
         cumulative = 0
@@ -3537,7 +3759,8 @@ class DecisionRungSystem:
             cumulative += max(0.05, weight)
             if r <= cumulative:
                 return action
-        return 'ACTION1'
+        # Return first available action from weights as fallback
+        return next(iter(weights.keys()))
 
     # =========================================================================
     # OUTCOME FEEDBACK - Report results back to winning rung
@@ -3663,9 +3886,12 @@ class DecisionRungSystem:
             result = rung.evaluate(game_state, context)
 
             if result.has_suggestion(rung.confidence_threshold):
+                # CRITICAL: Validate action is available (defense-in-depth)
+                if result.action and not is_action_available(result.action, context):
+                    continue  # Skip - emergency rung returned unavailable action
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
                 rung.record_outcome(was_accepted=True)
-                return result.action or 'ACTION1', f"[EMERGENCY:{rung.name}] {result.reason}"
+                return result.action or get_random_available_action(context), f"[EMERGENCY:{rung.name}] {result.reason}"
 
         return None
 
@@ -3719,8 +3945,9 @@ class DecisionRungSystem:
         WEIGHTED strategy excluding emergency rungs (already checked).
         All non-emergency rungs vote, weighted sum decides.
         """
-        action_votes: Dict[str, float] = {f'ACTION{i}': 0.0 for i in range(1, 8)}
-        accumulated_weights: Dict[str, float] = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+        # Initialize for AVAILABLE actions only
+        action_votes = get_available_action_weights(context, 0.0)
+        accumulated_weights = get_available_action_weights(context, 1.0)
         reasons: List[str] = []
 
         for rung in self.rungs:
@@ -3732,13 +3959,17 @@ class DecisionRungSystem:
 
             result = rung.evaluate(game_state, context)
 
-            # Accumulate filter weights (multiplicative)
+            # Accumulate filter weights (multiplicative) - only for available actions
             if result.weights:
                 for action, weight in result.weights.items():
-                    accumulated_weights[action] = accumulated_weights.get(action, 1.0) * weight
+                    if is_action_available(action, context):
+                        accumulated_weights[action] = accumulated_weights.get(action, 1.0) * weight
 
             # Add suggestion votes (additive, weighted by confidence and priority)
             if result.action:
+                # CRITICAL: Skip unavailable actions (defense-in-depth)
+                if not is_action_available(result.action, context):
+                    continue
                 # Weight by confidence and rung priority (lower priority = higher weight)
                 weight = result.confidence * (100 - rung.get_priority()) / 100
                 action_votes[result.action] = action_votes.get(result.action, 0) + weight
@@ -3761,7 +3992,7 @@ class DecisionRungSystem:
 
         # If best score is very low, fall back to weighted random
         if best_score < 0.15:
-            return self._weighted_random_choice(accumulated_weights), "Weighted random (low confidence)"
+            return self._weighted_random_choice(accumulated_weights, context), "Weighted random (low confidence)"
 
         top_contributors = ', '.join(reasons[:3]) if reasons else 'filters only'
         return best_action, f"[WEIGHTED] {best_action} ({best_score:.2f}) from [{top_contributors}]"
@@ -3771,7 +4002,8 @@ class DecisionRungSystem:
         LADDER strategy excluding emergency rungs (already checked).
         First confident non-emergency answer wins.
         """
-        accumulated_weights: Dict[str, float] = {f'ACTION{i}': 1.0 for i in range(1, 8)}
+        # Initialize for AVAILABLE actions only
+        accumulated_weights = get_available_action_weights(context, 1.0)
 
         for rung in self.rungs:
             if not rung.enabled:
@@ -3782,21 +4014,25 @@ class DecisionRungSystem:
 
             result = rung.evaluate(game_state, context)
 
-            # Accumulate weights from filter rungs
+            # Accumulate weights from filter rungs (only for available actions)
             if result.weights:
                 for action, weight in result.weights.items():
-                    accumulated_weights[action] = accumulated_weights.get(action, 1.0) * weight
+                    if is_action_available(action, context):
+                        accumulated_weights[action] = accumulated_weights.get(action, 1.0) * weight
 
             # Check if this rung has a confident suggestion
             if result.has_suggestion(rung.confidence_threshold):
+                # CRITICAL: Validate action is available (defense-in-depth)
+                if result.action and not is_action_available(result.action, context):
+                    continue  # Skip - returned unavailable action
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
                 rung.record_outcome(was_accepted=True)
                 # Capture metadata for checkpoint handoff
                 self.last_decision_metadata = result.metadata or {}
-                return result.action or 'ACTION1', f"[{rung.name}] {result.reason}"
+                return result.action or get_random_available_action(context), f"[{rung.name}] {result.reason}"
 
         # No confident answer - use accumulated weights for fallback
-        return self._weighted_random_choice(accumulated_weights), "Weighted fallback after ladder"
+        return self._weighted_random_choice(accumulated_weights, context), "Weighted fallback after ladder"
 
     def get_stats(self) -> Dict[str, Any]:
         """Get decision statistics"""
@@ -4035,8 +4271,10 @@ class CoreGameplayAdapter:
             # Position
             context['agent_position'] = getattr(self.core, '_current_agent_position', None)
 
-            # Safety weights (from graduated danger system)
-            context['action_safety_weights'] = getattr(self.core, '_action_safety_weights', {i: 1.0 for i in range(1, 8)})
+            # Safety weights (from graduated danger system) - use available actions
+            available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+            default_safety = {a: 1.0 for a in available}
+            context['action_safety_weights'] = getattr(self.core, '_action_safety_weights', default_safety)
 
             # Recent actions
             context['recent_actions'] = getattr(self.core, '_recent_actions', [])[-10:]

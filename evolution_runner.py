@@ -111,8 +111,12 @@ class EvolutionRunner:
             'online': OperationMode.ONLINE,
             'normal': OperationMode.NORMAL,
         }.get(mode.lower(), OperationMode.NORMAL)
+        self.op_mode = op_mode  # Store for tag generation
 
         self.arcade = Arcade(operation_mode=op_mode)
+
+        # Scorecard will be created per-agent with proper tags
+        self.current_scorecard_id: Optional[str] = None
 
         # Decision system
         self.decision_system = DecisionRungSystem(strategy='ladder')
@@ -160,6 +164,61 @@ class EvolutionRunner:
         print(f"[OK] Created {len(agents)} agents")
         return agents
 
+    def _create_scorecard_tags(self, agent: AgentState, game_id: str) -> List[str]:
+        """
+        Generate scorecard tags in the format:
+        branch_Ouroboros-v3, online/offline, game_{type}, agent, agent_{id}, mode_{role}, gen_{n}
+        """
+        # Determine mode string
+        if self.op_mode == OperationMode.ONLINE:
+            mode_tag = "online"
+        elif self.op_mode == OperationMode.OFFLINE:
+            mode_tag = "offline"
+        else:
+            mode_tag = "normal"
+
+        # Get game type (first 4 chars, e.g., "ls20")
+        game_type = game_id[:4] if len(game_id) >= 4 else game_id
+
+        # Get agent role from database (default to generalist)
+        role = "generalist"
+        try:
+            result = self.db.execute_query(
+                "SELECT specialization FROM agents WHERE agent_id = ?",
+                (agent.agent_id,)
+            )
+            if result:
+                role = result[0].get('specialization', 'generalist') or 'generalist'
+        except Exception:
+            pass
+
+        return [
+            "branch_Ouroboros-v3",
+            mode_tag,
+            f"game_{game_type}",
+            "agent",
+            f"agent_{agent.agent_id.replace('agent_', '')}",  # Remove prefix if present
+            f"mode_{role}",
+            f"gen_{agent.generation}",
+        ]
+
+    def _get_or_create_scorecard(self, agent: AgentState, game_id: str) -> Optional[str]:
+        """Get or create a scorecard with proper tags for this agent/game."""
+        try:
+            tags = self._create_scorecard_tags(agent, game_id)
+            scorecard_id = self.arcade.create_scorecard(
+                source_url="https://github.com/BitterTruth-AI/Ouroboros",
+                tags=tags
+            )
+            if self.verbose:
+                print(f"    [SCORECARD] Created: {scorecard_id}")
+                print(f"    [TAGS] {', '.join(tags)}")
+            return scorecard_id
+        except Exception as e:
+            if self.verbose:
+                print(f"    [WARN] Failed to create scorecard: {e}")
+            return None
+
     def get_available_games(self) -> List[str]:
         """Get list of available game IDs."""
         try:
@@ -180,10 +239,14 @@ class EvolutionRunner:
         Play a single game with an agent.
 
         Uses the decision system to select actions.
+        Creates a scorecard with proper tags for tracking.
         """
+        # Create scorecard with proper tags for this agent/game
+        scorecard_id = self._get_or_create_scorecard(agent, game_id)
+
         env = None
         try:
-            env = self.arcade.make(game_id)
+            env = self.arcade.make(game_id, scorecard_id=scorecard_id)
         except Exception as e:
             print(f"  [ERROR] Failed to create env for {game_id}: {e}")
             return GameResult(
@@ -229,6 +292,9 @@ class EvolutionRunner:
             # Get current observation from last step (or initial)
             obs = last_obs if last_obs else initial_obs
 
+            # Get CURRENT available_actions from observation (can change mid-game)
+            current_available = getattr(obs, 'available_actions', None) or available_actions
+
             # Build context for decision system with available_actions
             context = {
                 'game_id': game_id,
@@ -236,7 +302,7 @@ class EvolutionRunner:
                 'actions_taken': actions_taken,
                 'state': str(obs.state) if obs else 'UNKNOWN',
                 'frame_data': obs,
-                'available_actions': available_actions,
+                'available_actions': current_available,  # Current, not initial
                 'levels_completed': getattr(obs, 'levels_completed', 0),
                 'win_levels': win_levels,
             }
@@ -244,13 +310,35 @@ class EvolutionRunner:
             # Get action from decision system
             try:
                 result = self.decision_system.decide(context, {})
-                action_num = result.action if result else random.choice(available_actions)
-                # Validate action is in available set
-                if action_num not in available_actions:
-                    action_num = random.choice(available_actions)
+
+                # Decision system returns (action_str, reason) tuple
+                if isinstance(result, tuple):
+                    action_str, reason = result
+                    # Extract action number from string like 'ACTION1'
+                    if isinstance(action_str, str) and action_str.startswith('ACTION'):
+                        action_num = int(action_str.replace('ACTION', ''))
+                    else:
+                        action_num = random.choice(current_available)
+                elif hasattr(result, 'action'):
+                    action_num = result.action
+                else:
+                    action_num = random.choice(current_available)
+
+                # Ensure action_num is an int
+                if hasattr(action_num, 'value'):
+                    action_num = action_num.value
+
+                # Validate action is in available set - CRITICAL for online mode
+                if action_num not in current_available:
+                    if self.verbose:
+                        print(f"    [WARN] Action {action_num} not in {current_available}, picking random")
+                    action_num = random.choice(current_available)
+
                 action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
-            except Exception:
+            except Exception as e:
                 # Fallback to random from available actions only
+                if self.verbose:
+                    print(f"    [WARN] Decision failed: {e}, picking random")
                 action_num = random.choice(available_actions)
                 action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
 
