@@ -731,3 +731,142 @@ Output showed:
 - **Adaptive system** still adjusts ±15% per generation based on performance
 
 **Role multipliers preserved**: Pioneers (1.5x), Generalists (1.2x), Optimizers (1.0x), Exploiters (0.8x) still apply on top of base budgets.
+
+---
+
+## February 2, 2026 (Session 4)
+
+### Session: CRITICAL BUG - Learning Infrastructure Disconnected
+
+**Started**: ~8:50 AM
+**Last Update**: 10:52 AM
+
+---
+
+## Problem Statement
+
+User ran 5000 games and noticed agents scored 0.06% (66/104,826). Requested full audit.
+
+---
+
+## Audit Findings
+
+### Critical Issues Found:
+
+1. **NO ACTION TRACE RECORDING** - `evolution_runner.py` never called `save_action_trace()`
+   - Old traces: 17,816 from Jan 29-30
+   - New run: ZERO traces recorded
+   - All topology/network intelligence was BLIND
+
+2. **NO FRAME HASHING** - `frame_hash: None` in ALL traces
+   - State-matching rungs cannot work
+   - Topology recall impossible
+
+3. **NO SCORE CHANGE TRACKING** - `score_change: 0.0` everywhere
+   - No learning signal for what actions help/hurt
+   - RLVR feedback loop completely broken
+
+4. **MASSIVE ACTION BIAS** - ACTION1 was 78% of all actions
+   - Default fallback being hit too often
+
+5. **DATA DISCONNECT** - `evolution_runner.py` stores to `game_results` table
+   - But learning systems read from `action_traces` and `agent_arc_performance`
+   - Complete disconnect between execution and learning
+
+### Root Cause
+
+The `evolution_runner.py` was a **minimal loop** that:
+- ✅ Gets decisions from rungs
+- ✅ Takes actions
+- ✅ Stores game results to `game_results` table
+- ❌ **Does NOT record action traces**
+- ❌ **Does NOT compute frame hashes**
+- ❌ **Does NOT track score changes**
+- ❌ **Does NOT call outcome_processor**
+
+The elaborate learning infrastructure in `outcome_processor.py`, the 46 decision rungs, the network intelligence engine - ALL were blind because the evolution_runner bypassed them entirely.
+
+---
+
+## Fix Applied
+
+Added to `evolution_runner.py`:
+
+1. **Frame Hash Computation**
+   - `_compute_frame_hash(obs)` method
+   - MD5 hash of frame data (16 chars)
+   - Enables topology matching
+
+2. **Action Trace Recording**
+   - `_record_action_trace()` method
+   - Called after every action
+   - Records: frame_hash, frame_before/after, score_before/after, score_change, level, game_over
+
+3. **Session Management**
+   - Creates `training_sessions` record (FK requirement)
+   - Generates unique session_id per game
+
+4. **Score Tracking**
+   - `prev_score` variable tracks score across actions
+   - Enables score_change calculation
+
+---
+
+## Verification
+
+```bash
+python evolution_runner.py --mode=offline --test --game=ls20 -v
+```
+
+Before fix:
+```
+[TRACE-ERR] FOREIGN KEY constraint failed
+```
+
+After fix:
+```
+[  1] ACTION2  -> levels=0/7 state=NOT_FINISHED
+[  2] ACTION4  -> levels=0/7 state=NOT_FINISHED
+...
+```
+
+Database check:
+```python
+>>> db.execute_query('SELECT frame_hash, frame_changed, score_change FROM action_traces ORDER BY created_at DESC LIMIT 1')
+[{'frame_hash': '69748fd7aefe2722', 'frame_changed': 0, 'score_change': 0.0}]
+```
+
+**frame_hash is now being recorded!**
+
+---
+
+## Files Modified
+
+### evolution_runner.py
+- Added `hashlib`, `uuid` imports
+- Added `_compute_frame_hash()` method
+- Added `_record_action_trace()` method
+- Added `_current_session_id` tracking
+- Added training_session creation at game start
+- Added action trace recording after each step
+- Added `prev_score` tracking for score_change calculation
+
+---
+
+## Impact
+
+| Before | After |
+|--------|-------|
+| 0 new traces | Every action recorded |
+| frame_hash: None | MD5 hash computed |
+| score_change: 0.0 | Actual change tracked |
+| Learning blind | Learning enabled |
+
+---
+
+## Next Steps
+
+1. Run evolution test to verify learning kicks in
+2. Monitor if rungs start using accumulated knowledge
+3. Check if FrontierTopologyRung now has data to work with
+4. Verify score progression improves over generations

@@ -20,8 +20,10 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import argparse
 import asyncio
+import hashlib
 import random
 import signal
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -128,6 +130,95 @@ class EvolutionRunner:
         self.agents: List[AgentState] = []
         self.current_generation = 0
         self.running = True
+
+        # Session tracking for action traces
+        self._current_session_id: Optional[str] = None
+
+    def _compute_frame_hash(self, obs: Any) -> str:
+        """Compute hash of frame state for topology matching."""
+        if obs is None:
+            return "null_frame"
+        try:
+            # Get frame data - try multiple attributes
+            frame_data = None
+            for attr in ['frame', 'state', 'grid', 'observation']:
+                if hasattr(obs, attr):
+                    frame_data = getattr(obs, attr)
+                    break
+
+            if frame_data is None:
+                frame_data = str(obs)
+
+            # Convert to string if needed
+            if hasattr(frame_data, 'tolist'):
+                frame_str = str(frame_data.tolist())
+            else:
+                frame_str = str(frame_data)
+
+            return hashlib.md5(frame_str.encode()).hexdigest()[:16]
+        except Exception:
+            return "hash_error"
+
+    def _record_action_trace(
+        self,
+        game_id: str,
+        action_num: int,
+        obs_before: Any,
+        obs_after: Any,
+        score_before: float,
+        score_after: float,
+        level_before: int,
+        level_after: int,
+        is_game_over: bool,
+    ) -> None:
+        """Record action trace with frame hash and score change.
+
+        This is CRITICAL for learning - without this, the network has no memory.
+        """
+        try:
+            # Compute frame hashes
+            frame_hash_before = self._compute_frame_hash(obs_before)
+            frame_hash_after = self._compute_frame_hash(obs_after)
+            frame_changed = frame_hash_before != frame_hash_after
+
+            # Get frame data as string
+            frame_before_str = None
+            frame_after_str = None
+            try:
+                if obs_before and hasattr(obs_before, 'frame'):
+                    frame_before_str = str(obs_before.frame.tolist() if hasattr(obs_before.frame, 'tolist') else obs_before.frame)
+                if obs_after and hasattr(obs_after, 'frame'):
+                    frame_after_str = str(obs_after.frame.tolist() if hasattr(obs_after.frame, 'tolist') else obs_after.frame)
+            except Exception:
+                pass
+
+            # Record to database
+            self.db.execute_query("""
+                INSERT INTO action_traces (
+                    session_id, game_id, action_number, timestamp,
+                    frame_before, frame_after, frame_changed,
+                    score_before, score_after, score_change,
+                    level_number, resulted_in_game_over,
+                    frame_hash, created_at
+                ) VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (
+                self._current_session_id,
+                game_id,
+                action_num,
+                frame_before_str,
+                frame_after_str,
+                1 if frame_changed else 0,
+                score_before,
+                score_after,
+                score_after - score_before,
+                level_after,
+                1 if is_game_over else 0,
+                frame_hash_before,
+            ))
+        except Exception as e:
+            # Don't let trace recording break gameplay
+            if self.verbose:
+                print(f"    [TRACE-ERR] {e}")
 
         # Signal handling
         signal.signal(signal.SIGINT, self._handle_shutdown)
@@ -278,6 +369,19 @@ class EvolutionRunner:
         action_sequence = []
         last_obs = None
         prev_levels = 0
+        prev_score = 0.0  # Track score for learning
+
+        # Create session for action traces (FK requirement)
+        self._current_session_id = f"session_{uuid.uuid4().hex[:12]}_{int(datetime.now().timestamp())}"
+        try:
+            self.db.execute_query("""
+                INSERT INTO training_sessions (
+                    session_id, game_id, start_time, mode, status, total_actions
+                ) VALUES (?, ?, datetime('now'), 'evolution', 'in_progress', 0)
+            """, (self._current_session_id, game_id))
+        except Exception as e:
+            if self.verbose:
+                print(f"    [WARN] Failed to create training session: {e}")
 
         # Get initial observation and available actions
         initial_obs = env.observation_space
@@ -350,6 +454,7 @@ class EvolutionRunner:
 
             # Take action
             try:
+                obs_before = last_obs if last_obs else initial_obs
                 obs = env.step(action)
                 actions_taken += 1
                 action_sequence.append(action.name)
@@ -358,7 +463,26 @@ class EvolutionRunner:
                 # Track level progress
                 current_levels = getattr(obs, 'levels_completed', 0) or 0
                 level_up = current_levels > prev_levels
+
+                # Calculate score for this step (levels completed as fraction)
+                current_score = current_levels / win_levels if win_levels > 0 else 0.0
+
+                # CRITICAL: Record action trace for learning
+                is_game_over = obs and obs.state in (GameState.WIN, GameState.GAME_OVER)
+                self._record_action_trace(
+                    game_id=game_id,
+                    action_num=action_num,
+                    obs_before=obs_before,
+                    obs_after=obs,
+                    score_before=prev_score,
+                    score_after=current_score,
+                    level_before=prev_levels,
+                    level_after=current_levels,
+                    is_game_over=is_game_over,
+                )
+
                 prev_levels = current_levels
+                prev_score = current_score
 
                 # Verbose output
                 if self.verbose:
