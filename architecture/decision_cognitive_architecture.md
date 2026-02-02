@@ -1,8 +1,28 @@
 # Decision and Cognitive Architecture
 
-**Version**: 1.0
-**Date**: 2026-02-01
+**Version**: 1.3
+**Date**: 2026-02-02
 **Purpose**: Complete documentation of how the Decision Rung System, Cognitive Stage System, and CognitiveCore facade work together from game start to post-game learning.
+
+**Recent Changes (v1.3)**:
+- **Integration Complete**: Full event detection pipeline wired through OutcomeProcessor → ContextBuilder → DecisionRungSystem
+- Added `notify_action_complete()` hook for rung learning callbacks (enables SpatialRelationshipRung)
+- OutcomeProcessor now detects events via EventDetector when `frame_delta_count > 10`
+- ContextBuilder tracks `recent_events` and `frame_delta_count` for rung consumption
+- DecisionContext.to_dict() now includes `recent_events` and `frame_delta_count`
+
+**Previous Changes (v1.2)**:
+- Added three new world model rungs: `frame_interpretation`, `event_understanding`, `spatial_relationship`
+- Added new tables: `detected_events`, `causal_links`, `process_classifications`, `spatial_effects`, `goal_configurations`
+- Updated rung count to 52
+- Added ObjectTracker and EventDetector modules in engines/perception/
+- Added SpatialEffectLearner and MultiObjectGoalTracker in engines/perception/spatial_learning.py
+
+**Previous Changes (v1.1)**:
+- Added `state_matching` rung (Symbolic Reasoning Phase 4)
+- Added new tables: `property_transformations`, `goal_requirements`, `player_state_history`
+- CODS/Oracle fully deprecated - replaced by `primitive_suggester` rung
+- Added section: Dynamic Priority Modulation (comprehension-based runtime modulation)
 
 ---
 
@@ -70,7 +90,7 @@ The BitterTruth-AI system uses a modular, layered architecture to make action de
 - `KnowledgeProvenance` - Tracks HOW knowledge became knowable (epistemological provenance)
 - `DecisionRungSystem` - Orchestrates rung execution with strategy selection
 
-**Current Rung Count**: 48 rungs across 6 categories
+**Current Rung Count**: 52 rungs across 6 categories
 
 ### 2. Cognitive Stage System (`engines/cognition/cognitive_stages.py`)
 
@@ -225,6 +245,44 @@ Nine built-in orderings optimized for different scenarios:
 7. **phased_orientation** (11 rungs) - Phase-specific orientation
 8. **phased_hypothesis** (11 rungs) - Phase-specific hypothesis testing
 9. **phased_exploitation** (13 rungs) - Phase-specific exploitation
+
+### Dynamic Priority Modulation (Comprehension-Based)
+
+Beyond static orderings, rung priorities are **dynamically modulated** at runtime based on agent comprehension confidence. This is implemented via `TemporalIntegrator.get_rung_modulation()`.
+
+**How It Works**:
+
+1. **Track Predictions**: Agent predicts outcome before each action
+2. **Measure Surprise**: Compare prediction to actual outcome
+3. **Update Confidence**: Low surprise → confidence UP, high surprise → confidence DOWN
+4. **Modulate Categories**: Confidence level drives category priority multipliers
+
+**Category Mapping**:
+
+| Rung Category | Modulation Group | Effect |
+|---------------|------------------|--------|
+| `hypothesis` | exploration | Boosted when confused, suppressed when confident |
+| `orientation` | exploration | Boosted when confused, suppressed when confident |
+| `exploitation` | exploitation | Boosted when confident, suppressed when confused |
+| `filter` | safety | Boosted at extremes (very high/low confidence) |
+| `emergency` | safety | Always high priority |
+| `fallback` | neutral | Not modulated |
+
+**Modulation by Confidence Level**:
+
+| Confidence | Exploration Mult | Exploitation Mult | Interpretation |
+|------------|------------------|-------------------|----------------|
+| 0.0 (lost) | 1.30 (boost) | 0.50 (suppress) | "I don't understand - explore more" |
+| 0.5 (partial) | 0.90 | 0.90 | Balanced |
+| 1.0 (understands) | 0.50 (suppress) | 1.30 (boost) | "I understand - exploit knowledge" |
+
+**Key Insight**: This inverts the naive approach. When struggling, the system boosts **exploration** (need to find what works), not exploitation. When succeeding, it boosts **exploitation** (keep doing what works).
+
+**Implementation**:
+- `DecisionRungSystem._get_category_modulation()` - Queries temporal integrator
+- `DecisionRungSystem._get_modulated_priority()` - Applies multiplier to rung priority
+- Priority adjustment: `modulated_priority = base_priority / multiplier`
+- Higher multiplier → lower priority number → fires earlier in ladder
 
 ---
 
@@ -454,8 +512,24 @@ class CognitiveCore:
 │  │    ├── Detect frame_changed (visual diff)                   │   │
 │  │    ├── Detect level_changed, score_changed                  │   │
 │  │    ├── Detect is_death, is_level_complete, is_game_win     │   │
+│  │    ├── IF frame_delta_count > 10:                           │   │
+│  │    │     └── _detect_events() via EventDetector             │   │
+│  │    │         ├── Track objects between frames               │   │
+│  │    │         ├── Detect MOVEMENT, COLLISION, FUSION events  │   │
+│  │    │         └── Classify process (PHYSICS, ANIMATION, etc) │   │
 │  │    ├── Record action_trace to database                      │   │
-│  │    └─► Return ActionOutcome                                 │   │
+│  │    └─► Return ActionOutcome (with detected_events)          │   │
+│  └────────────────────────────────┬────────────────────────────┘   │
+│                                   │                                  │
+│                                   ▼                                  │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  STEP 4.5: Notify Rungs (Action Complete Hooks)              │   │
+│  │                                                              │   │
+│  │  DecisionRungSystem.notify_action_complete(...)              │   │
+│  │    └── FOR each rung with on_action_complete:               │   │
+│  │          └── rung.on_action_complete(action, frames, ctx)   │   │
+│  │              Example: SpatialRelationshipRung learns         │   │
+│  │              click effect patterns from frame changes        │   │
 │  └────────────────────────────────┬────────────────────────────┘   │
 │                                   │                                  │
 │                                   ▼                                  │
@@ -529,6 +603,8 @@ class CognitiveCore:
 
 ## Rung Reference
 
+> **Note**: Priorities shown are `default_priority` values. Rungs may share priorities; in LADDER strategy, rungs with equal priority are evaluated in registration order. Categories are logical groupings but do NOT constrain priority ranges - a rung's category describes its cognitive function, not its execution order.
+
 ### Category: EMERGENCY (Priority 1-3)
 
 | Rung | Priority | Purpose |
@@ -541,6 +617,7 @@ class CognitiveCore:
 | Rung | Priority | Purpose |
 |------|----------|---------|
 | `self_trust_boost` | 3 | Manage wA (self-trust) on frontier entry/exit |
+| `frame_interpretation` | 4 | Interpret dramatic frame changes, set context flags |
 | `imagination_budget` | 4 | Allocate compute based on novelty |
 | `survey` | 5 | What's salient in this frame? |
 | `breakthrough_budget` | 6 | Dynamic action allocation for breakthrough potential |
@@ -555,8 +632,8 @@ class CognitiveCore:
 
 | Rung | Priority | Purpose |
 |------|----------|---------|
-| `terminal_pattern` | 14 | Recognize approaching terminal states |
 | `contextual_failure` | 14 | Context-aware failure avoidance (position/direction) |
+| `terminal_pattern` | 14 | Recognize approaching terminal states |
 | `death_avoidance` | 15 | Avoid actions that led to death |
 | `prior_lessons` | 16 | Apply graduated weights from game_lessons_learned |
 | `pariah_avoidance` | 17 | Avoid network-marked bad patterns |
@@ -571,6 +648,7 @@ class CognitiveCore:
 | `assumption_formation` | 16 | Form testable assumptions from observations |
 | `metacognitive_prediction` | 18 | Make predictions, learn from errors |
 | `hypothesis_testing` | 19 | Test untested assumptions to validate/disprove |
+| `event_understanding` | 23 | Use causal world model (detected events) to inform decisions |
 | `deliberation_system` | 29 | TRM-inspired iterative refinement |
 | `two_streams` | 30 | Stream A vs Stream B conflict detection |
 | `i_thread` | 31 | Persistent identity, stream weighting |
@@ -587,7 +665,8 @@ class CognitiveCore:
 | `discovery_exploitation` | 20 | Exploit recent discoveries |
 | `map_intel_collision` | 24 | Obstacle avoidance |
 | `embedding_suggestion` | 25 | Cross-game neural similarity |
-| `rule_transfer` | 25 | Apply learned rules from other games (with feedback loop) |
+| `rule_transfer` | 25 | Apply learned rules from other games |
+| `state_matching` | 26 | Symbolic reasoning - compare player properties to goal |
 | `frontier_topology` | 28 | Network-level topology aggregation |
 | `network_wisdom` | 35 | Historical action traces from network |
 | `visual_analyzer` | 36 | Priority targets for clicks |
@@ -597,6 +676,7 @@ class CognitiveCore:
 | `primitive_suggester` | 40 | Seed primitive to action mapping |
 | `multi_stage_matching` | 42 | Cascading sequence matching |
 | `replay_learning` | 43 | Learn during sequence replay |
+| `spatial_relationship` | 44 | Learn click effect patterns, suggest clicks toward goal |
 | `abstraction_templates` | 45 | Pattern templates from wins |
 | `few_shot_invariants` | 46 | Relational bias from few examples |
 | `near_miss_analyzer` | 48 | Learn from high-score failures |
@@ -638,7 +718,14 @@ All knowledge flows through SQLite:
 | `agent_cognitive_stages` | Stage progression tracking |
 | `viral_packages` | Horizontal knowledge transfer |
 | `pariah_patterns` | Failed patterns to avoid |
-
+| `player_state_history` | Per-action player properties (symbolic reasoning) |
+| `property_transformations` | Learned object-property change mappings |
+| `goal_requirements` | Learned goal state requirements |
+| `detected_events` | **NEW** Events detected between frames (MOVEMENT, COLLISION, etc.) |
+| `causal_links` | **NEW** Links between actions and detected events |
+| `process_classifications` | **NEW** Process type classifications (PHYSICS_SIMULATION, etc.) |
+| `spatial_effects` | **NEW** Learned click effect patterns (relative positions) |
+| `goal_configurations` | **NEW** Known winning grid configurations |
 ### 3. Context Flow
 
 Context is built incrementally and passed through:
@@ -652,20 +739,57 @@ ContextBuilder.build_context()
     │
     ├── Network: prior_lessons, active_sequence, frontier_mode
     │
-    └── Cognitive: cognitive_stage, cull_distance, stream_weights
+    ├── Cognitive: cognitive_stage, cull_distance, stream_weights
+    │
+    └── Event Understanding: recent_events, frame_delta_count
+        (populated from ActionOutcome.detected_events via update())
 ```
 
-### 4. Learning Feedback Loop
+### 4. Event Understanding Data Flow
+
+```
+OutcomeProcessor.process()
+    │
+    ├── _detect_events(frame_before, frame_after, action)
+    │       ├── EventDetector.detect_events_from_frames()
+    │       └── EventDetector.classify_process()
+    │
+    └── ActionOutcome.detected_events = [event_dicts]
+            │
+            ▼
+ContextBuilder.update(action, outcome)
+    │
+    ├── _recent_events.extend(outcome.detected_events)
+    └── _last_frame_delta_count = outcome.frame_delta_count
+            │
+            ▼
+DecisionRungSystem.decide(frame, context.to_dict())
+    │
+    ├── FrameInterpretationRung reads context['frame_delta_count']
+    ├── EventUnderstandingRung reads context['recent_events']
+    └── Sets context flags: likely_physics_game, physics_game_confirmed
+            │
+            ▼
+DecisionRungSystem.notify_action_complete()
+    │
+    └── SpatialRelationshipRung.on_action_complete()
+            └── SpatialEffectLearner.record_click_effect()
+```
+
+### 5. Learning Feedback Loop
 
 ```
 Action → Outcome → Learning → Knowledge → Decision
-   │                            │
-   │                            ▼
-   │                     ┌──────────────┐
-   │                     │ Database     │
-   │                     └──────────────┘
-   │                            │
-   └────────────────────────────┘
+   │        │                      │
+   │        │ detected_events      ▼
+   │        │               ┌──────────────┐
+   │        └──────────────►│ Database     │
+   │                        │  - events    │
+   │                        │  - spatial   │
+   │                        │  - goals     │
+   │                        └──────────────┘
+   │                               │
+   └───────────────────────────────┘
 ```
 
 ---
@@ -689,4 +813,10 @@ Action → Outcome → Learning → Knowledge → Decision
 - [engines/self_model/cognitive_core.py](../engines/self_model/cognitive_core.py)
 - [game_loop.py](../game_loop.py)
 - [outcome_processor.py](../outcome_processor.py)
+- [context_builder.py](../context_builder.py)
 - [learning_systems.py](../learning_systems.py)
+
+*Event Understanding modules:*
+- [engines/perception/object_tracker.py](../engines/perception/object_tracker.py)
+- [engines/perception/event_detector.py](../engines/perception/event_detector.py)
+- [engines/perception/spatial_learning.py](../engines/perception/spatial_learning.py)
