@@ -56,6 +56,7 @@ from engines.consciousness.i_thread_types import (
     DeliberationResult,
     GutInstinctResult,
     IThreadState,
+    MortalityState,
     ReasoningLog,
     StreamProposal,
     SynthesisResult,
@@ -417,7 +418,7 @@ class IThread:
         state: IThreadState,
         stream_a_proposal: StreamProposal,
         stream_b_proposal: StreamProposal,
-        context: Optional[Dict[str, Any]] = None
+        _context: Optional[Dict[str, Any]] = None
     ) -> SynthesisResult:
         """
         Synthesize an action from competing stream proposals.
@@ -428,7 +429,7 @@ class IThread:
             state: Current I-Thread state with weights
             stream_a_proposal: Private experience proposal
             stream_b_proposal: Network wisdom proposal
-            context: Optional context (game state, history)
+            _context: Optional context (game state, history) - reserved for future use
 
         Returns:
             SynthesisResult with chosen action and metadata

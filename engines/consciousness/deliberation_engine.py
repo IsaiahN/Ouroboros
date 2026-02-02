@@ -28,16 +28,20 @@ Rule 10: Leverage existing systems
 import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+
+# WorldModel used for type hints - lazy import to avoid circular deps
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from database_interface import DatabaseInterface
 from engines.consciousness.i_thread_types import (
     DeliberationResult,
     GutInstinctResult,
+    MortalityState,
     ReasoningLog,
 )
 
-# WorldModel used in type hints below but imported directly where needed
+if TYPE_CHECKING:
+    from engines.reasoning.symbolic_reasoning_engine import WorldModel
 
 logger = logging.getLogger(__name__)
 

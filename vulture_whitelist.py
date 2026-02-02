@@ -29,3 +29,8 @@ FilterPhase  # noqa: F821 - deprecated/engines_decision/phases/phase6_filter.py
 SelectPhase  # noqa: F821 - deprecated/engines_decision/phases/phase7_select.py
 FinalDecision  # noqa: F821 - deprecated/engines_decision/phase_contracts.py
 Proposal  # noqa: F821 - deprecated/engines_decision/phase_contracts.py
+
+# engines/consciousness/ - Type hints used with string quotes for forward refs
+# Vulture doesn't recognize quoted type hints like Optional['MortalityState']
+MortalityState  # noqa: F821 - Used in type hints i_thread.py:1012, deliberation_engine.py:1019
+WorldModel  # noqa: F821 - Used in type hints deliberation_engine.py:1025
