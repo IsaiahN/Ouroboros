@@ -19,7 +19,7 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from database_interface import DatabaseInterface
 from engines.engine_logger import get_engine_logger, log_silent_failure
@@ -97,6 +97,42 @@ class ViralPackageEngine:
     def get_top_pariahs(self, *args, **kwargs) -> List[Dict]:
         """Delegated to PariahManager."""
         return self._pariah_manager.get_top_pariahs(*args, **kwargs)
+
+    def get_top_packages(self, limit: int = 5) -> List[Dict]:
+        """Get top viral packages by success rate and infection count."""
+        try:
+            rows = self.db.execute_query("""
+                SELECT
+                    package_id,
+                    package_name,
+                    package_type,
+                    success_rate,
+                    avg_score_contribution,
+                    active_infections,
+                    total_infections,
+                    generation_discovered
+                FROM viral_information_packages
+                WHERE is_active = TRUE
+                ORDER BY success_rate DESC, total_infections DESC
+                LIMIT ?
+            """, (limit,))
+
+            return [
+                {
+                    'package_id': r[0],
+                    'package_name': r[1],
+                    'package_type': r[2],
+                    'success_rate': r[3] or 0.0,
+                    'avg_score_contribution': r[4] or 0.0,
+                    'active_infections': r[5] or 0,
+                    'total_infections': r[6] or 0,
+                    'generation_discovered': r[7] or 0
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.debug(f"Could not get top packages: {e}")
+            return []
 
     # ========================================================================
     # FRONTIER PACKAGE COLUMNS (Schema migration)

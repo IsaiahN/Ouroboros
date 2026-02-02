@@ -25,32 +25,48 @@ logger = logging.getLogger(__name__)
 class EnhancedDatabaseInterface(DatabaseInterface):
     """DatabaseInterface with schema auto-maintenance."""
 
+    # Track pending schema changes to batch regeneration
+    _pending_schema_changes: int = 0
+    _schema_regen_threshold: int = 10  # Regenerate after this many DDL statements
+
     def __init__(self, db_path: str = "core_data.db"):
         """Initialize with schema auto-maintenance."""
         super().__init__(db_path)
 
-        # Add schema maintenance
-        try:
-            self.schema_maintenance = SchemaAutoMaintenance(db_path)
-            logger.info("Schema auto-maintenance enabled")
-        except Exception as e:
-            logger.warning(f"Schema auto-maintenance not available: {e}")
-            self.schema_maintenance = None
+        # Add schema maintenance (lazy - only used when needed)
+        self._schema_maintenance = None
+        self._db_path = db_path
+
+    @property
+    def schema_maintenance(self):
+        """Lazy-load schema maintenance only when needed."""
+        if self._schema_maintenance is None:
+            try:
+                self._schema_maintenance = SchemaAutoMaintenance(self._db_path)
+            except Exception as e:
+                logger.warning(f"Schema auto-maintenance not available: {e}")
+        return self._schema_maintenance
 
     def execute_query(self, query: str, params=()) -> list:
-        """Execute query with auto-schema export on schema changes."""
+        """Execute query with batched auto-schema export on schema changes."""
         # Execute the query using parent method
         result = super().execute_query(query, params)
 
-        # Auto-export schema if this was a schema change
-        if self.schema_maintenance and any(keyword in query.upper() for keyword in ['CREATE TABLE', 'ALTER TABLE', 'DROP TABLE']):
-            try:
-                self.schema_maintenance.regenerate_schema_file()
-                logger.info("✓ Schema auto-exported after schema change")
-            except Exception as e:
-                logger.warning(f"Schema auto-export failed: {e}")
+        # Track schema changes but don't regenerate on every one
+        if any(keyword in query.upper() for keyword in ['CREATE TABLE', 'ALTER TABLE', 'DROP TABLE']):
+            EnhancedDatabaseInterface._pending_schema_changes += 1
 
         return result
+
+    def flush_schema_changes(self):
+        """Manually trigger schema regeneration if there are pending changes."""
+        if EnhancedDatabaseInterface._pending_schema_changes > 0 and self.schema_maintenance:
+            try:
+                self.schema_maintenance.regenerate_schema_file()
+                EnhancedDatabaseInterface._pending_schema_changes = 0
+                logger.info("[OK] Schema auto-exported")
+            except Exception as e:
+                logger.warning(f"Schema auto-export failed: {e}")
 
 if __name__ == "__main__":
     # Test the enhanced interface

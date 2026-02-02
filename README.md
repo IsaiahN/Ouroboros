@@ -5,9 +5,6 @@
 **Foundational Papers & Theories**:
 - Paper: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 
-- [MetaLearning Theory](architecture/Concept%20-%20MetaLearning%20System/Abstract%20-%20Unified_Metalearning_System_Theory_Complete.md) - CODS/Oracle, 110 seed primitives, bootstrapping
-- [Consciousness Theory](architecture/Concept%20-%20Agent%20Self%20&%20World%20Model/Abstract%20-%20unified_agent_consciousness_theory.md) - Two Streams, persona submodeling, I-Thread
-- [Network Theory](architecture/Concept%20-%20Network%20Model/Abstract%20-%20unified_network_theory_complete.md) - Database-as-organism, viral exchange, dual-economy
 ---
 
 ## System Architecture
@@ -16,19 +13,16 @@ Three integrated subsystems:
 
 | Subsystem | Function | Implementation |
 |-----------|----------|----------------|
-| **Network Layer** | Persistent storage, viral package distribution | SQLite + horizontal transfer |
-| **Validation Layer** | Pattern validation, primitive unlocking | CODS engine |
-| **Agent Layer** | Dual-stream reasoning, action selection | Two Streams + Persona ensemble |
+| **Storage Layer** | Persistent knowledge, game results | SQLite database |
+| **Decision Layer** | Action selection via weighted rungs | 42-rung Decision System + Two Streams (wA/wB) |
+| **Evolution Layer** | Population management, fitness selection | Evolutionary engine + Agents |
 
 ---
 
 ## Acknowledgments
 
-**Key Collaborators & Influences:**
-
-- **RLVR** - [Reinforcement Learning with Verifiable Rewards](https://arxiv.org/abs/2506.14245)
-- **Tiny Reasoning Machines** -[Less is More: Recursive Reasoning with Tiny Networks](https://arxiv.org/abs/2510.04871)
-- **Patrick Cox** - Math-based Storytelling for characters
+- **ARC-AGI** - [Francois Chollet's ARC Prize](https://arcprize.org/) - The challenge driving this project
+- **RLVR** - [Reinforcement Learning with Verifiable Rewards](https://arxiv.org/abs/2506.14245) - Core feedback mechanism
 
 ---
 
@@ -63,9 +57,11 @@ cp .env.example .env
 ```
 
 **Key dependencies** (see `requirements.txt`):
-- `requests` - ARC API communication
+- `arc-agi` - Official ARC-AGI-3 SDK
 - `python-dotenv` - Environment configuration
-- `numpy` - Numerical operations
+- `numpy`, `pandas` - Data operations
+- `torch` - Learned representations
+- `aiohttp` - Async HTTP
 
 ## Quick Start
 
@@ -73,14 +69,17 @@ cp .env.example .env
 # Activate virtual environment
 & .venv/Scripts/Activate.ps1  # PowerShell
 
-# Start the autonomous evolution loop (Recommended)
-python run_evolution.py
+# Quick test (1 agent, 1 game, 1 generation)
+python evolution_runner.py --mode=offline --test --game=ls20
 
-# Run in "Specialist Mode" (Deep mastery of specific games)
-python run_evolution.py --specialist
+# Run with verbose output (see each action)
+python evolution_runner.py --mode=offline --test --game=ls20 --verbose
 
-# Run in "Diversity Mode" (Focus on generalization)
-python run_evolution.py --diversity
+# Full evolution run (offline mode)
+python evolution_runner.py --mode=offline --population=10 --max-generations=50
+
+# Online mode (submits to ARC scorecards)
+python evolution_runner.py --mode=online
 ```
 
 > **Important**: Always verify `(.venv)` prefix in terminal before running commands.
@@ -89,13 +88,14 @@ python run_evolution.py --diversity
 
 | Argument | Description |
 |----------|-------------|
-| `--specialist` | **Recommended**. Agents master specific games (2-3 each). High scores. |
-| `--diversity` | Focus on generalization and novel games. Prevents overfitting. |
-| `--fast` | Fast iterations: 30 min intervals, 5 games/generation. |
-| `--thorough` | Deep evaluation: 90 min intervals, 20 games/generation. |
-| `--quick` | Quick test run: Max 5 generations. |
-| `--test` | Minimal smoke test: 1 agent, 1 game, 1 generation. |
-| `--max-generations N` | Override maximum generations (useful for tests). |
+| `--mode` | Operation mode: `offline` (local only), `online` (scorecards), `normal` (both) |
+| `--test` | Minimal smoke test: 1 agent, 1 game, 1 generation |
+| `--verbose`, `-v` | Show each action and score during gameplay |
+| `--game GAME` | Target specific game (e.g., `--game=ls20`) |
+| `--population N` | Number of agents (default: 10) |
+| `--max-generations N` | Maximum generations (default: 100) |
+| `--games-per-gen N` | Games per agent per generation (default: 3) |
+| `--max-actions N` | Max actions per game (default: 500) |
 
 ## Core Concepts
 
@@ -126,48 +126,46 @@ The system mimics biological evolution with three distinct layers of information
 - **Viral Packages**: Successful strategies spread rapidly through the network
 - **Pariahs**: Failed patterns marked for avoidance (with decay to allow innovation)
 
-### 3. Dual-Stream Decision Architecture
+### 3. Decision Rung System (Action Selection)
 
-Agents integrate two knowledge sources for action selection:
+The core intelligence is a **42-rung modular decision ladder**. Each rung is a pluggable component that can propose actions with confidence scores.
 
-| Stream | Source | Update Frequency | Scope |
-|--------|--------|------------------|-------|
-| **Stream A** | Agent's own gameplay history | Per-action | Local experience |
-| **Stream B** | Network viral packages (CODS-validated) | Per-generation | Population knowledge |
+**Strategies**:
+- **LADDER**: First confident answer wins (fast, deterministic)
+- **WEIGHTED**: All rungs vote, weighted sum decides (thorough)
+- **PHASED**: Different orderings for orientation/hypothesis/exploitation phases
 
-**Integration**: Weighted combination `action = w_A * stream_A + w_B * stream_B` where weights are learned from outcome feedback. Stream conflict triggers deliberative processing.
+**Rung Categories**:
 
-### 3.1 IThread vs AgentSelfModel: Complementary Systems
+| Category | Purpose | Example Rungs |
+|----------|---------|---------------|
+| **Orientation** | Understand current state | Survey, Questioning, ExplorationPhase |
+| **Filter** | Avoid bad actions | DeathAvoidance, PriorLessons, InfiniteLoopBreaker |
+| **Hypothesis** | Test theories | ScientificMethod, TheoryGate, TwoStreams |
+| **Exploitation** | Use known patterns | NetworkWisdom, FrontierTopology, AbstractionTemplates |
+| **Emergency** | Break stuck states | InfiniteLoopBreaker, SmartActionSelection |
+| **Fallback** | Default when nothing else works | RandomExploration |
 
-Two distinct subsystems handle different aspects of agent cognition:
+**Key Rungs**:
+- `DeathAvoidanceRung` - Learns fatal patterns, prevents game-over
+- `PriorLessonsRung` - Applies lessons from previous games
+- `NetworkWisdomRung` - Queries viral packages from successful agents
+- `PrimitiveSuggesterRung` - Maps seed primitives to action suggestions
+- `FrontierCheckpointRung` - Uses checkpoints for efficient exploration
 
-| Aspect | IThread (Consciousness Weaver) | AgentSelfModel (World Model) |
-|--------|-------------------------------|------------------------------|
-| **Core Question** | "Which knowledge should I trust?" | "What do I control in this world?" |
-| **Domain** | Knowledge/belief weighting | Object/action mapping |
-| **Scope** | Cognitive identity (wA/wB) | Physical control discovery |
-| **Persists Across** | Agent's entire life | Each game/level |
-| **Conflict Resolution** | Stream A vs Stream B | "Is this object me or environment?" |
-| **Output** | Weighted predictions/decisions | Control hypotheses, object bindings |
+### 4. Pattern Validation via RLVR
 
-**IThread** (`i_thread.py`): The persistent identity that weaves Stream A (private experience) and Stream B (collective wisdom) together moment-by-moment. Manages personality as learned stream weighting. When streams conflict, consciousness becomes vivid—the agent must deliberate.
-
-**AgentSelfModel** (`agent_self_model.py`): Discovers physical control through action-effect correlation: "When I press ACTION1 (up), Object X moves up → I control Object X." Builds a mini world model per level, distinguishing controlled objects from environment.
-
-### 4. CODS: Centralized Pattern Validator
-
-CODS (Cognitive Operator Discovery System) is a population-level analyzer, not per-agent:
+Patterns are validated through Reinforcement Learning with Verifiable Rewards:
 
 | Function | Description |
 |----------|-------------|
-| Pattern detection | Analyzes gameplay across all agents |
-| Cross-validation | Requires pattern replication across multiple agents |
-| Primitive unlocking | Grants optimized operators when understanding demonstrated |
-| Package creation | Converts validated patterns to viral packages |
+| Score feedback | Direct ARC API score validates action sequences |
+| Cross-agent comparison | Successful patterns spread via viral packages |
+| Fitness calculation | RLVR scores drive evolutionary selection |
 
-**Architecture**: Decentralized exploration (agents), centralized validation (CODS), distributed storage (database).
+**Architecture**: Decentralized exploration (agents), centralized fitness (RLVR), distributed storage (database).
 
-### 5. Seed Primitives (110 Operations)
+### 5. Seed Primitives
 
 Bootstrap operators available at initialization:
 
@@ -182,8 +180,6 @@ Bootstrap operators available at initialization:
 | Social Learning | 4 | `imitation_bias`, `joint_attention` |
 | Explore/Exploit | 4 | `curiosity_drive`, `exploration_bonus` |
 | Metacognition | 5 | `get_confidence`, `detect_stuck` |
-
-Additional primitives unlock via CODS validation when agents demonstrate compositional understanding.
 
 ### 6. Agent Role Specialization
 
@@ -277,10 +273,10 @@ Transition on first full win; Pioneers reassign to remaining unbeaten games.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ### Entry Points
-- `run_evolution.py` - Main entry point for autonomous evolution
+- `evolution_runner.py` - Main entry point for autonomous evolution
 - `core_data.db` - The "network brain" (SQLite database storing ALL knowledge)
 
 ### Core Modules
@@ -288,53 +284,51 @@ Transition on first full win; Pioneers reassign to remaining unbeaten games.
 | Module | Purpose |
 |--------|---------|
 | `core_gameplay.py` | Main gameplay loop and action execution |
-| `i_thread.py` | **Consciousness Weaver** - Single source of truth for wA/wB stream weighting, identity persistence |
-| `agent_self_model.py` | **Physical World Model** - Object control discovery, action-effect correlation, developmental systems |
-| `cods_engine.py` | Centralized Operator Discovery System - pattern validation |
-| `network_intelligence_engine.py` | Network-level learning and emergence tracking |
-| `seed_primitives.py` | 110 innate cognitive primitives (attention, affordance, physics, metacognition) |
-| `persona_runtime.py` | Internal persona dialogue and metacognition |
-| `viral_package_engine.py` | Viral knowledge exchange system |
-| `prestige_engine.py` | Social capital and contribution tracking |
-| `mastery_system.py` | Earn-to-replay privileges, mastery tier tracking |
-| `sensation_engine.py` | Emotional gameplay and navigation state |
-| `resonance_detector.py` | Cross-domain pattern resonance |
+| `decision_rung_system.py` | 42-rung ladder for action selection |
+| `seed_primitives.py` | Innate cognitive primitives (attention, affordance, physics) |
+| `database_interface.py` | SQLite database operations |
+| `evolutionary_engine.py` | Population evolution and breeding |
+| `engines/consciousness/i_thread.py` | Stream A/B weighting, identity persistence |
+| `engines/consciousness/sensation_engine.py` | Emotional gameplay and navigation state |
+| `engines/social/viral_package_engine.py` | Viral knowledge exchange system |
+| `engines/social/prestige_engine.py` | Social capital and contribution tracking |
 
 ### Supporting Systems
 
 | Module | Purpose |
 |--------|---------|
-| `regulatory_signal_engine.py` | Adaptive signals for population control |
-| `autopoiesis_monitor.py` | System health metrics and self-regulation |
-| `primitive_unlock_manager.py` | Manages primitive bootstrapping and unlocks |
-| `concept_discovery_engine.py` | Semantic concept discovery across games |
-| `terminal_pattern_detector.py` | Game-over foresight - learns fatal patterns |
+| `engines/regulation/regulatory_signal_engine.py` | Adaptive signals for population control |
+| `engines/perception/terminal_pattern_detector.py` | Game-over foresight - learns fatal patterns |
+| `engines/postgame/orchestrator.py` | RLVR fitness calculation |
 | `safe_cleanup.py` | Database maintenance (runs every 10 generations) |
 
-### Architecture Documentation
+### Architecture & Theory Documentation
 
-Located in `architecture/`:
+Theoretical concepts in `DOCS/`:
 
 | Folder | Contents |
 |--------|----------|
 | `Concept - Agent Self & World Model/` | Consciousness theory, Two Streams, persona submodeling |
-| `Concept - MetaLearning System/` | CODS/Oracle, primitives, bootstrapping mechanisms |
+| `Concept - MetaLearning System/` | Primitives, bootstrapping mechanisms |
 | `Concept - Network Model/` | Network theory, viral exchange, database-as-organism |
 | `Concept Integration/` | Unified theory synthesis, integration architecture |
-| `ARC-API-DOCUMENTATION/` | ARC-AGI-3 API reference |
+
+Architectural decisions in `architecture/`:
+
+| File | Contents |
+|------|----------|
+| `decision_cognitive_architecture.md` | Decision rung system design |
+| `frontier_checkpoint_system.md` | Checkpoint and progress tracking |
 
 ---
 
-## 📊 Analysis & Monitoring Tools
+## Analysis & Monitoring Tools
 
 Located in `manual_tools/`:
 
 ```bash
 # Gameplay progression analysis
-python manual_tools/gameplay_analyzer.py --hours 3 --compare
-
-# Check CODS status
-python manual_tools/check_cods_status.py
+python manual_tools/analysis/gameplay_analyzer.py --hours 3
 
 # Database validation
 python manual_tools/db_validation.py
@@ -345,15 +339,13 @@ python manual_tools/database/schema_inspector.py --table agents --sample
 
 | Tool | Purpose |
 |------|---------|
-| `gameplay_analyzer.py` | Game results, scores, level completions |
-| `check_cods_status.py` | CODS health and discovery status |
-| `check_primitives.py` | Primitive unlock status |
+| `analysis/gameplay_analyzer.py` | Game results, scores, level completions |
 | `observer_dashboard.py` | Real-time system observation |
 | `db_validation.py` | Database integrity checks |
 
 ---
 
-## 🧪 Testing
+## Testing
 
 Tests are located in `tests/` folder (exception to "No Test Files" rule):
 
@@ -362,12 +354,12 @@ Tests are located in `tests/` folder (exception to "No Test Files" rule):
 pytest tests/
 
 # Run specific test
-pytest tests/test_cods.py -v
+pytest tests/test_primitives.py -v
 ```
 
 ---
 
-## 🛠️ Configuration
+## Configuration
 
 1. **Environment**: Copy `.env.example` to `.env`, set `ARC_API_KEY`
 2. **Dependencies**:
@@ -401,7 +393,7 @@ See [.github/copilot-instructions.md](.github/copilot-instructions.md) for compl
 
 **Key tradeoffs**:
 - Agent mortality enables population-level adaptation without catastrophic forgetting
-- Centralized validation (CODS) prevents collective hallucination while allowing decentralized exploration
+- RLVR feedback provides verifiable ground truth for pattern validation
 - Dual-currency system maintains diversity under evolutionary pressure
 
 ---
@@ -410,5 +402,5 @@ See [.github/copilot-instructions.md](.github/copilot-instructions.md) for compl
 
 ---
 
-Example Gameplay (Level 4 as66):
+Example Gameplay (Level 4 as66 - legacy version):
 [https://three.arcprize.org/replay/as66-821a4dcad9c2/55d279d1-3f1e-416f-9024-c49e1b1df573](https://three.arcprize.org/replay/as66-821a4dcad9c2/55d279d1-3f1e-416f-9024-c49e1b1df573)
