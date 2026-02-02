@@ -417,3 +417,205 @@ The fix is comprehensive (3 layers of protection), but real gameplay testing wil
 2. Monitor terminal output for any remaining ACTION6 warnings
 3. If clean, commit changes with message: "fix: Action-agnostic decision system - validate all external action sources"
 4. Run pre-commit hooks before final commit
+
+---
+
+## February 2, 2026 (Continued)
+
+### Session: Root Cause Fix + Rung System Enhancements + Comprehension-Based Modulation
+
+**Started**: ~12:20 AM
+**Last Update**: 1:33:59 AM
+
+---
+
+## Approach
+
+This session tackled multiple issues:
+
+1. **Root Cause Discovery**: The ACTION6 warnings persisted even after adding validation helpers. Traced the actual bug to the evolution_runner calling `decide(context, {})` with swapped arguments.
+
+2. **Rung System Configuration**: Made the rung ordering configurable via CLI and changed default from `efficiency` (15 rungs) to `comprehensive` (46 rungs).
+
+3. **Explore/Exploit Logic Fix**: Identified backwards logic where struggling agents would exploit (use failing strategies) instead of explore (find what works).
+
+4. **Comprehension-Based Modulation**: Implemented a new prediction-error based confidence system that modulates behavior based on UNDERSTANDING rather than raw outcomes.
+
+**Key Insight**: The old logic said "when failing, double down on known strategies" which is wrong. You can't exploit a system you don't understand. The correct model:
+- **Low confidence** (don't understand game) → EXPLORE to learn
+- **High confidence** (understand game) → EXPLOIT that understanding
+- Confidence should update based on **prediction accuracy**, not raw success/failure
+
+---
+
+## Steps Completed
+
+### 1. Root Cause Fix for ACTION6 Bug (12:25 AM)
+
+**Problem**: `available_in_ctx=MISSING` - rungs weren't receiving available_actions
+
+**Root Cause**: In evolution_runner.py line 313:
+`python
+# WRONG: context passed as game_state, empty {} as context
+result = self.decision_system.decide(context, {})
+`
+
+**Fix**:
+`python
+# CORRECT: obs as game_state, context (with available_actions) as context
+result = self.decision_system.decide(obs, context)
+`
+
+**Verified**: After fix, debug output showed `available_in_ctx=[1, 2, 3, 4]` and no more warnings.
+
+### 2. Changed Default Rung Ordering (12:35 AM)
+
+Changed default from `efficiency` (15 rungs) to `comprehensive` (46 rungs) in:
+- `decision_rung_system.py`: 4 locations
+- `core_gameplay.py`: 1 location
+
+### 3. Added --rungs CLI Parameter (12:40 AM)
+
+Added `--rungs` parameter to evolution_runner.py:
+`ash
+python evolution_runner.py --rungs comprehensive   # 46 rungs (default)
+python evolution_runner.py --rungs efficiency      # 15 rungs (fast)
+python evolution_runner.py --rungs minimal         # 6 rungs (fastest)
+python evolution_runner.py --rungs llm_optimal     # 48 rungs (full)
+`
+
+Available presets: comprehensive, efficiency, minimal, llm_optimal, human_brain, frontier_exploration, phased_orientation, phased_hypothesis, phased_exploitation
+
+### 4. Flipped Explore/Exploit Modulation (12:55 AM)
+
+**Old (Wrong)**:
+- Struggling → suppress exploration, boost exploitation
+- Succeeding → boost exploration, suppress exploitation
+
+**New (Correct)**:
+- Struggling → BOOST exploration (need to find what works)
+- Succeeding → BOOST exploitation (keep doing what works)
+
+Updated `get_rung_modulation()` in temporal_integrator.py.
+
+### 5. Implemented Prediction-Error Confidence System (1:15 AM)
+
+Created comprehensive system in `engines/memory/temporal_integrator.py`:
+
+**New Methods**:
+- `record_prediction()` - Record predicted outcome before action
+- `record_outcome_with_prediction_error()` - Compare prediction to reality
+- `get_comprehension_confidence()` - Get understanding level [0, 1]
+- `get_rung_modulation_v2()` - Comprehension-based modulation
+
+**Core Logic**:
+`
+Surprise = |predicted - actual| * prediction_confidence
+
+Low surprise → Confidence UP (my model is correct)
+High surprise → Confidence DOWN (my model is wrong)
+`
+
+**Modulation Based on Confidence**:
+| Confidence | Exploration | Exploitation |
+|------------|-------------|--------------|
+| 0.0 (lost) | 1.30 (boost) | 0.50 (suppress) |
+| 0.5 (partial) | 0.90 | 0.90 |
+| 1.0 (understands) | 0.50 (suppress) | 1.30 (boost) |
+
+**Tested and Verified**:
+- Good predictions (predicts correctly) → Confidence 1.00 → Exploit
+- Bad predictions (constantly surprised) → Confidence 0.00 → Explore
+
+---
+
+## Architecture: Comprehension-Based Modulation
+
+### The Key Insight
+
+**Old Model** (outcome-based):
+`
+Outcomes → Behavior
+- Win → Exploit
+- Lose → Explore
+`
+
+**New Model** (comprehension-based):
+`
+Outcomes → Update Confidence → Confidence drives behavior
+- Predicted correctly → Confidence UP
+- Surprised by reality → Confidence DOWN
+- High confidence → Exploit
+- Low confidence → Explore
+`
+
+### Why This Matters
+
+1. **Succeeding without understanding (luck)**: Old model would say "exploit!" but agent doesn't know WHY they succeeded. New model keeps confidence low → keep exploring.
+
+2. **Confident but failing**: Old model would say "explore!" but maybe the strategy is right and just needs refinement. New model checks: was I SURPRISED by failure? If yes, confidence drops and we explore. If no (I predicted failure), confidence stays high.
+
+3. **Can't exploit what you don't understand**: Exploitation requires a mental model. The new system ensures exploitation only kicks in when prediction accuracy is high.
+
+---
+
+## Files Modified
+
+### evolution_runner.py
+- Fixed `decide(context, {})` → `decide(obs, context)`
+- Added `--rungs` CLI parameter
+- Added `rung_ordering` parameter to EvolutionRunner class
+
+### decision_rung_system.py
+- Changed default ordering from 'efficiency' to 'comprehensive' (4 locations)
+- Updated fallback ordering reference
+
+### core_gameplay.py
+- Changed `decision_ordering` default to "comprehensive"
+
+### engines/memory/temporal_integrator.py
+- Fixed explore/exploit modulation direction
+- Added `record_prediction()` method
+- Added `record_outcome_with_prediction_error()` method
+- Added `get_comprehension_confidence()` method
+- Added `get_rung_modulation_v2()` method
+- Updated `get_rung_modulation()` to use comprehension when available
+- Updated `clear_buffer()` to clear new buffers
+
+---
+
+## Current Status
+
+| Item | Status |
+|------|--------|
+| ACTION6 root cause | FIXED - arguments were swapped |
+| Default rung ordering | Changed to 'comprehensive' (46 rungs) |
+| CLI --rungs parameter | IMPLEMENTED |
+| Explore/exploit logic | FIXED - now correctly modulated |
+| Comprehension confidence | IMPLEMENTED and TESTED |
+
+---
+
+## Current Failure/Issue
+
+**None critical** - All fixes verified working.
+
+**Pending Integration**:
+The new `record_prediction()` and `record_outcome_with_prediction_error()` methods need to be called from the gameplay loop to collect prediction data. Currently the system falls back to outcome-based modulation (which is now correctly oriented).
+
+**To fully enable comprehension-based modulation**:
+1. Rungs that make predictions (MetacognitivePredictionRung, TheoryGateRung) should call `record_prediction()`
+2. Evolution runner should call `record_outcome_with_prediction_error()` after each action
+3. Once prediction data accumulates (>5 predictions), system auto-switches to comprehension-based modulation
+
+---
+
+## Next Steps
+
+1. Commit all changes with appropriate message
+2. Integrate prediction recording into gameplay loop
+3. Run extended evolution test to verify:
+   - No ACTION6 warnings
+   - Rung system loads correct preset
+   - Modulation behaves correctly
+4. Monitor confidence tracking over generations

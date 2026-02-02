@@ -405,26 +405,42 @@ class TemporalIntegrator:
         - 'exploitation': Multiplier for exploitation-category rungs
         - 'safety': Multiplier for safety-category rungs
 
-        When recent outcomes are negative (low appetite):
-        - Exploration suppressed
-        - Exploitation boosted
-        - Safety boosted
+        COMPREHENSION-BASED MODULATION (preferred):
+        If prediction data exists, uses comprehension confidence:
+        - Low confidence → EXPLORE to understand
+        - High confidence → EXPLOIT understanding
 
-        When recent outcomes are positive (high appetite):
-        - Exploration boosted
-        - Exploitation neutral
-        - Safety reduced (can take more risks)
+        FALLBACK (outcome-based) when no prediction data:
+        - Struggling → EXPLORE (current approach not working)
+        - Succeeding → EXPLOIT (keep doing what works)
         """
+        # Try comprehension-based modulation first (if we have prediction data)
+        key = (agent_id, game_type)
+        has_prediction_data = (
+            hasattr(self, '_confidence_buffer') and
+            key in self._confidence_buffer and
+            len(self._confidence_buffer[key]) > 5  # Need enough data
+        )
+
+        if has_prediction_data:
+            return self.get_rung_modulation_v2(
+                agent_id, game_type, current_generation, current_action
+            )
+
+        # Fallback: outcome-based modulation
         appetite = self.get_exploration_appetite(
             agent_id, game_type, current_generation, current_action
         )
 
+        # OUTCOME-BASED FALLBACK:
+        # Low appetite (struggling) = explore more, exploit less
+        # High appetite (succeeding) = explore less, exploit more
         return {
-            'exploration': 0.3 + appetite * 0.7,      # [0.3, 1.0]
-            'exploitation': 1.3 - appetite * 0.6,    # [0.7, 1.3]
-            'safety': 1.0 + (0.5 - appetite) * 0.4,  # [0.8, 1.2] - higher when extreme
-            'metacognition': 1.0,                     # Always neutral
-            'filter': 1.0,                            # Always neutral (filters don't suggest)
+            'exploration': 1.3 - appetite * 0.8,    # [0.5, 1.3] - HIGH when struggling
+            'exploitation': 0.5 + appetite * 0.8,   # [0.5, 1.3] - HIGH when succeeding
+            'safety': 1.0 + (0.5 - appetite) * 0.4, # [0.8, 1.2] - higher at extremes
+            'metacognition': 1.0,                    # Always neutral
+            'filter': 1.0,                           # Always neutral
         }
 
     def get_strategic_state(
@@ -489,6 +505,254 @@ class TemporalIntegrator:
         """Clear in-memory buffer without persisting (for testing/reset)."""
         self._outcome_buffer.clear()
         self._integral_cache.clear()
+        self._prediction_buffer.clear()
+        self._confidence_cache.clear()
+
+    # =========================================================================
+    # PREDICTION-ERROR BASED CONFIDENCE SYSTEM
+    # =========================================================================
+    # The key insight: Confidence should be based on COMPREHENSION, not outcomes.
+    # - Predicted success that succeeds → Confidence UP (I understand this)
+    # - Predicted failure that fails → Confidence UP (I understand this)
+    # - Surprised by success → Confidence DOWN (got lucky, don't know why)
+    # - Surprised by failure → Confidence DOWN (my model is wrong)
+    #
+    # Confidence drives exploration vs exploitation:
+    # - Low confidence → EXPLORE to understand
+    # - High confidence → EXPLOIT understanding
+    # =========================================================================
+
+    def record_prediction(
+        self,
+        agent_id: str,
+        game_type: str,
+        generation: int,
+        action_in_generation: int,
+        predicted_outcome: float,
+        prediction_confidence: float = 0.5
+    ) -> None:
+        """
+        Record a prediction BEFORE taking an action.
+
+        Args:
+            agent_id: Agent identifier
+            game_type: Game type identifier
+            generation: Current generation (Big TIME)
+            action_in_generation: Action count within generation
+            predicted_outcome: Expected outcome [-1, 1]
+                              +1 = expect success
+                              0 = uncertain/neutral
+                              -1 = expect failure
+            prediction_confidence: How confident in this prediction [0, 1]
+        """
+        composite_t = self._composite_time(generation, action_in_generation)
+        key = (agent_id, game_type)
+
+        if not hasattr(self, '_prediction_buffer'):
+            self._prediction_buffer: Dict[Tuple[str, str], List[Tuple[float, float, float]]] = {}
+
+        if key not in self._prediction_buffer:
+            self._prediction_buffer[key] = []
+
+        self._prediction_buffer[key].append((composite_t, predicted_outcome, prediction_confidence))
+
+    def record_outcome_with_prediction_error(
+        self,
+        agent_id: str,
+        game_type: str,
+        generation: int,
+        action_in_generation: int,
+        actual_outcome: float
+    ) -> float:
+        """
+        Record outcome and compute prediction error.
+
+        Returns the surprise value (prediction error magnitude).
+        Updates comprehension confidence based on prediction accuracy.
+
+        Args:
+            agent_id: Agent identifier
+            game_type: Game type identifier
+            generation: Current generation
+            action_in_generation: Action count
+            actual_outcome: What actually happened [-1, 1]
+
+        Returns:
+            Surprise value [0, 1] where 0 = predicted correctly, 1 = completely wrong
+        """
+        composite_t = self._composite_time(generation, action_in_generation)
+        key = (agent_id, game_type)
+
+        # Get most recent prediction for this agent/game
+        predicted_outcome = 0.0  # Default: no prediction (neutral)
+        prediction_confidence = 0.0  # Default: not confident
+
+        if hasattr(self, '_prediction_buffer') and key in self._prediction_buffer:
+            predictions = self._prediction_buffer[key]
+            # Find the prediction closest to this time
+            if predictions:
+                # Get latest prediction before or at this time
+                valid_predictions = [(t, pred, conf) for t, pred, conf in predictions if t <= composite_t]
+                if valid_predictions:
+                    _, predicted_outcome, prediction_confidence = valid_predictions[-1]
+
+        # Compute prediction error (surprise)
+        # Error = |predicted - actual| weighted by prediction confidence
+        raw_error = abs(predicted_outcome - actual_outcome)
+        # Scale error by prediction confidence: if you weren't confident, being wrong is less surprising
+        surprise = raw_error * prediction_confidence
+
+        # Update comprehension confidence based on surprise
+        # Low surprise = confidence UP, high surprise = confidence DOWN
+        confidence_delta = (1.0 - surprise * 2.0) * 0.1  # Scale factor for gradual updates
+        self._update_comprehension_confidence(agent_id, game_type, composite_t, confidence_delta)
+
+        # Also record the raw outcome for backward compatibility
+        self.record_outcome(agent_id, game_type, generation, action_in_generation, actual_outcome)
+
+        return surprise
+
+    def _update_comprehension_confidence(
+        self,
+        agent_id: str,
+        game_type: str,
+        composite_t: float,
+        confidence_delta: float
+    ) -> None:
+        """Update comprehension confidence based on prediction accuracy."""
+        if not hasattr(self, '_confidence_buffer'):
+            self._confidence_buffer: Dict[Tuple[str, str], List[Tuple[float, float]]] = {}
+
+        key = (agent_id, game_type)
+        if key not in self._confidence_buffer:
+            self._confidence_buffer[key] = []
+
+        self._confidence_buffer[key].append((composite_t, confidence_delta))
+
+        # Invalidate confidence cache
+        if hasattr(self, '_confidence_cache'):
+            keys_to_remove = [k for k in self._confidence_cache if k[0] == agent_id and k[1] == game_type]
+            for k in keys_to_remove:
+                del self._confidence_cache[k]
+
+    def get_comprehension_confidence(
+        self,
+        agent_id: str,
+        game_type: str,
+        current_generation: int,
+        current_action: int
+    ) -> float:
+        """
+        Get current comprehension confidence for an agent on a game.
+
+        This is NOT outcome-based - it's based on prediction accuracy.
+        High confidence = "I understand how this game works"
+        Low confidence = "I don't understand what's happening"
+
+        Returns:
+            Confidence value [0, 1] where:
+            0.0 = No understanding (explore heavily)
+            0.5 = Partial understanding
+            1.0 = Full understanding (exploit knowledge)
+        """
+        current_t = self._composite_time(current_generation, current_action)
+
+        if not hasattr(self, '_confidence_cache'):
+            self._confidence_cache: Dict[Tuple[str, str, float], float] = {}
+
+        cache_key = (agent_id, game_type, current_t)
+        if cache_key in self._confidence_cache:
+            return self._confidence_cache[cache_key]
+
+        # Get confidence buffer
+        if not hasattr(self, '_confidence_buffer'):
+            self._confidence_buffer = {}
+
+        key = (agent_id, game_type)
+        deltas = self._confidence_buffer.get(key, [])
+
+        if not deltas:
+            # No data - start at 0.2 (low confidence, need to explore)
+            return 0.2
+
+        # Integrate confidence deltas with decay (tactical window)
+        window_config = self.windows.get('tactical', self.windows['immediate'])
+        decay_rate = window_config.decay_rate
+        lookback_limit = current_t - (5 * window_config.half_life_generations) if decay_rate > 0 else 0
+
+        weighted_sum = 0.0
+        weight_total = 0.0
+
+        for delta_t, delta_value in deltas:
+            if delta_t > current_t:
+                continue
+            if decay_rate > 0 and delta_t < lookback_limit:
+                continue
+
+            age = current_t - delta_t
+            weight = math.exp(-decay_rate * age) if decay_rate > 0 else 1.0
+
+            weighted_sum += delta_value * weight
+            weight_total += weight
+
+        if weight_total > 0:
+            # Confidence changes integrated over time, mapped to [0, 1]
+            # Start at 0.2, can grow to 1.0 or shrink to 0.0
+            base_confidence = 0.2
+            confidence = base_confidence + weighted_sum
+            confidence = max(0.0, min(1.0, confidence))
+        else:
+            confidence = 0.2  # Default starting confidence
+
+        self._confidence_cache[cache_key] = confidence
+        return confidence
+
+    def get_rung_modulation_v2(
+        self,
+        agent_id: str,
+        game_type: str,
+        current_generation: int,
+        current_action: int
+    ) -> Dict[str, float]:
+        """
+        Compute rung modulation based on COMPREHENSION CONFIDENCE.
+
+        This replaces the outcome-based modulation with understanding-based:
+        - Low confidence (don't understand) → EXPLORE to learn
+        - High confidence (understand well) → EXPLOIT that understanding
+
+        Returns dict mapping category names to multipliers.
+        """
+        confidence = self.get_comprehension_confidence(
+            agent_id, game_type, current_generation, current_action
+        )
+
+        # Also factor in recent outcome trajectory for safety
+        appetite = self.get_exploration_appetite(
+            agent_id, game_type, current_generation, current_action
+        )
+
+        # COMPREHENSION-BASED MODULATION:
+        # Low confidence → explore more, exploit less
+        # High confidence → exploit more, explore less
+        return {
+            # Exploration: HIGH when confidence LOW (need to understand)
+            'exploration': 1.3 - confidence * 0.8,  # [0.5, 1.3] - boosted when confused
+
+            # Exploitation: HIGH when confidence HIGH (can use understanding)
+            'exploitation': 0.5 + confidence * 0.8,  # [0.5, 1.3] - boosted when confident
+
+            # Safety: Boosted when EITHER extreme (very confident or very lost)
+            # - Very lost: be careful, don't know what's dangerous
+            # - Very confident but failing: something's wrong, be careful
+            'safety': 1.0 + abs(confidence - 0.5) * 0.4 + (1.0 - appetite) * 0.3,
+
+            # Metacognition: Always active (helps build understanding)
+            'metacognition': 1.0,
+
+            # Filters: Always active
+            'filter': 1.0,
+        }
 
 
 # Module-level singleton

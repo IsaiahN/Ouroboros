@@ -77,7 +77,7 @@ class EngineConfig:
     db_path: str = "core_data.db"
 
     # Decision system
-    decision_ordering: str = "efficiency"  # Which rung ordering to use
+    decision_ordering: str = "comprehensive"  # Which rung ordering to use
     decision_strategy: str = "ladder"  # ladder or tournament
 
     # Game defaults
@@ -311,7 +311,7 @@ class GameplayEngine:
         self,
         game_id: str,
         agent_config: AgentConfig,
-        error: str,
+        _error: str,  # Unused but kept for API consistency
     ) -> GameResult:
         """Create a failed game result."""
         return GameResult(

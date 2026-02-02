@@ -3365,7 +3365,7 @@ class DecisionRungSystem:
         self._current_action_in_generation: int = 0
 
         # Load default ordering
-        self.load_ordering('efficiency')
+        self.load_ordering('comprehensive')
 
     @property
     def engines(self) -> "EngineRegistry":
@@ -3505,7 +3505,7 @@ class DecisionRungSystem:
             ordering = self._load_custom_ordering(preset_name)
             if not ordering:
                 print(f"[RUNG-SYSTEM] Warning: Unknown ordering '{preset_name}', using efficiency")
-                ordering = ORDERING_PRESETS['efficiency']
+                ordering = ORDERING_PRESETS['comprehensive']
 
         # Instantiate rungs with both legacy core AND engine registry
         for rung_name, priority in ordering:
@@ -4110,7 +4110,7 @@ class CoreGameplayAdapter:
     - Performance metrics for A/B comparison
     """
 
-    def __init__(self, core_gameplay_ref: Any, ordering: str = 'efficiency'):
+    def __init__(self, core_gameplay_ref: Any, ordering: str = 'comprehensive'):
         self.core: Any = core_gameplay_ref
         self.rung_system = DecisionRungSystem(
             strategy='ladder',
@@ -4361,7 +4361,7 @@ from decision_rung_system import (
 STEP 2: INITIALIZE IN __init__ (in CoreGameplay.__init__)
 ---------------------------------------------------------
 # Near other engine initialization
-self.decision_adapter = CoreGameplayAdapter(self, ordering='efficiency')
+self.decision_adapter = CoreGameplayAdapter(self, ordering='comprehensive')
 
 # Optional: Enable shadow mode for testing
 if self.game_config.get('shadow_mode_decisions'):

@@ -95,9 +95,11 @@ class EvolutionRunner:
         max_actions_per_game: int = 500,
         target_game: Optional[str] = None,
         verbose: bool = False,
+        rung_ordering: str = "comprehensive",
     ):
         self.mode = mode
         self.verbose = verbose
+        self.rung_ordering = rung_ordering
         self.db = DatabaseInterface(db_path)
         self.population_size = population_size
         self.games_per_generation = games_per_generation
@@ -118,8 +120,9 @@ class EvolutionRunner:
         # Scorecard will be created per-agent with proper tags
         self.current_scorecard_id: Optional[str] = None
 
-        # Decision system
+        # Decision system with configurable rung ordering
         self.decision_system = DecisionRungSystem(strategy='ladder')
+        self.decision_system.load_ordering(self.rung_ordering)
 
         # State
         self.agents: List[AgentState] = []
@@ -616,6 +619,11 @@ def main():
                        help='Quick test mode (1 agent, 1 game, 1 gen)')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Show each action and score during gameplay')
+    parser.add_argument('--rungs', type=str, default='comprehensive',
+                       choices=['comprehensive', 'efficiency', 'minimal', 'llm_optimal',
+                                'human_brain', 'frontier_exploration', 'phased_orientation',
+                                'phased_hypothesis', 'phased_exploitation'],
+                       help='Rung ordering preset (default: comprehensive)')
 
     args = parser.parse_args()
 
@@ -634,6 +642,7 @@ def main():
         max_actions_per_game=args.max_actions,
         target_game=args.game,
         verbose=args.verbose,
+        rung_ordering=args.rungs,
     )
 
     runner.run()
