@@ -5985,3 +5985,100 @@ CREATE INDEX idx_winning_sequences_game_level_active ON winning_sequences(game_i
 CREATE INDEX idx_working_theories_agent_game ON working_theories(agent_id, game_type, level_number);
 
 CREATE INDEX idx_working_theories_stage ON working_theories(stage);
+
+-- ============================================================
+-- SYMBOLIC REASONING TABLES (Phase 2-3)
+-- Added: February 2, 2026
+-- Purpose: Track property transformations and goal requirements
+-- ============================================================
+
+-- Track when objects change player properties (shape, color, orientation)
+CREATE TABLE IF NOT EXISTS property_transformations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    frame_hash TEXT,                    -- Where the transformation happened
+
+    -- What object caused the transformation
+    object_position_x INTEGER,          -- Grid position of transformer
+    object_position_y INTEGER,
+    object_color_hash TEXT,             -- Hash of object region for identification
+
+    -- What changed
+    property_changed TEXT NOT NULL,     -- 'dominant_color', 'shape_phash', 'orientation'
+    value_before TEXT,                  -- Value before transformation
+    value_after TEXT,                   -- Value after transformation
+
+    -- Learning metadata
+    times_observed INTEGER DEFAULT 1,   -- How often this exact transformation seen
+    confidence REAL DEFAULT 0.5,        -- Confidence this is reliable
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_observed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_property_transformations_game ON property_transformations(game_id, level_number);
+CREATE INDEX idx_property_transformations_property ON property_transformations(property_changed);
+
+-- Track what state each goal position requires for success
+CREATE TABLE IF NOT EXISTS goal_requirements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+
+    -- Goal identification
+    goal_position_x INTEGER,            -- Grid position of goal
+    goal_position_y INTEGER,
+    goal_index INTEGER,                 -- If multiple goals, which one (0, 1, 2...)
+
+    -- Required state (learned from successes/failures)
+    required_dominant_color TEXT,       -- Hex color like '#FF0000'
+    required_shape_phash TEXT,          -- 64-bit perceptual hash
+    required_orientation INTEGER,       -- 0, 90, 180, 270
+
+    -- Learning counters
+    times_succeeded INTEGER DEFAULT 0,  -- How many times player succeeded with this state
+    times_failed INTEGER DEFAULT 0,     -- How many times player failed with this state
+    confidence REAL DEFAULT 0.0,        -- (succeeded / (succeeded + failed))
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_observed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(game_id, level_number, goal_index)
+);
+
+CREATE INDEX idx_goal_requirements_game ON goal_requirements(game_id, level_number);
+CREATE INDEX idx_goal_requirements_confidence ON goal_requirements(confidence);
+
+-- Track player state at each action (for learning)
+CREATE TABLE IF NOT EXISTS player_state_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    action_number INTEGER NOT NULL,
+
+    -- Player localization
+    player_region_x INTEGER,            -- Bounding box x
+    player_region_y INTEGER,            -- Bounding box y
+    player_region_w INTEGER,            -- Bounding box width
+    player_region_h INTEGER,            -- Bounding box height
+    localization_confidence REAL,       -- How confident we are about player position
+
+    -- Extracted properties (JSON for flexibility)
+    properties_json TEXT,               -- Full properties dict as JSON
+
+    -- Quick access fields (denormalized for queries)
+    dominant_color TEXT,
+    shape_phash TEXT,
+    orientation INTEGER,
+
+    -- Action context
+    action_taken TEXT,                  -- ACTION1-7
+    action_resulted_in TEXT,            -- 'success', 'failure', 'continue', 'death'
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_player_state_session ON player_state_history(session_id, action_number);
+CREATE INDEX idx_player_state_game ON player_state_history(game_id, level_number);

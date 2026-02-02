@@ -1887,6 +1887,337 @@ class NearMissAnalyzerRung(DecisionRung):
             return RungResult(reason=f"Near-miss analyzer failed: {e}")
 
 
+class StateMatchingRung(DecisionRung):
+    """
+    Compare current player properties to learned goal requirements - EXPLOITATION
+
+    Part of Symbolic Reasoning Implementation (Phase 4).
+
+    This rung uses LEARNED data (not hard-coded game knowledge) to:
+    1. Check if current player properties match goal requirements
+    2. If mismatch, find a transformer that can fix it
+    3. Suggest navigation toward transformer or goal
+
+    Data Sources:
+    - player_state_history: Current player properties (from PlayerLocalizer/PropertyExtractor)
+    - goal_requirements: Learned requirements from successes/failures
+    - property_transformations: Known transformers that change properties
+
+    Graceful degradation: Returns empty result when no learned data exists.
+    """
+    name = "state_matching"
+    category = "exploitation"
+    default_priority = 26  # After rule_transfer (25), before frontier_topology (28)
+    confidence_threshold = 0.5
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._db: Optional[Any] = None
+        # Cache for current game session
+        self._cached_requirements: Dict[str, Any] = {}
+        self._cached_transformers: Dict[str, Any] = {}
+
+    def _get_db(self) -> Optional[Any]:
+        """Lazy-load database interface."""
+        if self._db is None:
+            try:
+                from database_interface import DatabaseInterface
+                self._db = DatabaseInterface()
+            except ImportError as e:
+                logger.debug(f"[STATE-MATCHING] Failed to load DatabaseInterface: {e}")
+        return self._db
+
+    def _get_goal_requirements(self, game_type: str, level: int) -> Optional[Dict[str, Any]]:
+        """Query learned goal requirements for this game/level."""
+        cache_key = f"{game_type}:{level}"
+        if cache_key in self._cached_requirements:
+            return self._cached_requirements[cache_key]
+
+        db = self._get_db()
+        if db is None:
+            return None
+
+        try:
+            result = db.execute_query("""
+                SELECT required_dominant_color, required_shape_phash, required_orientation,
+                       times_succeeded, times_failed, confidence
+                FROM goal_requirements
+                WHERE game_id LIKE ? AND level_number = ?
+                  AND confidence >= 0.5
+                ORDER BY confidence DESC
+                LIMIT 1
+            """, (f"{game_type}%", level))
+
+            row = result.fetchone() if result else None
+            if row:
+                req = {
+                    'dominant_color': row[0],
+                    'shape_signature': row[1],
+                    'orientation': row[2],
+                    'times_succeeded': row[3],
+                    'times_failed': row[4],
+                    'confidence': row[5],
+                }
+                self._cached_requirements[cache_key] = req
+                return req
+
+            self._cached_requirements[cache_key] = None
+            return None
+        except Exception as e:
+            logger.debug(f"[STATE-MATCHING] Goal query failed: {e}")
+            return None
+
+    def _get_transformers(self, game_type: str, level: int, property_needed: str) -> List[Dict[str, Any]]:
+        """Query known transformers that can change the specified property."""
+        cache_key = f"{game_type}:{level}:{property_needed}"
+        if cache_key in self._cached_transformers:
+            return self._cached_transformers[cache_key]
+
+        db = self._get_db()
+        if db is None:
+            return []
+
+        try:
+            result = db.execute_query("""
+                SELECT object_position_x, object_position_y,
+                       value_before, value_after,
+                       times_observed, confidence
+                FROM property_transformations
+                WHERE game_id LIKE ? AND level_number = ?
+                  AND property_changed = ?
+                  AND confidence >= 0.5
+                ORDER BY confidence DESC
+                LIMIT 5
+            """, (f"{game_type}%", level, property_needed))
+
+            transformers = []
+            for row in result.fetchall() if result else []:
+                transformers.append({
+                    'position': (row[0], row[1]),
+                    'value_before': row[2],
+                    'value_after': row[3],
+                    'times_observed': row[4],
+                    'confidence': row[5],
+                })
+
+            self._cached_transformers[cache_key] = transformers
+            return transformers
+        except Exception as e:
+            logger.debug(f"[STATE-MATCHING] Transformer query failed: {e}")
+            return []
+
+    def _get_current_properties(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Get current player properties from context or recent state history."""
+        # First check if properties are in context (injected by evolution_runner)
+        if 'player_properties' in context:
+            return context['player_properties']
+
+        # Otherwise query recent player_state_history
+        db = self._get_db()
+        if db is None:
+            return None
+
+        try:
+            session_id = context.get('session_id')
+            if not session_id:
+                return None
+
+            result = db.execute_query("""
+                SELECT dominant_color, shape_phash, orientation, properties_json
+                FROM player_state_history
+                WHERE session_id = ?
+                  AND dominant_color IS NOT NULL
+                ORDER BY id DESC
+                LIMIT 1
+            """, (session_id,))
+
+            row = result.fetchone() if result else None
+            if row:
+                return {
+                    'dominant_color': row[0],
+                    'shape_signature': row[1],
+                    'orientation': row[2],
+                }
+            return None
+        except Exception as e:
+            logger.debug(f"[STATE-MATCHING] Properties query failed: {e}")
+            return None
+
+    def _find_mismatches(
+        self,
+        current: Dict[str, Any],
+        required: Dict[str, Any]
+    ) -> List[str]:
+        """Find which properties don't match requirements."""
+        mismatches = []
+
+        # Check dominant_color
+        if required.get('dominant_color') and current.get('dominant_color'):
+            req_color = str(required['dominant_color'])
+            cur_color = str(current['dominant_color'])
+            if req_color != cur_color:
+                mismatches.append('dominant_color')
+
+        # Check orientation
+        if required.get('orientation') is not None and current.get('orientation') is not None:
+            if int(required['orientation']) != int(current['orientation']):
+                mismatches.append('orientation')
+
+        # Check shape_signature (allow some hamming distance)
+        if required.get('shape_signature') and current.get('shape_signature'):
+            req_sig = required['shape_signature']
+            cur_sig = current['shape_signature']
+            if len(req_sig) == len(cur_sig):
+                hamming = sum(c1 != c2 for c1, c2 in zip(req_sig, cur_sig))
+                if hamming > 8:  # Allow up to 8-bit difference in 64-bit signature
+                    mismatches.append('shape_signature')
+
+        return mismatches
+
+    def _suggest_direction_to_position(
+        self,
+        target_pos: Tuple[int, int],
+        context: Dict[str, Any]
+    ) -> Optional[str]:
+        """Suggest action to move toward a target position."""
+        # Get current player position from context
+        player_pos = context.get('player_position')
+        if not player_pos:
+            return None
+
+        curr_row, curr_col = player_pos
+        target_row, target_col = target_pos
+
+        # Calculate direction
+        row_diff = target_row - curr_row
+        col_diff = target_col - curr_col
+
+        # Prioritize larger difference
+        if abs(row_diff) > abs(col_diff):
+            if row_diff < 0:
+                return 'ACTION1'  # Up
+            else:
+                return 'ACTION2'  # Down
+        else:
+            if col_diff < 0:
+                return 'ACTION3'  # Left
+            elif col_diff > 0:
+                return 'ACTION4'  # Right
+
+        return None
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        """
+        Evaluate state matching and suggest action if applicable.
+
+        Returns empty result if:
+        - No learned goal requirements exist
+        - Current properties not available
+        - Properties already match (no action needed from this rung)
+        """
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+
+        # Step 1: Get learned goal requirements
+        requirements = self._get_goal_requirements(game_type, level)
+        if not requirements:
+            # No learned requirements yet - graceful degradation
+            return RungResult()
+
+        # Step 2: Get current player properties
+        current_props = self._get_current_properties(context)
+        if not current_props:
+            # Can't determine current state
+            return RungResult(reason="No current properties available")
+
+        # Step 3: Find mismatches
+        mismatches = self._find_mismatches(current_props, requirements)
+
+        if not mismatches:
+            # Properties match! Suggest moving toward goal
+            # (but we don't know goal position, so just report match)
+            return RungResult(
+                confidence=0.3,  # Low confidence - just informational
+                reason=f"Properties match goal requirements (conf={requirements['confidence']:.2f})",
+                metadata={
+                    'state': 'properties_match',
+                    'requirements': requirements,
+                    'current': current_props,
+                }
+            )
+
+        # Step 4: Find transformer to fix first mismatch
+        first_mismatch = mismatches[0]
+        transformers = self._get_transformers(game_type, level, first_mismatch)
+
+        if not transformers:
+            # We know there's a mismatch but don't know any transformers
+            return RungResult(
+                confidence=0.2,  # Very low - we identified a problem but can't solve it
+                reason=f"Property mismatch ({first_mismatch}) but no known transformers",
+                metadata={
+                    'state': 'mismatch_no_transformer',
+                    'mismatches': mismatches,
+                    'current': current_props,
+                    'required': requirements,
+                }
+            )
+
+        # Step 5: Suggest navigation toward transformer
+        best_transformer = transformers[0]
+        target_pos = best_transformer['position']
+
+        if target_pos[0] is None or target_pos[1] is None:
+            # Transformer position unknown
+            return RungResult(
+                confidence=0.3,
+                reason=f"Found transformer for {first_mismatch} but position unknown",
+                metadata={
+                    'state': 'transformer_unknown_position',
+                    'transformer': best_transformer,
+                }
+            )
+
+        suggested_action = self._suggest_direction_to_position(target_pos, context)
+
+        if suggested_action:
+            # Validate action is available
+            if not is_action_available(suggested_action, context):
+                return RungResult(
+                    reason=f"State matching suggested unavailable action: {suggested_action}"
+                )
+
+            return RungResult(
+                action=suggested_action,
+                confidence=min(0.6, best_transformer['confidence']),
+                reason=f"Navigate to transformer for {first_mismatch} ({best_transformer['value_before']}->{best_transformer['value_after']})",
+                metadata={
+                    'state': 'navigating_to_transformer',
+                    'target_position': target_pos,
+                    'mismatch': first_mismatch,
+                    'transformer': best_transformer,
+                    'current': current_props,
+                    'required': requirements,
+                }
+            )
+
+        # Can't determine direction (maybe at transformer already?)
+        return RungResult(
+            confidence=0.3,
+            reason=f"Need {first_mismatch} change, transformer at {target_pos}",
+            metadata={
+                'state': 'at_or_near_transformer',
+                'transformer': best_transformer,
+                'mismatches': mismatches,
+            }
+        )
+
+    def clear_cache(self):
+        """Clear cached data (call on game/level change)."""
+        self._cached_requirements.clear()
+        self._cached_transformers.clear()
+
+
 class SubgoalPlanningRung(DecisionRung):
     """Decompose complex levels into subgoals - EXPLOITATION"""
     name = "subgoal_planning"
@@ -3131,22 +3462,23 @@ ORDERING_PRESETS = {
         # EXPLOITATION - Use known knowledge (Priority 40-80)
         ('three_try_sequence', 40),
         ('rule_transfer', 41),  # Apply rules from other games
-        ('discovery_exploitation', 42),
-        ('embedding_suggestion', 43),
-        ('multi_stage_matching', 44),
-        ('replay_learning', 45),
-        ('primitive_suggester', 46),
-        ('network_wisdom', 47),
-        ('abstraction_templates', 48),
-        ('few_shot_invariants', 49),
-        ('subgoal_planning', 50),
-        ('visual_analyzer', 51),
-        ('network_object_inventory', 52),
-        ('near_miss_analyzer', 53),
-        ('completion_prediction', 54),
-        ('frontier_topology', 55),
-        ('map_intel_collision', 56),
-        ('grid_exploration', 57),
+        ('state_matching', 42), # Symbolic reasoning - property matching
+        ('discovery_exploitation', 43),
+        ('embedding_suggestion', 44),
+        ('multi_stage_matching', 45),
+        ('replay_learning', 46),
+        ('primitive_suggester', 47),
+        ('network_wisdom', 48),
+        ('abstraction_templates', 49),
+        ('few_shot_invariants', 50),
+        ('subgoal_planning', 51),
+        ('visual_analyzer', 52),
+        ('network_object_inventory', 53),
+        ('near_miss_analyzer', 54),
+        ('completion_prediction', 55),
+        ('frontier_topology', 56),
+        ('map_intel_collision', 57),
+        ('grid_exploration', 58),
 
         # FALLBACK (Priority 99)
         ('smart_action_selection', 99),
@@ -3271,6 +3603,7 @@ class DecisionRungSystem:
         'sensation_engine': SensationEngineRung,
         'i_thread': IThreadRung,
         'near_miss_analyzer': NearMissAnalyzerRung,
+        'state_matching': StateMatchingRung,         # Symbolic reasoning - compare properties to goals
         'subgoal_planning': SubgoalPlanningRung,
         'breakthrough_budget': BreakthroughBudgetRung,
         'regulatory_signal': RegulatorySignalRung,

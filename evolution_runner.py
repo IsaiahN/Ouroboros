@@ -21,12 +21,15 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 import argparse
 import asyncio
 import hashlib
+import json
 import random
 import signal
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+import numpy as np
 
 # Load .env
 try:
@@ -42,6 +45,10 @@ from arcengine import GameAction, GameState
 # Local imports
 from database_interface import DatabaseInterface
 from decision_rung_system import DecisionRungSystem
+
+# Symbolic reasoning components (Phase 0-1)
+from engines.perception.player_localizer import PlayerLocalizer
+from engines.perception.property_extractor import PropertyExtractor, properties_to_json
 
 
 @dataclass
@@ -134,6 +141,12 @@ class EvolutionRunner:
         # Session tracking for action traces
         self._current_session_id: Optional[str] = None
 
+        # Symbolic reasoning components (Phase 0-1)
+        self.player_localizer = PlayerLocalizer(confidence_threshold=0.6)
+        self.property_extractor = PropertyExtractor(color_quantization=16)
+        self._prev_frame: Optional[np.ndarray] = None  # For localization
+        self._prev_properties: Optional[dict] = None   # For change detection
+
     def _compute_frame_hash(self, obs: Any) -> str:
         """Compute hash of frame state for topology matching."""
         if obs is None:
@@ -219,6 +232,299 @@ class EvolutionRunner:
             # Don't let trace recording break gameplay
             if self.verbose:
                 print(f"    [TRACE-ERR] {e}")
+
+    def _get_frame_array(self, obs: Any) -> Optional[np.ndarray]:
+        """Extract frame as numpy array from observation."""
+        if obs is None:
+            return None
+        try:
+            # Try multiple attributes
+            for attr in ['frame', 'grid', 'observation']:
+                if hasattr(obs, attr):
+                    data = getattr(obs, attr)
+                    if isinstance(data, np.ndarray):
+                        return data
+                    if isinstance(data, list):
+                        # Frame data from ARC games is often a list
+                        return np.array(data, dtype=np.uint8)
+                    if hasattr(data, 'tolist'):
+                        return np.array(data)
+            return None
+        except Exception:
+            return None
+
+    def _record_player_state(
+        self,
+        game_id: str,
+        action_num: int,
+        action_taken: str,
+        obs_before: Any,
+        obs_after: Any,
+        action_result: str,
+        level_number: int,
+    ) -> Optional[dict]:
+        """
+        Record player state for symbolic reasoning (Phase 0-1).
+
+        1. Attempt to localize player sprite
+        2. Extract properties if confident
+        3. Detect property changes
+        4. Record to player_state_history table
+
+        Returns current properties dict or None.
+        """
+        try:
+            # Get frames as numpy arrays
+            frame_before = self._get_frame_array(obs_before)
+            frame_after = self._get_frame_array(obs_after)
+
+            if frame_before is None or frame_after is None:
+                return None
+
+            # Step 1: Attempt player localization
+            localization = self.player_localizer.localize(
+                frame_before, frame_after, action_taken
+            )
+
+            player_region = None
+            player_bbox = localization.get('region')
+            confidence = localization.get('confidence', 0.0)
+
+            # Step 2: Extract properties if confident about player location
+            current_properties = None
+            if confidence >= 0.5 and player_bbox is not None:
+                player_region = self.player_localizer.get_player_region(frame_after)
+                if player_region is not None:
+                    current_properties = self.property_extractor.extract_properties(player_region)
+
+            # Step 3: Detect property changes
+            property_changes = {}
+            if self._prev_properties and current_properties:
+                property_changes = self.property_extractor.properties_changed(
+                    self._prev_properties, current_properties
+                )
+
+                # PHASE 2: Record property transformations to database
+                if property_changes:
+                    self._record_property_transformations(
+                        game_id=game_id,
+                        level_number=level_number,
+                        player_bbox=player_bbox,
+                        property_changes=property_changes
+                    )
+                    if self.verbose:
+                        for prop, change in property_changes.items():
+                            print(f"    [PROP] {prop}: {change['from']} -> {change['to']}")
+
+            # PHASE 3: Track goal outcomes (success/failure at goals)
+            if action_result in ('success', 'win'):
+                self._record_goal_outcome(
+                    game_id=game_id,
+                    level_number=level_number,
+                    player_bbox=player_bbox,
+                    properties=current_properties,
+                    succeeded=True
+                )
+
+            # Step 4: Record to database
+            props_json = properties_to_json(current_properties)
+
+            self.db.execute_query("""
+                INSERT INTO player_state_history (
+                    session_id, game_id, level_number, action_number,
+                    player_region_x, player_region_y, player_region_w, player_region_h,
+                    localization_confidence, properties_json,
+                    dominant_color, shape_phash, orientation,
+                    action_taken, action_resulted_in, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (
+                self._current_session_id,
+                game_id,
+                level_number,
+                action_num,
+                player_bbox[0] if player_bbox else None,
+                player_bbox[1] if player_bbox else None,
+                player_bbox[2] if player_bbox else None,
+                player_bbox[3] if player_bbox else None,
+                confidence,
+                props_json,
+                current_properties.get('dominant_color') if current_properties else None,
+                current_properties.get('shape_signature') if current_properties else None,
+                current_properties.get('orientation') if current_properties else None,
+                action_taken,
+                action_result,
+            ))
+
+            # Update state for next iteration
+            self._prev_frame = frame_after
+            self._prev_properties = current_properties
+
+            return current_properties
+
+        except Exception as e:
+            if self.verbose:
+                print(f"    [STATE-ERR] {e}")
+            return None
+
+    def _record_property_transformations(
+        self,
+        game_id: str,
+        level_number: int,
+        player_bbox: Optional[tuple],
+        property_changes: dict
+    ) -> None:
+        """
+        Record property transformations to database (Phase 2).
+
+        When the player's properties change (color, shape, orientation),
+        record what changed and where it happened. This builds a knowledge
+        base of "transformer" locations in the game.
+        """
+        try:
+            for prop_name, change in property_changes.items():
+                # Check if this exact transformation was seen before
+                existing = self.db.execute_query("""
+                    SELECT id, times_observed FROM property_transformations
+                    WHERE game_id = ? AND level_number = ?
+                      AND object_position_x = ? AND object_position_y = ?
+                      AND property_changed = ?
+                      AND value_before = ? AND value_after = ?
+                """, (
+                    game_id, level_number,
+                    player_bbox[0] if player_bbox else None,
+                    player_bbox[1] if player_bbox else None,
+                    prop_name,
+                    str(change.get('from')),
+                    str(change.get('to')),
+                ))
+
+                row = existing.fetchone() if existing else None
+
+                if row:
+                    # Update existing record
+                    new_times = row[1] + 1
+                    new_confidence = min(0.99, 0.5 + (new_times * 0.1))
+                    self.db.execute_query("""
+                        UPDATE property_transformations SET
+                            times_observed = ?,
+                            confidence = ?,
+                            last_observed = datetime('now')
+                        WHERE id = ?
+                    """, (new_times, new_confidence, row[0]))
+                else:
+                    # Insert new record
+                    self.db.execute_query("""
+                        INSERT INTO property_transformations (
+                            game_id, level_number,
+                            object_position_x, object_position_y,
+                            property_changed, value_before, value_after,
+                            times_observed, confidence, created_at, last_observed
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0.5, datetime('now'), datetime('now'))
+                    """, (
+                        game_id,
+                        level_number,
+                        player_bbox[0] if player_bbox else None,
+                        player_bbox[1] if player_bbox else None,
+                        prop_name,
+                        str(change.get('from')),
+                        str(change.get('to')),
+                    ))
+        except Exception as e:
+            if self.verbose:
+                print(f"    [TRANSFORM-ERR] {e}")
+
+    def _record_goal_outcome(
+        self,
+        game_id: str,
+        level_number: int,
+        player_bbox: Optional[tuple],
+        properties: Optional[dict],
+        succeeded: bool
+    ) -> None:
+        """
+        Record goal outcome to build requirement knowledge (Phase 3).
+
+        When a player succeeds or fails at a goal position, record their
+        properties at that moment. Over time, this reveals what properties
+        are required to complete each goal.
+        """
+        if properties is None:
+            return
+
+        try:
+            # Determine goal_index from level (simplified - could track multiple goals)
+            goal_index = 0  # For now, assume single goal per level
+
+            # Get current stats for this goal
+            existing = self.db.execute_query("""
+                SELECT id, times_succeeded, times_failed
+                FROM goal_requirements
+                WHERE game_id = ? AND level_number = ? AND goal_index = ?
+            """, (game_id, level_number, goal_index))
+
+            row = existing.fetchone() if existing else None
+
+            if row:
+                # Update existing record
+                if succeeded:
+                    new_succeeded = row[1] + 1
+                    new_failed = row[2]
+                else:
+                    new_succeeded = row[1]
+                    new_failed = row[2] + 1
+
+                total = new_succeeded + new_failed
+                new_confidence = new_succeeded / total if total > 0 else 0.0
+
+                self.db.execute_query("""
+                    UPDATE goal_requirements SET
+                        times_succeeded = ?,
+                        times_failed = ?,
+                        confidence = ?,
+                        required_dominant_color = ?,
+                        required_shape_phash = ?,
+                        required_orientation = ?,
+                        last_observed = datetime('now')
+                    WHERE id = ?
+                """, (
+                    new_succeeded,
+                    new_failed,
+                    new_confidence,
+                    str(properties.get('dominant_color')) if succeeded else None,
+                    properties.get('shape_signature') if succeeded else None,
+                    properties.get('orientation') if succeeded else None,
+                    row[0],
+                ))
+            else:
+                # Insert new record
+                times_succeeded = 1 if succeeded else 0
+                times_failed = 0 if succeeded else 1
+                confidence = 1.0 if succeeded else 0.0
+
+                self.db.execute_query("""
+                    INSERT INTO goal_requirements (
+                        game_id, level_number, goal_index,
+                        goal_position_x, goal_position_y,
+                        required_dominant_color, required_shape_phash, required_orientation,
+                        times_succeeded, times_failed, confidence,
+                        created_at, last_observed
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                """, (
+                    game_id,
+                    level_number,
+                    goal_index,
+                    player_bbox[0] if player_bbox else None,
+                    player_bbox[1] if player_bbox else None,
+                    str(properties.get('dominant_color')) if succeeded else None,
+                    properties.get('shape_signature') if succeeded else None,
+                    properties.get('orientation') if succeeded else None,
+                    times_succeeded,
+                    times_failed,
+                    confidence,
+                ))
+        except Exception as e:
+            if self.verbose:
+                print(f"    [GOAL-ERR] {e}")
 
         # Signal handling
         signal.signal(signal.SIGINT, self._handle_shutdown)
@@ -371,6 +677,11 @@ class EvolutionRunner:
         prev_levels = 0
         prev_score = 0.0  # Track score for learning
 
+        # Reset symbolic reasoning state for new game
+        self.player_localizer.reset()
+        self._prev_frame = None
+        self._prev_properties = None
+
         # Create session for action traces (FK requirement)
         self._current_session_id = f"session_{uuid.uuid4().hex[:12]}_{int(datetime.now().timestamp())}"
         try:
@@ -479,6 +790,23 @@ class EvolutionRunner:
                     level_before=prev_levels,
                     level_after=current_levels,
                     is_game_over=is_game_over,
+                )
+
+                # NEW: Record player state for symbolic reasoning (Phase 0-1)
+                action_result = 'continue'
+                if is_game_over:
+                    action_result = 'win' if obs.state == GameState.WIN else 'death'
+                elif level_up:
+                    action_result = 'success'
+
+                self._record_player_state(
+                    game_id=game_id,
+                    action_num=actions_taken,
+                    action_taken=action.name,
+                    obs_before=obs_before,
+                    obs_after=obs,
+                    action_result=action_result,
+                    level_number=current_levels,
                 )
 
                 prev_levels = current_levels
