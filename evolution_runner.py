@@ -309,7 +309,8 @@ class EvolutionRunner:
 
             # Get action from decision system
             try:
-                result = self.decision_system.decide(context, {})
+                # Note: decide(game_state, context) - pass obs as game_state, context as context
+                result = self.decision_system.decide(obs, context)
 
                 # Decision system returns (action_str, reason) tuple
                 if isinstance(result, tuple):
@@ -331,7 +332,9 @@ class EvolutionRunner:
                 # Validate action is in available set - CRITICAL for online mode
                 if action_num not in current_available:
                     if self.verbose:
-                        print(f"    [WARN] Action {action_num} not in {current_available}, picking random")
+                        # Debug: show which rung returned invalid action
+                        rung_info = reason if 'reason' in dir() and reason else 'unknown'
+                        print(f"    [WARN] Action {action_num} not in {current_available}, picking random | from: {rung_info[:50]}")
                     action_num = random.choice(current_available)
 
                 action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
