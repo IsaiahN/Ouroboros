@@ -181,10 +181,23 @@ class EvolutionRunner:
 
         Uses the decision system to select actions.
         """
+        env = None
         try:
             env = self.arcade.make(game_id)
         except Exception as e:
             print(f"  [ERROR] Failed to create env for {game_id}: {e}")
+            return GameResult(
+                game_id=game_id,
+                agent_id=agent.agent_id,
+                score=0.0,
+                levels_completed=0,
+                total_levels=1,
+                is_win=False,
+                actions_taken=0,
+            )
+
+        if env is None:
+            print(f"  [ERROR] env is None for {game_id}")
             return GameResult(
                 game_id=game_id,
                 agent_id=agent.agent_id,
