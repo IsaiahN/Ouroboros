@@ -16,10 +16,39 @@ def get_object_detector():
     from engines.perception.object_detector import ObjectDetector
     return ObjectDetector
 
+
+def get_object_tracker():
+    """Lazy-load ObjectTracker to avoid import issues."""
+    from engines.perception.object_tracker import ObjectTracker
+    return ObjectTracker
+
+
+def get_event_detector():
+    """Lazy-load EventDetector to avoid import issues."""
+    from engines.perception.event_detector import EventDetector
+    return EventDetector
+
+
+def get_spatial_effect_learner():
+    """Lazy-load SpatialEffectLearner to avoid import issues."""
+    from engines.perception.spatial_learning import SpatialEffectLearner
+    return SpatialEffectLearner
+
+
+def get_multi_object_goal_tracker():
+    """Lazy-load MultiObjectGoalTracker to avoid import issues."""
+    from engines.perception.spatial_learning import MultiObjectGoalTracker
+    return MultiObjectGoalTracker
+
+
 __all__ = [
     'VisualAnalyzer',
     'TerminalPatternDetector',
     'get_object_detector',
+    'get_object_tracker',
+    'get_event_detector',
+    'get_spatial_effect_learner',
+    'get_multi_object_goal_tracker',
     'VisualReasoningEngine',
     'PlayerLocalizer',
     'PropertyExtractor',

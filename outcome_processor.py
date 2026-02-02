@@ -77,6 +77,10 @@ class ActionOutcome:
     frame_before: Optional[List[List[int]]] = None
     frame_after: Optional[List[List[int]]] = None
 
+    # Event understanding (from EventDetector)
+    detected_events: List[Dict[str, Any]] = field(default_factory=list)
+    process_classification: Optional[Dict[str, Any]] = None
+
     # Timing
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -118,6 +122,8 @@ class ActionOutcome:
             'position_delta': self.position_delta,
             'state_before': self.state_before.name,
             'state_after': self.state_after.name,
+            'detected_events': self.detected_events,
+            'process_classification': self.process_classification,
             'timestamp': self.timestamp.isoformat(),
         }
 
@@ -173,6 +179,10 @@ class OutcomeProcessor:
         self._frame_change_threshold = 0  # Any change counts
         # Generate session_id for action trace grouping
         self._session_id = session_id or f"session_{hashlib.md5(str(random.random()).encode()).hexdigest()[:8]}_{int(datetime.now().timestamp())}"
+        # Lazy-loaded event detection components
+        self._event_detector: Any = None
+        self._recent_events: List[Dict[str, Any]] = []  # Ring buffer of recent events
+        self._max_recent_events = 50
 
     def process(
         self,
@@ -238,10 +248,98 @@ class OutcomeProcessor:
             frame_after=frame_after,
         )
 
+        # Detect events if frame changed significantly (enables event understanding)
+        if frame_changed and frame_delta_count > 10:
+            events, process_class = self._detect_events(
+                frame_before, frame_after, action
+            )
+            outcome.detected_events = events
+            outcome.process_classification = process_class
+            # Add to recent events ring buffer
+            self._recent_events.extend(events)
+            if len(self._recent_events) > self._max_recent_events:
+                self._recent_events = self._recent_events[-self._max_recent_events:]
+
         # Record action trace to database (enables FrontierTopologyRung)
         self._record_action_trace(before_state, action, outcome, observation)
 
         return outcome
+
+    def get_recent_events(self) -> List[Dict[str, Any]]:
+        """Get recent detected events for context building."""
+        return list(self._recent_events)
+
+    def _get_event_detector(self) -> Any:
+        """Lazy-load the event detector."""
+        if self._event_detector is None:
+            try:
+                from engines.perception.event_detector import EventDetector
+                self._event_detector = EventDetector()
+            except ImportError:
+                pass
+        return self._event_detector
+
+    def _detect_events(
+        self,
+        frame_before: Any,
+        frame_after: Any,
+        action: GameAction,
+    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """
+        Detect events between frames using EventDetector.
+
+        Args:
+            frame_before: Frame before action
+            frame_after: Frame after action
+            action: The action that was taken
+
+        Returns:
+            Tuple of (list of event dicts, process classification dict or None)
+        """
+        detector = self._get_event_detector()
+        if detector is None:
+            return [], None
+
+        try:
+            import numpy as np
+
+            # Convert frames to numpy if needed
+            if not isinstance(frame_before, np.ndarray):
+                frame_before = np.array(frame_before, dtype=np.uint8)
+            if not isinstance(frame_after, np.ndarray):
+                frame_after = np.array(frame_after, dtype=np.uint8)
+
+            # Extract action number for timestamp
+            action_number = 0
+            if action.name.startswith('ACTION'):
+                try:
+                    action_number = int(action.name[6:])
+                except ValueError:
+                    pass
+
+            # Detect events
+            _tracked, events = detector.detect_events_from_frames(
+                frame_before, frame_after, action_number
+            )
+
+            # Classify process
+            process_class = None
+            if events:
+                classification = detector.classify_process(events)
+                process_class = {
+                    'process_type': classification.process_type.value,
+                    'confidence': classification.confidence,
+                    'description': classification.description,
+                    'event_count': classification.event_count,
+                }
+
+            # Convert events to dicts
+            event_dicts = [e.to_dict() for e in events]
+
+            return event_dicts, process_class
+
+        except Exception:
+            return [], None
 
     def _record_action_trace(
         self,

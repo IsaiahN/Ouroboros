@@ -2218,6 +2218,572 @@ class StateMatchingRung(DecisionRung):
         self._cached_transformers.clear()
 
 
+# =============================================================================
+# EVENT UNDERSTANDING RUNGS - World Model Building
+# =============================================================================
+
+class FrameInterpretationRung(DecisionRung):
+    """
+    HIGH PRIORITY: Interpret dramatic frame changes and set context.
+
+    This rung sets context flags for downstream rungs based on frame delta
+    magnitude. Does NOT suppress actions - the ARC API is blocking so spam
+    is impossible anyway.
+
+    Sets context flags:
+    - likely_physics_game: True if large frame delta
+    - expect_large_deltas: True if physics signature detected
+    - detected_process_type: The type of process observed
+    """
+    name = "frame_interpretation"
+    category = "orientation"
+    default_priority = 4  # Early, after emergency rungs
+    confidence_threshold = 0.0  # Context setter, not action suggester
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._event_detector: Optional[Any] = None
+        self._recent_process_types: List[str] = []
+
+    def _get_event_detector(self) -> Optional[Any]:
+        """Lazy-load event detector."""
+        if self._event_detector is None:
+            try:
+                from engines.perception.event_detector import EventDetector
+                self._event_detector = EventDetector()
+            except ImportError:
+                pass
+        return self._event_detector
+
+    def _has_physics_signature(self, events: List[Any]) -> bool:
+        """Check if events show physics-like behavior."""
+        if not events:
+            return False
+
+        movement_count = sum(
+            1 for e in events
+            if hasattr(e, 'event_type') and str(e.event_type) == 'MOVEMENT'
+        )
+        return movement_count >= 3
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        delta_count = context.get('frame_delta_count', 0)
+        recent_events = context.get('recent_events', [])
+
+        # Interpret dramatic changes
+        if delta_count > 500:  # Significant frame change
+            # Annotate context for downstream rungs
+            context['likely_physics_game'] = True
+            context['expect_large_deltas'] = True
+
+            # Check for physics signature
+            if recent_events and self._has_physics_signature(recent_events):
+                context['detected_process_type'] = 'PHYSICS_SIMULATION'
+                self._recent_process_types.append('PHYSICS_SIMULATION')
+
+            return RungResult(
+                confidence=0.0,  # No action suggestion
+                reason=f"Large frame delta ({delta_count}) - likely physics/animation game",
+                metadata={
+                    'delta_count': delta_count,
+                    'physics_signature': bool(recent_events and self._has_physics_signature(recent_events)),
+                    'recent_process_types': self._recent_process_types[-5:] if self._recent_process_types else [],
+                }
+            )
+
+        # Small delta - probably direct control game
+        if delta_count > 0 and delta_count < 100:
+            context['likely_direct_control'] = True
+
+        return RungResult()
+
+
+class EventUnderstandingRung(DecisionRung):
+    """
+    Use causal world model to inform decisions.
+
+    This rung builds understanding from frame-to-frame changes:
+    - Tracks object movements and interactions
+    - Detects collisions, fusions, and other events
+    - Attributes causality to actions
+    - Classifies the overall process type
+
+    Uses this understanding to:
+    - Set context flags for downstream rungs
+    - Boost weights for actions that caused productive events
+    - Predict continuation of causal chains
+    """
+    name = "event_understanding"
+    category = "hypothesis"
+    default_priority = 23  # After orientation, before exploitation
+    confidence_threshold = 0.4
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._event_detector: Optional[Any] = None
+        self._object_tracker: Optional[Any] = None
+        self._event_history: List[Dict] = []  # Recent events for causal chain analysis
+        self._db: Optional[Any] = None
+
+    def _get_event_detector(self) -> Optional[Any]:
+        """Lazy-load event detector."""
+        if self._event_detector is None:
+            try:
+                from engines.perception.event_detector import EventDetector
+                self._event_detector = EventDetector()
+            except ImportError:
+                pass
+        return self._event_detector
+
+    def _get_object_tracker(self) -> Optional[Any]:
+        """Lazy-load object tracker."""
+        if self._object_tracker is None:
+            try:
+                from engines.perception.object_tracker import ObjectTracker
+                self._object_tracker = ObjectTracker()
+            except ImportError:
+                pass
+        return self._object_tracker
+
+    def _get_db(self) -> Optional[Any]:
+        """Lazy-load database interface."""
+        if self._db is None:
+            try:
+                from database_interface import DatabaseInterface
+                self._db = DatabaseInterface()
+            except ImportError:
+                pass
+        return self._db
+
+    def _get_recent_events(self, context: Dict[str, Any]) -> List[Dict]:
+        """Get recent events from context or database."""
+        if 'recent_events' in context:
+            return context['recent_events']
+
+        db = self._get_db()
+        if db is None:
+            return self._event_history[-10:]
+
+        try:
+            game_type = context.get('game_type', '')
+            result = db.execute_query("""
+                SELECT event_type, objects_involved, positions, confidence
+                FROM detected_events
+                WHERE game_type = ?
+                ORDER BY timestamp DESC
+                LIMIT 10
+            """, (game_type,))
+
+            return [
+                {'type': r[0], 'objects': r[1], 'positions': r[2], 'confidence': r[3]}
+                for r in (result.fetchall() if result else [])
+            ]
+        except Exception:
+            return self._event_history[-10:]
+
+    def _last_action_caused_productive_event(self, events: List[Dict]) -> bool:
+        """Check if the last action caused a productive event."""
+        if not events:
+            return False
+
+        # Productive events: COLLECTION, TRANSFORMATION toward goal, FUSION
+        productive_types = {'COLLECTION', 'TRANSFORMATION', 'FUSION'}
+
+        for event in events[:3]:  # Check recent events
+            event_type = event.get('type', event.get('event_type', ''))
+            if isinstance(event_type, str) and event_type in productive_types:
+                return True
+            elif hasattr(event_type, 'value') and event_type.value in productive_types:
+                return True
+
+        return False
+
+    def _detected_physics_process(self, events: List[Dict]) -> bool:
+        """Check if physics simulation was detected."""
+        if not events:
+            return False
+
+        movement_count = 0
+        for event in events:
+            event_type = event.get('type', event.get('event_type', ''))
+            if 'MOVEMENT' in str(event_type):
+                movement_count += 1
+
+        return movement_count >= 3
+
+    def _get_active_causal_chain(self, events: List[Dict]) -> List[Dict]:
+        """Identify active causal chain from recent events."""
+        if len(events) < 2:
+            return []
+
+        # Look for sequence of related events
+        chain = []
+        for event in events:
+            event_type = str(event.get('type', event.get('event_type', '')))
+            if event_type in {'MOVEMENT', 'COLLISION', 'FUSION', 'CHAIN_REACTION'}:
+                chain.append(event)
+            elif chain:
+                break  # Chain broken
+
+        return chain
+
+    def _predict_chain_continuation(self, chain: List[Dict]) -> Optional[str]:
+        """Predict what action would continue the causal chain."""
+        if not chain:
+            return None
+
+        # If last event was a collision, maybe continue pushing
+        last_event = chain[-1]
+        last_type = str(last_event.get('type', last_event.get('event_type', '')))
+
+        if 'COLLISION' in last_type or 'MOVEMENT' in last_type:
+            # Continue in same direction if we have that info
+            positions = last_event.get('positions', [])
+            if len(positions) >= 2:
+                # Calculate movement direction
+                try:
+                    dy = float(positions[1][0]) - float(positions[0][0])
+                    dx = float(positions[1][1]) - float(positions[0][1])
+
+                    if abs(dy) > abs(dx):
+                        return 'ACTION2' if dy > 0 else 'ACTION1'  # Down or Up
+                    elif abs(dx) > 0:
+                        return 'ACTION4' if dx > 0 else 'ACTION3'  # Right or Left
+                except (IndexError, TypeError, ValueError):
+                    pass
+
+        return None
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        recent_events = self._get_recent_events(context)
+
+        if not recent_events:
+            return RungResult()  # No understanding yet
+
+        # Build weight modifiers based on understanding
+        weights = get_available_action_weights(context, 1.0)
+
+        # If last action caused productive event, boost similar actions
+        if self._last_action_caused_productive_event(recent_events):
+            last_action = context.get('last_action')
+            if last_action and last_action in weights:
+                weights[last_action] = 1.3  # Boost similar actions
+
+        # If physics simulation detected, set context
+        if self._detected_physics_process(recent_events):
+            context['physics_game_confirmed'] = True
+
+        # If we understand the causal chain, boost actions that extend it
+        causal_chain = self._get_active_causal_chain(recent_events)
+        if causal_chain:
+            next_action = self._predict_chain_continuation(causal_chain)
+            if next_action and is_action_available(next_action, context):
+                return RungResult(
+                    action=next_action,
+                    confidence=0.55,
+                    reason=f"Continuing causal chain of {len(causal_chain)} events",
+                    weights=weights,
+                    metadata={
+                        'chain_length': len(causal_chain),
+                        'last_event_type': str(causal_chain[-1].get('type', '')),
+                    }
+                )
+
+        return RungResult(weights=weights)
+
+
+class SpatialRelationshipRung(DecisionRung):
+    """
+    Learn and exploit spatial relationships in click puzzles.
+
+    Tracks: "clicking position A affects positions B, C, D"
+    Uses: "to change position X, I should click position Y"
+
+    This rung is particularly useful for:
+    - Lights Out-style games (clicking affects neighbors)
+    - Tile puzzles with spatial dependencies
+    - Any game where clicks have predictable spatial effects
+    """
+    name = "spatial_relationship"
+    category = "exploitation"
+    default_priority = 44  # After state_matching (42), before frontier_topology
+    confidence_threshold = 0.5
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._effect_learner: Optional[Any] = None
+        self._goal_tracker: Optional[Any] = None
+        self._property_extractor: Optional[Any] = None
+        self._db: Optional[Any] = None
+        # Cache
+        self._effect_pattern_cache: Dict[str, List[Tuple[int, int]]] = {}
+        self._goal_cache: Dict[Tuple[str, int], Dict] = {}
+
+    def _get_db(self) -> Optional[Any]:
+        """Lazy-load database interface."""
+        if self._db is None:
+            try:
+                from database_interface import DatabaseInterface
+                self._db = DatabaseInterface()
+            except ImportError:
+                pass
+        return self._db
+
+    def _get_effect_learner(self) -> Optional[Any]:
+        """Lazy-load spatial effect learner."""
+        if self._effect_learner is None:
+            try:
+                from engines.perception.spatial_learning import SpatialEffectLearner
+                db = self._get_db()
+                if db:
+                    self._effect_learner = SpatialEffectLearner(db)
+            except ImportError:
+                pass
+        return self._effect_learner
+
+    def _get_goal_tracker(self) -> Optional[Any]:
+        """Lazy-load goal tracker."""
+        if self._goal_tracker is None:
+            try:
+                from engines.perception.spatial_learning import MultiObjectGoalTracker
+                db = self._get_db()
+                if db:
+                    self._goal_tracker = MultiObjectGoalTracker(db)
+            except ImportError:
+                pass
+        return self._goal_tracker
+
+    def _get_property_extractor(self) -> Optional[Any]:
+        """Lazy-load property extractor."""
+        if self._property_extractor is None:
+            try:
+                from engines.perception.spatial_learning import PropertyExtractor
+                self._property_extractor = PropertyExtractor()
+            except ImportError:
+                pass
+        return self._property_extractor
+
+    def _extract_grid_state(self, frame: Any) -> Dict[Tuple[int, int], int]:
+        """Extract current grid state from frame."""
+        extractor = self._get_property_extractor()
+        if extractor is None or frame is None:
+            return {}
+
+        try:
+            import numpy as np
+            if isinstance(frame, np.ndarray):
+                return extractor.extract_grid_state(frame)
+        except Exception:
+            pass
+        return {}
+
+    def _get_effect_pattern(self, game_type: str) -> List[Tuple[int, int]]:
+        """Get learned effect pattern for this game."""
+        if game_type in self._effect_pattern_cache:
+            return self._effect_pattern_cache[game_type]
+
+        learner = self._get_effect_learner()
+        if learner is None:
+            return []
+
+        try:
+            pattern = learner.get_effect_pattern(game_type)
+            self._effect_pattern_cache[game_type] = pattern
+            return pattern
+        except Exception:
+            return []
+
+    def _get_target_configuration(
+        self,
+        game_type: str,
+        level: int
+    ) -> Optional[Dict[Tuple[int, int], int]]:
+        """Get known winning configuration for this level."""
+        cache_key = (game_type, level)
+        if cache_key in self._goal_cache:
+            return self._goal_cache[cache_key]
+
+        tracker = self._get_goal_tracker()
+        if tracker is None:
+            return None
+
+        try:
+            target = tracker.get_target_configuration(game_type, level)
+            if target:
+                self._goal_cache[cache_key] = target
+            return target
+        except Exception:
+            return None
+
+    def _find_differences(
+        self,
+        current: Dict[Tuple[int, int], int],
+        target: Dict[Tuple[int, int], int]
+    ) -> List[Tuple[int, int]]:
+        """Find positions where current differs from target."""
+        differences = []
+        all_positions = set(current.keys()) | set(target.keys())
+
+        for pos in all_positions:
+            if current.get(pos, 0) != target.get(pos, 0):
+                differences.append(pos)
+
+        return differences
+
+    def _find_best_click(
+        self,
+        current: Dict[Tuple[int, int], int],
+        target: Dict[Tuple[int, int], int],
+        differences: List[Tuple[int, int]],
+        effect_pattern: List[Tuple[int, int]],
+        grid_size: int = 8
+    ) -> Optional[Tuple[int, int]]:
+        """Find click position that reduces difference from goal."""
+        best_click = None
+        best_improvement = 0
+
+        # Try clicking each grid position
+        for gx in range(grid_size):
+            for gy in range(grid_size):
+                improvement = 0
+
+                # Simulate effect
+                for (rel_x, rel_y) in effect_pattern:
+                    affected_x = gx + rel_x
+                    affected_y = gy + rel_y
+
+                    if (affected_x, affected_y) in differences:
+                        improvement += 1
+
+                if improvement > best_improvement:
+                    best_improvement = improvement
+                    best_click = (gx, gy)
+
+        return best_click if best_improvement > 0 else None
+
+    def _grid_to_pixel(
+        self,
+        grid_pos: Tuple[int, int],
+        frame_size: int = 64,
+        grid_size: int = 8
+    ) -> Tuple[int, int]:
+        """Convert grid position to pixel coordinates (center of cell)."""
+        cell_size = frame_size // grid_size
+        pixel_x = grid_pos[0] * cell_size + cell_size // 2
+        pixel_y = grid_pos[1] * cell_size + cell_size // 2
+        return (pixel_x, pixel_y)
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Learn from click effects (called by outcome processor)."""
+        if action != 'ACTION6':
+            return
+
+        learner = self._get_effect_learner()
+        extractor = self._get_property_extractor()
+
+        if learner is None or extractor is None:
+            return
+
+        try:
+            import numpy as np
+            if not isinstance(frame_before, np.ndarray) or not isinstance(frame_after, np.ndarray):
+                return
+
+            game_type = context.get('game_type', '')
+            click_x = action_data.get('x', 0)
+            click_y = action_data.get('y', 0)
+
+            # Detect grid size and convert pixel to grid
+            grid_size = extractor._detect_grid_size(frame_before)
+            click_grid_pos = extractor.pixel_to_grid(
+                click_x, click_y,
+                frame_before.shape[1], frame_before.shape[0],
+                grid_size
+            )
+
+            # Detect position changes
+            changes = extractor.detect_position_changes(frame_before, frame_after, grid_size)
+
+            if changes:
+                learner.record_click_effect(game_type, click_grid_pos, changes)
+                # Invalidate cache
+                self._effect_pattern_cache.pop(game_type, None)
+
+        except Exception:
+            pass
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        # ACTION6 only
+        available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+        if 6 not in available:
+            return RungResult()
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+
+        # Get current grid state
+        frame = game_state.frame if hasattr(game_state, 'frame') else None
+        current_state = self._extract_grid_state(frame)
+
+        if not current_state:
+            return RungResult()
+
+        # Get target configuration (if known)
+        target = self._get_target_configuration(game_type, level)
+
+        if not target:
+            return RungResult()  # Don't know goal yet
+
+        # Find differences
+        differences = self._find_differences(current_state, target)
+
+        if not differences:
+            return RungResult(
+                confidence=0.3,
+                reason="Grid state matches known goal configuration",
+                metadata={'state': 'at_goal'}
+            )
+
+        # Get effect pattern
+        effect_pattern = self._get_effect_pattern(game_type)
+
+        if not effect_pattern:
+            return RungResult()  # Don't know effects yet
+
+        # Find click that moves us toward goal
+        best_click = self._find_best_click(
+            current_state, target, differences, effect_pattern
+        )
+
+        if best_click:
+            click_x, click_y = self._grid_to_pixel(best_click)
+            return RungResult(
+                action='ACTION6',
+                confidence=0.6,
+                reason=f"Click ({best_click[0]}, {best_click[1]}) to change {len(differences)} tiles toward goal",
+                metadata={
+                    'grid_position': best_click,
+                    'pixel_position': (click_x, click_y),
+                    'differences_count': len(differences),
+                    'effect_pattern_size': len(effect_pattern),
+                }
+            )
+
+        return RungResult()
+
+    def clear_cache(self):
+        """Clear cached data."""
+        self._effect_pattern_cache.clear()
+        self._goal_cache.clear()
+
+
 class SubgoalPlanningRung(DecisionRung):
     """Decompose complex levels into subgoals - EXPLOITATION"""
     name = "subgoal_planning"
@@ -3428,6 +3994,7 @@ ORDERING_PRESETS = {
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 2),
         ('self_trust_boost', 3),  # Manage wA based on context
+        ('frame_interpretation', 4),  # Context setting for dramatic frame changes
 
         # ORIENTATION - Understanding the world (Priority 5-20)
         ('imagination_budget', 5),
@@ -3448,6 +4015,7 @@ ORDERING_PRESETS = {
         ('three_layer_filter', 19),
 
         # HYPOTHESIS - Form and test theories (Priority 25-40)
+        ('event_understanding', 23),  # Causal world model
         ('assumption_formation', 24), # Form assumptions from observations
         ('scientific_method', 25),
         ('theory_gate', 26),
@@ -3464,21 +4032,22 @@ ORDERING_PRESETS = {
         ('rule_transfer', 41),  # Apply rules from other games
         ('state_matching', 42), # Symbolic reasoning - property matching
         ('discovery_exploitation', 43),
-        ('embedding_suggestion', 44),
-        ('multi_stage_matching', 45),
-        ('replay_learning', 46),
-        ('primitive_suggester', 47),
-        ('network_wisdom', 48),
-        ('abstraction_templates', 49),
-        ('few_shot_invariants', 50),
-        ('subgoal_planning', 51),
-        ('visual_analyzer', 52),
-        ('network_object_inventory', 53),
-        ('near_miss_analyzer', 54),
-        ('completion_prediction', 55),
-        ('frontier_topology', 56),
-        ('map_intel_collision', 57),
-        ('grid_exploration', 58),
+        ('spatial_relationship', 44),  # Click effect patterns for puzzles
+        ('embedding_suggestion', 45),
+        ('multi_stage_matching', 46),
+        ('replay_learning', 47),
+        ('primitive_suggester', 48),
+        ('network_wisdom', 49),
+        ('abstraction_templates', 50),
+        ('few_shot_invariants', 51),
+        ('subgoal_planning', 52),
+        ('visual_analyzer', 53),
+        ('network_object_inventory', 54),
+        ('near_miss_analyzer', 55),
+        ('completion_prediction', 56),
+        ('frontier_topology', 57),
+        ('map_intel_collision', 58),
+        ('grid_exploration', 59),
 
         # FALLBACK (Priority 99)
         ('smart_action_selection', 99),
@@ -3604,6 +4173,9 @@ class DecisionRungSystem:
         'i_thread': IThreadRung,
         'near_miss_analyzer': NearMissAnalyzerRung,
         'state_matching': StateMatchingRung,         # Symbolic reasoning - compare properties to goals
+        'frame_interpretation': FrameInterpretationRung,  # Context setting for dramatic frame changes
+        'event_understanding': EventUnderstandingRung,    # Causal world model for physics games
+        'spatial_relationship': SpatialRelationshipRung,  # Click effect patterns for puzzles
         'subgoal_planning': SubgoalPlanningRung,
         'breakthrough_budget': BreakthroughBudgetRung,
         'regulatory_signal': RegulatorySignalRung,
@@ -4166,6 +4738,40 @@ class DecisionRungSystem:
             game_type=ctx.get('game_type', 'unknown'),
             outcome_value=outcome_value
         )
+
+    def notify_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Notify rungs that have on_action_complete hooks.
+
+        Enables rungs like SpatialRelationshipRung to learn from action effects.
+        Called by GameLoop after action execution and outcome processing.
+
+        Args:
+            action: The action name that was executed
+            action_data: Action parameters (x, y for clicks)
+            frame_before: Frame before the action
+            frame_after: Frame after the action
+            context: Decision context
+        """
+        for rung in self.rungs:
+            if hasattr(rung, 'on_action_complete'):
+                try:
+                    rung.on_action_complete(
+                        action=action,
+                        action_data=action_data,
+                        frame_before=frame_before,
+                        frame_after=frame_after,
+                        context=context
+                    )
+                except Exception:
+                    # Don't break on hook errors
+                    pass
 
     # =========================================================================
     # EMERGENCY RUNGS - Always checked first regardless of strategy

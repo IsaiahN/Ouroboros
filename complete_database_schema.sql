@@ -6082,3 +6082,93 @@ CREATE TABLE IF NOT EXISTS player_state_history (
 
 CREATE INDEX idx_player_state_session ON player_state_history(session_id, action_number);
 CREATE INDEX idx_player_state_game ON player_state_history(game_id, level_number);
+
+-- =============================================================================
+-- EVENT UNDERSTANDING TABLES - World Model Building
+-- =============================================================================
+
+-- Track detected events between frames
+CREATE TABLE IF NOT EXISTS detected_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    action_number INTEGER NOT NULL,
+    event_type TEXT NOT NULL,               -- MOVEMENT, COLLISION, FUSION, DESTRUCTION, CREATION, TRANSFORMATION
+    objects_involved TEXT,                  -- JSON list of object IDs
+    positions TEXT,                         -- JSON list of positions [(y, x), ...]
+    confidence REAL DEFAULT 0.5,
+    details TEXT,                           -- JSON with event-specific details
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_game_type ON detected_events(game_type);
+CREATE INDEX IF NOT EXISTS idx_events_type ON detected_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_timestamp ON detected_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_events_game_level ON detected_events(game_type, level_number);
+
+-- Track causal links between actions and events
+CREATE TABLE IF NOT EXISTS causal_links (
+    link_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    action_taken TEXT NOT NULL,             -- ACTION1-ACTION7
+    action_data TEXT,                       -- JSON with action parameters (x, y for clicks)
+    event_id INTEGER REFERENCES detected_events(event_id),
+    confidence REAL DEFAULT 0.5,
+    link_type TEXT DEFAULT 'direct',        -- direct, indirect, coincidental
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_causal_game_action ON causal_links(game_type, action_taken);
+CREATE INDEX IF NOT EXISTS idx_causal_timestamp ON causal_links(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_causal_event ON causal_links(event_id);
+
+-- Track process classifications (overall game mechanic type)
+CREATE TABLE IF NOT EXISTS process_classifications (
+    classification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    action_number INTEGER NOT NULL,
+    process_type TEXT NOT NULL,             -- PHYSICS_SIMULATION, ANIMATION_SEQUENCE, TRANSFORMATION, CHAIN_REACTION, DIRECT_CONTROL
+    event_count INTEGER DEFAULT 0,
+    description TEXT,
+    confidence REAL DEFAULT 0.5,
+    supporting_evidence TEXT,               -- JSON list of evidence strings
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_process_game ON process_classifications(game_type);
+CREATE INDEX IF NOT EXISTS idx_process_timestamp ON process_classifications(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_process_type ON process_classifications(process_type);
+
+-- =============================================================================
+-- SPATIAL RELATIONSHIP TABLES - Click Effect Learning
+-- =============================================================================
+
+-- Track spatial effect patterns (what positions change when clicking)
+CREATE TABLE IF NOT EXISTS spatial_effects (
+    effect_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    click_rel_x INTEGER NOT NULL,           -- Relative X from click position
+    click_rel_y INTEGER NOT NULL,           -- Relative Y from click position
+    effect_type TEXT DEFAULT 'color_change',
+    observation_count INTEGER DEFAULT 1,
+    UNIQUE(game_type, click_rel_x, click_rel_y)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spatial_game ON spatial_effects(game_type);
+
+-- Track goal configurations for multi-tile puzzles
+CREATE TABLE IF NOT EXISTS goal_configurations (
+    config_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    state_hash TEXT NOT NULL,
+    grid_state TEXT NOT NULL,               -- JSON: {(x,y): color}
+    success_count INTEGER DEFAULT 0,
+    failure_count INTEGER DEFAULT 0,
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(game_type, level_number, state_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_goal_game_level ON goal_configurations(game_type, level_number);
+CREATE INDEX IF NOT EXISTS idx_goal_success ON goal_configurations(success_count DESC);

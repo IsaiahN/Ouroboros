@@ -144,6 +144,10 @@ class DecisionContext:
     # Prior lessons (from lessons_learned table)
     prior_lessons: List[Dict[str, Any]] = field(default_factory=lambda: [])
 
+    # Event understanding (from OutcomeProcessor's EventDetector)
+    recent_events: List[Dict[str, Any]] = field(default_factory=lambda: [])
+    frame_delta_count: int = 0
+
     # Timestamp
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -219,6 +223,10 @@ class DecisionContext:
 
             # Prior lessons for PriorLessonsRung
             'prior_lessons': self.prior_lessons,
+
+            # Event understanding
+            'recent_events': self.recent_events,
+            'frame_delta_count': self.frame_delta_count,
         }
 
 
@@ -272,6 +280,10 @@ class ContextBuilder:
         self._checkpoint_expected_frames: int = 0  # Expected unique frames from checkpoint
         self._checkpoint_frames_seen: Set[str] = set()  # Frame hashes seen during replay
         self._checkpoint_divergence_checked: bool = False  # Only check once at midpoint
+
+        # Event understanding state (populated from OutcomeProcessor)
+        self._recent_events: List[Dict[str, Any]] = []
+        self._last_frame_delta_count: int = 0
 
     def build(
         self,
@@ -385,6 +397,10 @@ class ContextBuilder:
             # Frame
             frame_width=frame_width,
             frame_height=frame_height,
+
+            # Event understanding
+            recent_events=self._recent_events.copy(),
+            frame_delta_count=self._last_frame_delta_count,
         )
 
     def update(self, action: str, outcome: ActionOutcome, decision_metadata: Optional[Dict[str, Any]] = None) -> None:
@@ -433,6 +449,14 @@ class ContextBuilder:
         if outcome.is_death:
             self._death_count += 1
             self._clear_checkpoint()
+
+        # Track events from outcome (for event understanding rungs)
+        self._last_frame_delta_count = getattr(outcome, 'frame_delta_count', 0)
+        if hasattr(outcome, 'detected_events') and outcome.detected_events:
+            self._recent_events.extend(outcome.detected_events)
+            # Keep only last 50 events
+            if len(self._recent_events) > 50:
+                self._recent_events = self._recent_events[-50:]
 
         # Handle checkpoint state from decision metadata
         if decision_metadata:

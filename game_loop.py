@@ -253,6 +253,9 @@ class GameLoop:
         # Report outcome back to decision system (closes feedback loop)
         self._report_outcome_to_decision_system(action, outcome, context)
 
+        # Notify rungs with action complete hooks (enables spatial learning)
+        self._notify_rungs_action_complete(action, outcome, context)
+
         # Update context builder (with decision metadata for checkpoint tracking)
         self._context_builder.update(action.name, outcome, decision_metadata)
 
@@ -309,6 +312,44 @@ class GameLoop:
             )
         except Exception:
             # Don't break gameplay on feedback errors
+            pass
+
+    def _notify_rungs_action_complete(
+        self,
+        action: Any,
+        outcome: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Notify rungs that have on_action_complete hooks.
+
+        Enables rungs like SpatialRelationshipRung to learn from action effects.
+
+        Args:
+            action: The action that was executed
+            outcome: The ActionOutcome from outcome processor
+            context: The decision context
+        """
+        if not hasattr(self._decision_system, 'notify_action_complete'):
+            return
+
+        try:
+            action_name = action.name if hasattr(action, 'name') else str(action)
+            action_data = {
+                'x': getattr(action, 'x', 0),
+                'y': getattr(action, 'y', 0),
+            }
+            frame_before = getattr(outcome, 'frame_before', None)
+            frame_after = getattr(outcome, 'frame_after', None)
+
+            self._decision_system.notify_action_complete(
+                action=action_name,
+                action_data=action_data,
+                frame_before=frame_before,
+                frame_after=frame_after,
+                context=context
+            )
+        except Exception:
+            # Don't break gameplay on notification errors
             pass
 
     def _build_loop_state(self) -> LoopState:

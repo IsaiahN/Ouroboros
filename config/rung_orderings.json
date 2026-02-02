@@ -3,10 +3,12 @@
 
   "experimental_curiosity_first": [
     ["infinite_loop_breaker", 1],
+    ["frame_interpretation", 3],
     ["exploration_phase", 5],
     ["survey", 10],
     ["metacognitive_prediction", 15],
     ["scientific_method", 20],
+    ["event_understanding", 22],
     ["questioning_engine", 25],
     ["two_streams", 30],
     ["death_avoidance", 35],
@@ -14,6 +16,7 @@
     ["discovery_exploitation", 45],
     ["embedding_suggestion", 50],
     ["primitive_suggester", 55],
+    ["spatial_relationship", 60],
     ["smart_action_selection", 99]
   ],
 
@@ -34,6 +37,7 @@
     ["infinite_loop_breaker", 1],
     ["death_avoidance", 2],
     ["prior_lessons", 3],
+    ["frame_interpretation", 4],
     ["questioning_engine", 5],
     ["survey", 10],
     ["network_wisdom", 15],
@@ -66,6 +70,22 @@
     ["scientific_method", 20],
     ["metacognitive_prediction", 25],
     ["death_avoidance", 80],
+    ["smart_action_selection", 99]
+  ],
+
+  "world_model_heavy": [
+    ["infinite_loop_breaker", 1],
+    ["coordinate_oscillation", 2],
+    ["frame_interpretation", 4],
+    ["survey", 8],
+    ["event_understanding", 15],
+    ["death_avoidance", 20],
+    ["network_wisdom", 25],
+    ["state_matching", 30],
+    ["spatial_relationship", 35],
+    ["discovery_exploitation", 40],
+    ["embedding_suggestion", 45],
+    ["primitive_suggester", 50],
     ["smart_action_selection", 99]
   ]
 }
