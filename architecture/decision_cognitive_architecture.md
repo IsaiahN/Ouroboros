@@ -1,10 +1,16 @@
 # Decision and Cognitive Architecture
 
-**Version**: 1.3
-**Date**: 2026-02-02
-**Purpose**: Complete documentation of how the Decision Rung System, Cognitive Stage System, and CognitiveCore facade work together from game start to post-game learning.
+**Version**: 1.4
+**Date**: 2026-02-03
+**Purpose**: Complete documentation of how the Decision Rung System, Cognitive Stage System, CognitiveCore facade, and Evolution-level engines work together from game start to post-game learning.
 
-**Recent Changes (v1.3)**:
+**Recent Changes (v1.4)**:
+- **Evolution Runner Integration**: Documented 10 evolution-level engines now integrated into evolution_runner.py
+- Added new section: Evolution-Level Engine Orchestration
+- Updated System Overview diagram to show evolution layer
+- Added: NetworkIntelligenceEngine, HorizontalTransferEngine, MetaLearningCurriculum, AgentLifecycleManager, CollectiveReasoningEngine, ConceptDiscoveryEngine, UniversalPatternEngine, GamesAsTeachersEngine
+
+**Previous Changes (v1.3)**:
 - **Integration Complete**: Full event detection pipeline wired through OutcomeProcessor → ContextBuilder → DecisionRungSystem
 - Added `notify_action_complete()` hook for rung learning callbacks (enables SpatialRelationshipRung)
 - OutcomeProcessor now detects events via EventDetector when `frame_delta_count > 10`
@@ -30,12 +36,13 @@
 
 1. [System Overview](#system-overview)
 2. [Component Architecture](#component-architecture)
-3. [The Decision Rung System](#the-decision-rung-system)
-4. [The Cognitive Stage System](#the-cognitive-stage-system)
-5. [The CognitiveCore Facade](#the-cognitivecore-facade)
-6. [Complete Game Flow](#complete-game-flow)
-7. [Rung Reference](#rung-reference)
-8. [Integration Points](#integration-points)
+3. [Evolution-Level Engine Orchestration](#evolution-level-engine-orchestration)
+4. [The Decision Rung System](#the-decision-rung-system)
+5. [The Cognitive Stage System](#the-cognitive-stage-system)
+6. [The CognitiveCore Facade](#the-cognitivecore-facade)
+7. [Complete Game Flow](#complete-game-flow)
+8. [Rung Reference](#rung-reference)
+9. [Integration Points](#integration-points)
 
 ---
 
@@ -44,6 +51,24 @@
 The BitterTruth-AI system uses a modular, layered architecture to make action decisions. At its core are three complementary systems:
 
 ```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       EVOLUTION ORCHESTRATION                           │
+│                                                                         │
+│   EvolutionRunner  ──►  (manages generations, population, learning)    │
+│        │                                                                │
+│        ├── EvolutionaryEngine (genetic evolution, crossover, mutation) │
+│        ├── NetworkIntelligenceEngine (ecosystem health snapshots)      │
+│        ├── HorizontalTransferEngine (viral knowledge spread)           │
+│        ├── MetaLearningCurriculum (4-stage game selection)             │
+│        ├── AgentLifecycleManager (birth/retirement/deletion)           │
+│        ├── CollectiveReasoningEngine (multi-agent consensus)           │
+│        ├── ConceptDiscoveryEngine (cross-game concept emergence)       │
+│        ├── UniversalPatternEngine (pattern transfer)                   │
+│        └── GamesAsTeachersEngine (lesson extraction from wins)         │
+│                                                                         │
+└──────────────────────────────────┬──────────────────────────────────────┘
+                                   │ spawns agents for
+                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          GAMEPLAY ORCHESTRATION                         │
 │                                                                         │
@@ -110,6 +135,128 @@ The BitterTruth-AI system uses a modular, layered architecture to make action de
 - `FewShotRelations` - Relational invariants from few examples
 - `NetworkSharingEngine` - Network knowledge exchange
 - `ControlTracker` - "I am this object" tracking
+
+---
+
+## Evolution-Level Engine Orchestration
+
+The `EvolutionRunner` orchestrates 10 specialized engines that operate at the **population/generation level** rather than the per-action level. These engines manage cross-agent learning, network health, and evolutionary dynamics.
+
+### Engine Integration Summary
+
+| Engine | Frequency | Purpose |
+|--------|-----------|---------|
+| `EvolutionaryEngine` | Every generation | Genetic evolution: crossover, mutation, selection |
+| `ViralPackageEngine` | On wins | Create viral packages from winning sequences |
+| `NetworkIntelligenceEngine` | Every 5 generations | Ecosystem health snapshots, network metrics |
+| `HorizontalTransferEngine` | Every generation | Spread knowledge virally between agents |
+| `MetaLearningCurriculum` | Per agent-game | 4-stage curriculum: specialization → generalization |
+| `AgentLifecycleManager` | Every 50 generations | Retire/delete ancient inactive agents |
+| `CollectiveReasoningEngine` | For stuck games | Multi-agent ensemble reasoning |
+| `ConceptDiscoveryEngine` | Every 10 generations | Detect cross-game concept emergence |
+| `UniversalPatternEngine` | Passive | Cross-game pattern matching |
+| `GamesAsTeachersEngine` | On wins | Extract lessons from winning games |
+
+### Engine Execution Timeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    GENERATION N LIFECYCLE                               │
+│                                                                         │
+│  PHASE 1: PRE-GAME                                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  MetaLearningCurriculum.select_games_for_agent()                │   │
+│  │    └── 4-stage curriculum: specialization → near_transfer       │   │
+│  │                           → diversification → generalization    │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                │                                        │
+│                                ▼                                        │
+│  PHASE 2: GAMEPLAY (per agent-game)                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  CoreGameplay.play_single_game()                                │   │
+│  │    └── (see Complete Game Flow section)                         │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                │                                        │
+│                                ▼                                        │
+│  PHASE 3: POST-GAME LEARNING                                           │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  IF stuck_on_game:                                              │   │
+│  │    CollectiveReasoningEngine.start_collective_session()         │   │
+│  │      └── Multi-agent voting on what to try                      │   │
+│  │                                                                  │   │
+│  │  IF is_win:                                                     │   │
+│  │    ViralPackageEngine.create_viral_package_from_sequence()      │   │
+│  │    GamesAsTeachersEngine.extract_lesson()                       │   │
+│  │      └── Extract generalizable lesson from win                  │   │
+│  │                                                                  │   │
+│  │  MetaLearningCurriculum.update_stage_progress()                 │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                │                                        │
+│                                ▼                                        │
+│  PHASE 4: EVOLUTION                                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  EvolutionaryEngine.evolve_population()                         │   │
+│  │    ├── Fitness evaluation                                       │   │
+│  │    ├── Selection (keep top performers)                          │   │
+│  │    ├── Crossover (breed new agents)                             │   │
+│  │    └── Mutation (random variation)                              │   │
+│  │                                                                  │   │
+│  │  HorizontalTransferEngine.execute_generation_transfers()        │   │
+│  │    └── Spread viral packages to other agents                    │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                │                                        │
+│                                ▼                                        │
+│  PHASE 5: PERIODIC MAINTENANCE                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  IF generation % 5 == 0:                                        │   │
+│  │    NetworkIntelligenceEngine.capture_ecosystem_snapshot()       │   │
+│  │      └── Record network health, diversity, knowledge metrics    │   │
+│  │                                                                  │   │
+│  │  IF generation % 10 == 0:                                       │   │
+│  │    ConceptDiscoveryEngine.check_concept_emergence()             │   │
+│  │      └── Detect patterns appearing across multiple games        │   │
+│  │                                                                  │   │
+│  │  IF generation % 50 == 0:                                       │   │
+│  │    AgentLifecycleManager.cleanup_ancient_inactive_agents()      │   │
+│  │      └── Delete zero-score agents >50 generations old           │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Engine Details
+
+#### 1. MetaLearningCurriculum
+
+Implements a 4-stage developmental curriculum:
+
+| Stage | Name | Focus | Exit Criteria |
+|-------|------|-------|---------------|
+| 1 | Specialization | Master one game type | Win rate ≥ 30% |
+| 2 | Near Transfer | Similar games | Transfer rate ≥ 20% |
+| 3 | Diversification | Variety of games | Cross-domain win |
+| 4 | Generalization | Any game | Maintained performance |
+
+#### 2. NetworkIntelligenceEngine
+
+Tracks ecosystem health via `ecosystem_health_snapshots` table:
+- Knowledge metrics (sequences, patterns, rules)
+- Information flow (creation rate, validation rate)
+- Resilience (critical sequences, redundancy)
+- Population metrics (diversity, turnover)
+
+#### 3. CollectiveReasoningEngine
+
+Activates when games are stuck (many failures, no progress):
+- Recruits agents who've played the game
+- Runs voting or debate reasoning mode
+- Produces consensus recommendations
+
+#### 4. ConceptDiscoveryEngine
+
+Detects abstract concepts emerging across games:
+- Monitors for patterns proven in multiple games
+- Links to primitive unlock system (CODS)
+- Creates sharable concept definitions
 
 ---
 
@@ -708,6 +855,7 @@ class DecisionRung(ABC):
 
 All knowledge flows through SQLite:
 
+**Gameplay Tables**:
 | Table | Purpose |
 |-------|---------|
 | `action_traces` | Every action taken with outcome |
@@ -721,6 +869,17 @@ All knowledge flows through SQLite:
 | `player_state_history` | Per-action player properties (symbolic reasoning) |
 | `property_transformations` | Learned object-property change mappings |
 | `goal_requirements` | Learned goal state requirements |
+
+**Evolution-Level Tables**:
+| Table | Purpose |
+|-------|---------|
+| `ecosystem_health_snapshots` | Network intelligence health metrics |
+| `horizontal_transfer_events` | Viral knowledge transfer records |
+| `curriculum_progress` | MetaLearningCurriculum stage tracking |
+| `collective_reasoning_sessions` | Multi-agent reasoning sessions |
+| `collective_proposals` | Proposals from collective reasoning |
+| `knowledge_redundancy` | Knowledge backup tracking |
+| `game_lessons` | Lessons extracted by GamesAsTeachersEngine |
 | `detected_events` | **NEW** Events detected between frames (MOVEMENT, COLLISION, etc.) |
 | `causal_links` | **NEW** Links between actions and detected events |
 | `process_classifications` | **NEW** Process type classifications (PHYSICS_SIMULATION, etc.) |
@@ -802,12 +961,27 @@ Action → Outcome → Learning → Knowledge → Decision
 4. **Role-Aware**: Decisions consider agent role (Pioneer, Optimizer, Generalist, Exploiter)
 5. **Stage-Aware**: Cognitive capabilities gate available strategies
 6. **Network-Centric**: Knowledge flows bidirectionally with the network database
+7. **Two-Level Architecture**: Evolution-level engines manage populations; gameplay engines manage actions
 
 ---
 
 **END OF DOCUMENT**
 
 *For implementation details, see the source files:*
+
+*Evolution-level orchestration:*
+- [evolution_runner.py](../evolution_runner.py)
+- [evolutionary_engine.py](../evolutionary_engine.py)
+- [network_intelligence_engine.py](../network_intelligence_engine.py)
+- [horizontal_transfer_engine.py](../horizontal_transfer_engine.py)
+- [meta_learning_curriculum.py](../meta_learning_curriculum.py)
+- [agent_lifecycle_manager.py](../agent_lifecycle_manager.py)
+- [collective_reasoning_engine.py](../collective_reasoning_engine.py)
+- [concept_discovery_engine.py](../concept_discovery_engine.py)
+- [engines/self_model/universal_patterns.py](../engines/self_model/universal_patterns.py)
+- [engines/postgame/games_as_teachers.py](../engines/postgame/games_as_teachers.py)
+
+*Gameplay-level decision making:*
 - [decision_rung_system.py](../decision_rung_system.py)
 - [engines/cognition/cognitive_stages.py](../engines/cognition/cognitive_stages.py)
 - [engines/self_model/cognitive_core.py](../engines/self_model/cognitive_core.py)

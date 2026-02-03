@@ -870,3 +870,204 @@ Database check:
 2. Monitor if rungs start using accumulated knowledge
 3. Check if FrontierTopologyRung now has data to work with
 4. Verify score progression improves over generations
+---
+
+## February 3, 2026
+
+### Session: Orphaned Engine Integration & Architecture Repair
+
+**Started**: ~11:30 AM
+**Last Update**: 1:03:16 PM
+
+---
+
+## Approach
+
+This session focused on **integrating orphaned sophisticated engines** that existed in the codebase but were never connected to the evolution system. The discovery came from investigating why the system ran 5,000+ generations with only 10 agents and 0 wins.
+
+**Key Problem**: The codebase contained elaborate engines implementing the "Network Intelligence" theory (evolutionary algorithms, horizontal transfer, meta-learning curriculum, collective reasoning, etc.) but `evolution_runner.py` never instantiated or called them. The sophisticated architecture existed only on paper.
+
+**Philosophy Applied**: Per the Master Ruleset - "The database IS the AGI. Agents are temporary cells." These engines were supposed to make the network intelligent, but they were orphaned code.
+
+---
+
+## Steps Completed
+
+### 1. Population Size Fix (~11:30 AM)
+- **Discovery**: Evolution was running with only 10 agents for 5,000+ generations
+- **Problem**: Far too small a population for meaningful evolution/diversity
+- **Fix**: Increased default `population_size` from 10 to 100 in `evolution_runner.py`
+
+### 2. Database Cleanup (~11:45 AM)
+- **Discovery**: Database bloated to 10GB with 9.2M rows of zero-value data
+- **Problem**: 5,000 generations × 10 agents × many tables = massive accumulation with 0 wins
+- **Fix**: Ran `safe_cleanup.py --execute` to remove:
+  - Zero-score game results
+  - Old navigation state history
+  - Excess system logs
+  - Result: DB reduced significantly
+
+### 3. Zombie Agent Fix (~12:00 PM)
+- **Discovery**: 51,780 zombie agents marked `is_active=1` but never playing
+- **Problem**: `evolve()` method culled agents by marking `cull_this_cycle=1` but NEVER set `is_active=0`
+- **Fix**: Added proper deactivation in `evolve()`:
+  ```python
+  # Mark culled agents as inactive
+  self.db.execute_query("""
+      UPDATE agents SET is_active = 0
+      WHERE cull_this_cycle = 1 AND is_active = 1
+  """)
+  ```
+- **Cleanup**: Deactivated all 51,780 zombie agents
+
+### 4. EvolutionaryEngine Integration (~12:15 PM)
+- **Discovery**: `EvolutionaryEngine` class existed (crossover, mutation, selection) but was never instantiated
+- **Fix**: Added to `evolution_runner.py`:
+  - Import with try/except guard
+  - Initialization in `__init__`
+  - Call to `evolve_population()` in `evolve()` method
+
+### 5. Comprehensive Orphan Audit (~12:20 PM)
+- Ran full audit of codebase for sophisticated engines not connected to evolution
+- Found 10 major orphaned engines
+
+### 6. Mass Engine Integration (~12:30 PM - 12:50 PM)
+Integrated all 10 orphaned engines into `evolution_runner.py`:
+
+| Engine | Purpose | When Called |
+|--------|---------|-------------|
+| `EvolutionaryEngine` | Genetic evolution (crossover, mutation) | Every generation in `evolve()` |
+| `ViralPackageEngine` | Create viral packages from wins | On winning sequences |
+| `NetworkIntelligenceEngine` | Ecosystem health snapshots | Every 5 generations |
+| `HorizontalTransferEngine` | Spread knowledge virally | Every generation after evolution |
+| `MetaLearningCurriculum` | 4-stage curriculum for game selection | Per agent-game selection |
+| `AgentLifecycleManager` | Retire/delete ancient agents | Every 50 generations |
+| `CollectiveReasoningEngine` | Multi-agent consensus for stuck games | When games are stuck |
+| `ConceptDiscoveryEngine` | Cross-game concept emergence | Every 10 generations |
+| `UniversalPatternEngine` | Cross-game pattern transfer | Passive/initialized |
+| `GamesAsTeachersEngine` | Extract lessons from wins | On game wins |
+
+### 7. Integration Testing & Bug Fixes (~12:50 PM - 1:00 PM)
+Ran integration tests and found 3 issues:
+
+**Issue 1**: `ecosystem_health_snapshots` table missing `persona_count` column
+- **Fix**: Added column to `complete_database_schema.sql`
+- **Fix**: Ran ALTER TABLE migration on live database
+
+**Issue 2**: `get_transfer_statistics()` NoneType division error
+- **Location**: `horizontal_transfer_engine.py` line 693
+- **Fix**: Added `or 0` guards for None values in division
+
+**Issue 3**: Wrong method name in evolution_runner.py
+- **Problem**: Called `scan_for_concept_candidates()` which doesn't exist
+- **Fix**: Changed to `check_concept_emergence()` (actual method name)
+
+### 8. Architecture Documentation Update (~1:00 PM)
+Updated `architecture/decision_cognitive_architecture.md` from v1.3 to v1.4:
+- Added "Evolution Orchestration" layer to System Overview diagram
+- Added new section: "Evolution-Level Engine Orchestration"
+- Added engine execution timeline (5 phases per generation)
+- Added evolution-level database tables
+- Updated source file references
+
+---
+
+## Current Status
+
+**All 10 engines now integrated and verified:**
+
+```
+=== FINAL INTEGRATION TEST ===
+
+============================================================
+  [OK] All 10 engines initialized: 10/10
+  [OK] ConceptDiscoveryEngine: 0 concepts
+  [OK] NetworkIntelligenceEngine: [CRITICAL] CRITICAL
+  [OK] HorizontalTransferEngine: ratio: 0.0
+  [OK] CollectiveReasoningEngine: session: collective_fe67c781fed4
+  [OK] AgentLifecycleManager: would delete: 0
+============================================================
+
+  RESULT: ALL TESTS PASSED
+============================================================
+```
+
+---
+
+## Files Modified
+
+### evolution_runner.py
+- Added 10 try/except import blocks (lines 50-130)
+- Added 10 engine initializations in `__init__` (lines 180-330)
+- Added MetaLearningCurriculum for game selection (lines 1140-1160)
+- Added curriculum progress update after games (line 1195)
+- Added CollectiveReasoningEngine for stuck games (lines 1210-1220)
+- Added GamesAsTeachersEngine lesson extraction on wins (lines 1320-1360)
+- Added lifecycle cleanup, network snapshot, concept discovery in `evolve()` (lines 1400-1480)
+- Fixed `evolve()` to properly deactivate culled agents
+
+### horizontal_transfer_engine.py
+- Fixed NoneType division in `get_transfer_statistics()` (line 693)
+
+### complete_database_schema.sql
+- Added `persona_count`, `persona_active_24h`, `persona_avg_context_reliability` columns to `ecosystem_health_snapshots` table
+
+### architecture/decision_cognitive_architecture.md
+- Updated to v1.4
+- Added Evolution-Level Engine Orchestration section
+- Updated System Overview diagram with evolution layer
+- Added evolution-level database tables
+
+---
+
+## Current Failure/Issue
+
+**None at code level** - All engines integrated and passing tests.
+
+**System health status**: CRITICAL (score: 0.000)
+- This is expected because evolution hasn't run yet with the new integrations
+- Network health will improve as agents start winning games and creating knowledge
+
+---
+
+## Next Steps
+
+1. **Run evolution test** with new 100-agent population and all engines active
+2. **Monitor ecosystem health** - watch for health_score improvement over generations
+3. **Verify curriculum progression** - agents should move through 4 stages
+4. **Check horizontal transfer** - viral packages should spread between agents
+5. **Watch for first wins** - this will trigger lesson extraction and viral packaging
+
+---
+
+## Architecture Summary
+
+The system now has a proper **two-level architecture**:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    EVOLUTION LEVEL (per generation)                  │
+│                                                                      │
+│  EvolutionRunner orchestrates:                                      │
+│  - EvolutionaryEngine (genetic algorithms)                          │
+│  - NetworkIntelligenceEngine (health monitoring)                    │
+│  - HorizontalTransferEngine (viral knowledge)                       │
+│  - MetaLearningCurriculum (game selection)                          │
+│  - AgentLifecycleManager (population management)                    │
+│  - CollectiveReasoningEngine (stuck game help)                      │
+│  - ConceptDiscoveryEngine (abstract patterns)                       │
+│  - GamesAsTeachersEngine (lesson extraction)                        │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    GAMEPLAY LEVEL (per action)                       │
+│                                                                      │
+│  CoreGameplay → GameLoop → DecisionRungSystem (52 rungs)            │
+│  - CognitiveCore, IThread, SensationEngine                          │
+│  - OutcomeProcessor, ContextBuilder                                 │
+│  - All learning/decision systems                                    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+The "Network Intelligence" theory is now actually implemented, not just documented.

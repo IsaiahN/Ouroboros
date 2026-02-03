@@ -690,8 +690,8 @@ class HorizontalTransferEngine:
                 'recent_performance': recent_stats[0] if recent_stats else {},
                 'knowledge_growth': knowledge_growth[0] if knowledge_growth else {},
                 'transfer_ratio': (
-                    knowledge_growth[0]['transfer_sequences'] / max(knowledge_growth[0]['total_sequences'], 1)
-                    if knowledge_growth else 0.0
+                    (knowledge_growth[0]['transfer_sequences'] or 0) / max((knowledge_growth[0]['total_sequences'] or 0), 1)
+                    if knowledge_growth and knowledge_growth[0] else 0.0
                 )
             }
 

@@ -1885,8 +1885,19 @@ CREATE TABLE ecosystem_health_snapshots (
 
     -- Overall health assessment
     health_status TEXT DEFAULT 'unknown',  -- 'critical', 'poor', 'fair', 'good', 'excellent'
-    health_score REAL DEFAULT 0.0  -- 0.0 to 1.0
-, total_levels_completed_this_gen INTEGER DEFAULT 0, avg_levels_per_game REAL DEFAULT 0.0, avg_actions_per_level REAL DEFAULT 0.0, network_learning_rate REAL DEFAULT 0.0);
+    health_score REAL DEFAULT 0.0,  -- 0.0 to 1.0
+
+    -- Extended metrics (added over time)
+    total_levels_completed_this_gen INTEGER DEFAULT 0,
+    avg_levels_per_game REAL DEFAULT 0.0,
+    avg_actions_per_level REAL DEFAULT 0.0,
+    network_learning_rate REAL DEFAULT 0.0,
+
+    -- Persona metrics
+    persona_count INTEGER DEFAULT 0,
+    persona_active_24h INTEGER DEFAULT 0,
+    persona_avg_context_reliability REAL DEFAULT 0.5
+);
 
 CREATE TABLE ecosystem_metabolism_snapshots (
             snapshot_id TEXT PRIMARY KEY,

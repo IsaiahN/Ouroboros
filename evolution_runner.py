@@ -51,6 +51,7 @@ from decision_rung_system import DecisionRungSystem
 # Symbolic reasoning components (Phase 0-1)
 from engines.perception.player_localizer import PlayerLocalizer
 from engines.perception.property_extractor import PropertyExtractor, properties_to_json
+from evolutionary_engine import EvolutionaryEngine, calculate_youth_bonus
 
 # Viral package engine for network knowledge sharing
 try:
@@ -58,6 +59,69 @@ try:
     VIRAL_PACKAGE_AVAILABLE = True
 except ImportError:
     VIRAL_PACKAGE_AVAILABLE = False
+
+# Network Intelligence Engine - ecosystem health monitoring (Unified Theory core)
+try:
+    from network_intelligence_engine import NetworkIntelligenceEngine
+    NETWORK_INTELLIGENCE_AVAILABLE = True
+except ImportError:
+    NETWORK_INTELLIGENCE_AVAILABLE = False
+
+# Horizontal Transfer Engine - viral knowledge spread between agents
+try:
+    from horizontal_transfer_engine import HorizontalTransferEngine
+    HORIZONTAL_TRANSFER_AVAILABLE = True
+except ImportError:
+    HORIZONTAL_TRANSFER_AVAILABLE = False
+
+# Meta-Learning Curriculum - intelligent game selection for generalization
+try:
+    from meta_learning_curriculum import MetaLearningCurriculum
+    META_LEARNING_AVAILABLE = True
+except ImportError:
+    META_LEARNING_AVAILABLE = False
+
+# Agent Lifecycle Manager - safe agent birth/death/revival management
+try:
+    from agent_lifecycle_manager import AgentLifecycleManager
+    LIFECYCLE_MANAGER_AVAILABLE = True
+except ImportError:
+    LIFECYCLE_MANAGER_AVAILABLE = False
+
+# Collective Reasoning Engine - multi-agent ensemble intelligence
+try:
+    from collective_reasoning_engine import CollectiveReasoningEngine
+    COLLECTIVE_REASONING_AVAILABLE = True
+except ImportError:
+    COLLECTIVE_REASONING_AVAILABLE = False
+
+# Concept Discovery Engine - high-level concept discovery (CODS Tier 4)
+try:
+    from concept_discovery_engine import ConceptDiscoveryEngine
+    CONCEPT_DISCOVERY_AVAILABLE = True
+except ImportError:
+    CONCEPT_DISCOVERY_AVAILABLE = False
+
+# Universal Pattern Engine - cross-game pattern transfer
+try:
+    from engines.self_model.universal_patterns import UniversalPatternEngine
+    UNIVERSAL_PATTERN_AVAILABLE = True
+except ImportError:
+    UNIVERSAL_PATTERN_AVAILABLE = False
+
+# Games-as-Teachers Engine - lesson extraction from wins
+try:
+    from engines.reasoning.scientific_method_engine import GamesAsTeachersEngine
+    GAMES_AS_TEACHERS_AVAILABLE = True
+except ImportError:
+    GAMES_AS_TEACHERS_AVAILABLE = False
+
+# Symbolic Reasoning Engine - abstract symbolic reasoning for complex games
+try:
+    from engines.reasoning.symbolic_reasoning_engine import SymbolicReasoningEngine
+    SYMBOLIC_REASONING_AVAILABLE = True
+except ImportError:
+    SYMBOLIC_REASONING_AVAILABLE = False
 
 
 @dataclass
@@ -107,7 +171,7 @@ class EvolutionRunner:
         self,
         mode: str = "normal",
         db_path: str = "core_data.db",
-        population_size: int = 10,
+        population_size: int = 100,
         games_per_generation: int = 5,
         max_generations: int = 10,
         max_actions_per_game: int = 500,
@@ -142,6 +206,9 @@ class EvolutionRunner:
         self.decision_system = DecisionRungSystem(strategy='ladder')
         self.decision_system.load_ordering(self.rung_ordering)
 
+        # Evolutionary engine for sophisticated evolution (youth bonus, prestige, mutation, etc.)
+        self.evolutionary_engine = EvolutionaryEngine(self.db)
+
         # State
         self.agents: List[AgentState] = []
         self.current_generation = 0
@@ -165,6 +232,94 @@ class EvolutionRunner:
                     print("[INIT] Viral package engine initialized")
             except Exception as e:
                 print(f"[WARN] Could not initialize viral package engine: {e}")
+
+        # Network Intelligence Engine - ecosystem health monitoring
+        # Per Unified Theory: "The database IS the AGI. Agents are temporary cells."
+        self.network_intelligence_engine = None
+        if NETWORK_INTELLIGENCE_AVAILABLE:
+            try:
+                self.network_intelligence_engine = NetworkIntelligenceEngine(self.db)
+                if self.verbose:
+                    print("[INIT] Network intelligence engine initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize network intelligence engine: {e}")
+
+        # Horizontal Transfer Engine - viral knowledge spread
+        # Per Unified Theory: "Intelligence spreads through horizontal information transfer"
+        self.horizontal_transfer_engine = None
+        if HORIZONTAL_TRANSFER_AVAILABLE:
+            try:
+                self.horizontal_transfer_engine = HorizontalTransferEngine(self.db)
+                if self.verbose:
+                    print("[INIT] Horizontal transfer engine initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize horizontal transfer engine: {e}")
+
+        # Meta-Learning Curriculum - intelligent game selection
+        # Per Unified Theory: 4-stage curriculum for generalization
+        self.meta_learning_curriculum = None
+        if META_LEARNING_AVAILABLE:
+            try:
+                self.meta_learning_curriculum = MetaLearningCurriculum(self.db)
+                if self.verbose:
+                    print("[INIT] Meta-learning curriculum initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize meta-learning curriculum: {e}")
+
+        # Agent Lifecycle Manager - safe agent birth/death/revival
+        # Per Unified Theory: "Good players never deleted, just retired"
+        self.lifecycle_manager = None
+        if LIFECYCLE_MANAGER_AVAILABLE:
+            try:
+                self.lifecycle_manager = AgentLifecycleManager(self.db)
+                if self.verbose:
+                    print("[INIT] Agent lifecycle manager initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize lifecycle manager: {e}")
+
+        # Collective Reasoning Engine - multi-agent ensemble intelligence
+        # Per Unified Theory: "Top performers collaborate on challenging games"
+        self.collective_reasoning_engine = None
+        if COLLECTIVE_REASONING_AVAILABLE:
+            try:
+                self.collective_reasoning_engine = CollectiveReasoningEngine(self.db)
+                if self.verbose:
+                    print("[INIT] Collective reasoning engine initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize collective reasoning engine: {e}")
+
+        # Concept Discovery Engine - high-level concept discovery (CODS Tier 4)
+        # Per Unified Theory: "Concepts emerge from cross-game pattern recognition"
+        self.concept_discovery_engine = None
+        if CONCEPT_DISCOVERY_AVAILABLE:
+            try:
+                self.concept_discovery_engine = ConceptDiscoveryEngine(self.db)
+                if self.verbose:
+                    print("[INIT] Concept discovery engine initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize concept discovery engine: {e}")
+
+        # Universal Pattern Engine - cross-game pattern transfer
+        # Per Unified Theory: "Patterns that transfer across games become universal"
+        self.universal_pattern_engine = None
+        if UNIVERSAL_PATTERN_AVAILABLE:
+            try:
+                self.universal_pattern_engine = UniversalPatternEngine()
+                if self.verbose:
+                    print("[INIT] Universal pattern engine initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize universal pattern engine: {e}")
+
+        # Games-as-Teachers Engine - lesson extraction from wins
+        # Per Unified Theory: "Games are teachers - each level is a lesson"
+        self.games_as_teachers_engine = None
+        if GAMES_AS_TEACHERS_AVAILABLE:
+            try:
+                self.games_as_teachers_engine = GamesAsTeachersEngine(self.db)
+                if self.verbose:
+                    print("[INIT] Games-as-teachers engine initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize games-as-teachers engine: {e}")
 
     def _compute_frame_hash(self, obs: Any) -> str:
         """Compute hash of frame state for topology matching."""
@@ -988,8 +1143,25 @@ class EvolutionRunner:
             if not self.running:
                 break
 
-            # Select games for this agent
-            agent_games = random.sample(games, min(self.games_per_generation, len(games)))
+            # Select games for this agent using MetaLearningCurriculum if available
+            # Per Unified Theory: 4-stage curriculum for generalization
+            if self.meta_learning_curriculum:
+                try:
+                    agent_games = self.meta_learning_curriculum.select_games_for_agent(
+                        agent_id=agent.agent_id,
+                        available_games=games,
+                        num_games=self.games_per_generation
+                    )
+                    if not agent_games:
+                        # Fallback if curriculum returns empty
+                        agent_games = random.sample(games, min(self.games_per_generation, len(games)))
+                except Exception as e:
+                    if self.verbose:
+                        print(f"    [CURRICULUM] Fallback to random: {e}")
+                    agent_games = random.sample(games, min(self.games_per_generation, len(games)))
+            else:
+                # No curriculum - random selection
+                agent_games = random.sample(games, min(self.games_per_generation, len(games)))
 
             print(f"\n[AGENT] {agent.agent_id[:12]}... playing {len(agent_games)} games")
 
@@ -1016,11 +1188,39 @@ class EvolutionRunner:
                 # Store in database
                 self._store_game_result(result)
 
+            # Update curriculum progress for this agent after all games
+            # Per Unified Theory: Track stage progression for generalization
+            if self.meta_learning_curriculum:
+                try:
+                    self.meta_learning_curriculum.update_stage_progress(agent.agent_id)
+                except Exception as e:
+                    if self.verbose:
+                        print(f"    [CURRICULUM] Progress update failed: {e}")
+
         games_played = len(results)
         avg_score = total_score / max(1, games_played)
         win_rate = total_wins / max(1, games_played)
 
         print(f"\n[SUMMARY] Gen {self.current_generation}: {games_played} games, {total_wins} wins ({win_rate*100:.1f}%), avg score: {avg_score:.2f}")
+
+        # COLLECTIVE REASONING: Try collective approach on stuck games
+        # Per Unified Theory: "Top performers collaborate on challenging games"
+        if self.collective_reasoning_engine and total_wins == 0 and self.current_generation > 5:
+            try:
+                # Find games with consistent failures
+                stuck_games = self._find_stuck_games(results)
+                if stuck_games and len(stuck_games) > 0:
+                    game_to_try = stuck_games[0]
+                    session_id = self.collective_reasoning_engine.start_collective_session(
+                        game_id=game_to_try,
+                        generation=self.current_generation,
+                        reasoning_mode='voting'
+                    )
+                    if session_id:
+                        print(f"  [COLLECTIVE] Started collective reasoning session for {game_to_try}")
+            except Exception as e:
+                if self.verbose:
+                    print(f"  [COLLECTIVE-ERR] Collective reasoning failed: {e}")
 
         return {
             'games_played': games_played,
@@ -1028,6 +1228,22 @@ class EvolutionRunner:
             'win_rate': win_rate,
             'avg_score': avg_score,
         }
+
+    def _find_stuck_games(self, results: List[GameResult]) -> List[str]:
+        """Find games where all agents failed to make progress."""
+        game_scores = {}
+        for result in results:
+            if result.game_id not in game_scores:
+                game_scores[result.game_id] = []
+            game_scores[result.game_id].append(result.score)
+
+        stuck_games = []
+        for game_id, scores in game_scores.items():
+            # Game is "stuck" if max score < 0.2 (didn't complete 2 levels)
+            if max(scores) < 0.2:
+                stuck_games.append(game_id)
+
+        return stuck_games
 
     def _store_game_result(self, result: GameResult):
         """Store game result in database."""
@@ -1106,29 +1322,189 @@ class EvolutionRunner:
                         if self.verbose:
                             print(f"    [VIRAL-ERR] Could not create package: {vpe}")
 
+                # GAMES-AS-TEACHERS: Extract lesson from win
+                # Per Unified Theory: "I won = I demonstrated understanding"
+                if self.games_as_teachers_engine:
+                    try:
+                        # Convert action sequence strings to ints for the engine
+                        action_ints = []
+                        for act in result.action_sequence:
+                            if isinstance(act, str) and act.startswith('ACTION'):
+                                action_ints.append(int(act.replace('ACTION', '')))
+                            elif isinstance(act, int):
+                                action_ints.append(act)
+
+                        lesson = self.games_as_teachers_engine.extract_lesson(
+                            game_type=game_type,
+                            level_number=result.levels_completed,
+                            winning_sequence=action_ints,
+                            frame_history=None,  # Could capture frames for deeper analysis
+                            working_theory=None  # Could pass current theory
+                        )
+                        if lesson:
+                            concept = lesson.get('concept_demonstrated', 'unknown')
+                            print(f"    [LESSON] Concept demonstrated: {concept}")
+                    except Exception as le:
+                        if self.verbose:
+                            print(f"    [LESSON-ERR] Could not extract lesson: {le}")
+
         except Exception as e:
             print(f"  [WARN] Failed to store result: {e}")
 
     def evolve(self):
         """
-        Evolve population: select best agents, create offspring.
+        Evolve population using full EvolutionaryEngine.
 
-        Simple tournament selection + mutation.
+        Features enabled (from Unified Theory):
+        - Youth bonus: Newer agents get breeding opportunities
+        - Prestige system: Network contribution affects breeding priority
+        - Genome mutation: Proper genetic variation with role-based mutation rates
+        - Crossover: Two-parent breeding with epigenetic inheritance
+        - Survival protection: High-prestige agents resist culling
+        - Proper culling: Bottom performers marked inactive (they "die")
+
+        Per Unified Theory:
+        - "Agents die, database persists"
+        - "Anti-Vampire Rule: agents sunset when usefulness wanes"
+        - "Youth Selection Bonus: newer generations get opportunities"
+        - "Prestige affects trust, not access"
         """
-        print(f"\n[EVOLVE] Evolving population...")
+        print(f"\n[EVOLVE] Evolving population via EvolutionaryEngine...")
 
-        # Sort by fitness (avg score * win_rate bonus)
+        # Build evolution strategy with all parameters
+        evolution_strategy = {
+            'generation': self.current_generation,
+            'population_size': self.population_size,
+            'selection_pressure': 0.5,
+            'crossover_rate': 0.6,
+            'mutation_rate': 0.2,
+            'diversity_mode': True,  # Enable diversity + meta-learning fitness
+            'focus': 'balanced',
+        }
+
+        try:
+            # Use full EvolutionaryEngine for sophisticated evolution
+            new_population = self.evolutionary_engine.evolve_population(evolution_strategy)
+
+            # Convert database dicts back to AgentState objects for runner
+            self.agents = []
+            for agent_dict in new_population:
+                agent_state = AgentState(
+                    agent_id=agent_dict['agent_id'],
+                    generation=agent_dict.get('generation', self.current_generation + 1),
+                    total_score=agent_dict.get('total_score', 0.0),
+                    games_played=agent_dict.get('games_played', 0),
+                    wins=agent_dict.get('wins', 0),
+                )
+                self.agents.append(agent_state)
+
+            # Log evolution results
+            print(f"  New population: {len(self.agents)} agents")
+            print(f"  Features: youth_bonus, prestige, mutation, crossover, epigenetics")
+
+            # Show top performers with their fitness
+            if self.agents:
+                top_agents = sorted(self.agents, key=lambda a: a.avg_score * (1 + a.win_rate), reverse=True)[:3]
+                print(f"  Top performers: {[f'{a.agent_id[:8]}(s={a.avg_score:.1f})' for a in top_agents]}")
+
+            # HORIZONTAL TRANSFER: Spread knowledge between agents
+            # Per Unified Theory: "Intelligence spreads through horizontal information transfer"
+            if self.horizontal_transfer_engine:
+                try:
+                    transfers = self.horizontal_transfer_engine.execute_generation_transfers(
+                        generation=self.current_generation,
+                        max_transfers_per_agent=2
+                    )
+                    if transfers > 0:
+                        print(f"  [TRANSFER] {transfers} horizontal knowledge transfers completed")
+
+                        # Get transfer statistics
+                        if self.verbose:
+                            stats = self.horizontal_transfer_engine.get_transfer_statistics(self.current_generation)
+                            if stats.get('layer_statistics'):
+                                for layer_stat in stats['layer_statistics']:
+                                    print(f"    Layer {layer_stat['transfer_layer']}: "
+                                          f"{layer_stat['successful_transfers']}/{layer_stat['total_attempts']} "
+                                          f"(compat: {layer_stat['avg_compatibility']:.2f})")
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  [TRANSFER-ERR] Horizontal transfer failed: {e}")
+
+            # NETWORK INTELLIGENCE: Capture ecosystem snapshot
+            # Per Unified Theory: "The database IS the AGI. Agents are temporary cells."
+            if self.network_intelligence_engine and self.current_generation % 5 == 0:
+                try:
+                    snapshot = self.network_intelligence_engine.capture_ecosystem_snapshot(self.current_generation)
+                    health_status = snapshot.get('health_status', 'unknown')
+                    health_score = snapshot.get('health_score', 0.0)
+                    print(f"  [NETWORK] Ecosystem health: {health_status} (score: {health_score:.3f})")
+
+                    # Show key metrics
+                    if self.verbose:
+                        print(f"    Knowledge: {snapshot.get('total_sequences', 0)} sequences, "
+                              f"{snapshot.get('total_patterns', 0)} patterns, "
+                              f"{snapshot.get('unique_games_solved', 0)} games solved")
+                        print(f"    Diversity index: {snapshot.get('knowledge_diversity_index', 0):.3f}")
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  [NETWORK-ERR] Ecosystem snapshot failed: {e}")
+
+            # AGENT LIFECYCLE: Clean up ancient inactive agents periodically
+            # Per Unified Theory: "Good players never deleted, just retired"
+            if self.lifecycle_manager and self.current_generation % 50 == 0:
+                try:
+                    cleanup_stats = self.lifecycle_manager.cleanup_ancient_inactive_agents(
+                        current_generation=self.current_generation,
+                        dry_run=False
+                    )
+                    total_deleted = cleanup_stats.get('total_deleted', 0)
+                    if total_deleted > 0:
+                        print(f"  [LIFECYCLE] Cleaned {total_deleted} ancient inactive agents")
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  [LIFECYCLE-ERR] Agent cleanup failed: {e}")
+
+            # CONCEPT DISCOVERY: Analyze cross-game patterns periodically
+            # Per Unified Theory: "Concepts emerge from cross-game pattern recognition"
+            if self.concept_discovery_engine and self.current_generation % 10 == 0:
+                try:
+                    # Check for newly emerging concepts from pattern tracking
+                    new_concepts = self.concept_discovery_engine.check_concept_emergence()
+                    if new_concepts:
+                        print(f"  [CONCEPTS] Discovered {len(new_concepts)} concept candidates")
+                        if self.verbose:
+                            for concept in new_concepts[:3]:  # Show top 3
+                                print(f"    - {concept.get('pattern', 'unnamed')[:20]}: {concept.get('confidence', 0):.2f}")
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  [CONCEPT-ERR] Concept discovery failed: {e}")
+
+        except Exception as e:
+            print(f"  [WARN] EvolutionaryEngine failed, using fallback: {e}")
+            # Fallback to simple evolution if engine fails
+            self._simple_evolve_fallback()
+
+    def _simple_evolve_fallback(self):
+        """Fallback simple evolution if EvolutionaryEngine fails."""
         def fitness(a: AgentState) -> float:
             return a.avg_score * (1 + a.win_rate)
 
         self.agents.sort(key=fitness, reverse=True)
-
-        # Keep top 50% (minimum 1)
         keep_count = max(1, len(self.agents) // 2)
         survivors = self.agents[:keep_count]
-        print(f"  Top performers: {[f'{a.agent_id[:8]}(s={a.avg_score:.1f})' for a in survivors[:3]]}")
+        culled = self.agents[keep_count:]
 
-        # Create offspring from survivors
+        # Deactivate culled agents
+        if culled:
+            culled_ids = [a.agent_id for a in culled]
+            placeholders = ','.join(['?' for _ in culled_ids])
+            self.db.execute_query(f"""
+                UPDATE agents SET is_active = FALSE
+                WHERE agent_id IN ({placeholders})
+            """, culled_ids)
+            print(f"  [FALLBACK] Culled {len(culled)} underperformers")
+
+        # Simple offspring creation
         offspring = []
         while len(survivors) + len(offspring) < self.population_size:
             parent = random.choice(survivors)
@@ -1137,11 +1513,7 @@ class EvolutionRunner:
                 generation=self.current_generation + 1,
             )
             offspring.append(child)
-
-            # Default genome (could inherit/mutate from parent)
             genome = '{"exploration_rate": 0.3, "learning_rate": 0.1}'
-
-            # Store in database
             self.db.execute_query("""
                 INSERT INTO agents (
                     agent_id, generation, agent_type, genome, specialization,
@@ -1150,7 +1522,7 @@ class EvolutionRunner:
             """, (child.agent_id, child.generation, genome, f'["{parent.agent_id}"]'))
 
         self.agents = survivors + offspring
-        print(f"  New population: {len(survivors)} survivors + {len(offspring)} offspring = {len(self.agents)}")
+        print(f"  [FALLBACK] New population: {len(self.agents)}")
 
     def run(self):
         """Main evolution loop."""
@@ -1197,8 +1569,8 @@ def main():
     parser = argparse.ArgumentParser(description='Evolution Runner')
     parser.add_argument('--mode', choices=['online', 'offline', 'normal'], default='normal',
                        help='Operation mode')
-    parser.add_argument('--population', type=int, default=10,
-                       help='Population size')
+    parser.add_argument('--population', type=int, default=100,
+                       help='Population size (default: 100, recommended: 50-500)')
     parser.add_argument('--games-per-gen', type=int, default=5,
                        help='Games per generation per agent')
     parser.add_argument('--max-generations', type=int, default=10,
