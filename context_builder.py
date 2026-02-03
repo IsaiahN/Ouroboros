@@ -148,6 +148,21 @@ class DecisionContext:
     recent_events: List[Dict[str, Any]] = field(default_factory=lambda: [])
     frame_delta_count: int = 0
 
+    # Two-stage analysis (extract objects THEN detect transformations)
+    # Populated by PaletteDetectionRung
+    detected_palette: Optional[Dict[str, Any]] = None  # PaletteInfo as dict
+    extracted_objects: Optional[Dict[str, Any]] = None  # Categorized objects from frame
+    detected_transformations: List[Dict[str, Any]] = field(default_factory=lambda: [])
+
+    # Sparse grid representation (efficient pattern matching)
+    # Populated by SparseGridRung
+    sparse_grid: Optional[Any] = None  # SparseGrid object
+    sparse_hash: str = ""  # Structural hash for comparison
+    sparse_cell_count: int = 0  # Number of non-background cells
+    sparse_colors: Set[int] = field(default_factory=set)  # Colors used
+    sparse_components: List[Dict[str, Any]] = field(default_factory=list)  # Connected components
+    sparse_diff: Optional[Dict[str, Any]] = None  # Diff from previous frame
+
     # Timestamp
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -227,6 +242,19 @@ class DecisionContext:
             # Event understanding
             'recent_events': self.recent_events,
             'frame_delta_count': self.frame_delta_count,
+
+            # Two-stage analysis
+            'detected_palette': self.detected_palette,
+            'extracted_objects': self.extracted_objects,
+            'detected_transformations': self.detected_transformations,
+
+            # Sparse grid representation
+            'sparse_grid': self.sparse_grid,
+            'sparse_hash': self.sparse_hash,
+            'sparse_cell_count': self.sparse_cell_count,
+            'sparse_colors': self.sparse_colors,
+            'sparse_components': self.sparse_components,
+            'sparse_diff': self.sparse_diff,
         }
 
 

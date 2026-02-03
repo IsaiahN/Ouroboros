@@ -6183,3 +6183,59 @@ CREATE TABLE IF NOT EXISTS goal_configurations (
 
 CREATE INDEX IF NOT EXISTS idx_goal_game_level ON goal_configurations(game_type, level_number);
 CREATE INDEX IF NOT EXISTS idx_goal_success ON goal_configurations(success_count DESC);
+
+-- =============================================================================
+-- DELIBERATION AUDIT LOG - Alternative Interpretations
+-- =============================================================================
+
+-- Record 5 alternative interpretations per decision for post-hoc analysis
+CREATE TABLE IF NOT EXISTS deliberation_audit_log (
+    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Context identification
+    game_id TEXT NOT NULL,
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    action_number INTEGER NOT NULL,
+    agent_id TEXT,
+
+    -- Frame context
+    frame_hash TEXT,
+    frame_sparse_hash TEXT,           -- Position-invariant structural hash
+
+    -- Chosen interpretation
+    chosen_action TEXT NOT NULL,
+    chosen_confidence REAL,
+    chosen_reason TEXT,
+    chosen_rung TEXT,                 -- Which rung provided the action
+
+    -- Alternative interpretations (JSON array of up to 5)
+    -- Each: {action, confidence, reason, rung, why_rejected}
+    alternatives TEXT,                -- JSON array
+
+    -- Palette/Object context (from two-stage analysis)
+    detected_palette TEXT,            -- JSON: PaletteInfo
+    object_count INTEGER,
+    transformation_count INTEGER,
+
+    -- Sparse grid analysis
+    sparse_cell_count INTEGER,
+    sparse_colors TEXT,               -- JSON array of colors
+
+    -- Outcome (updated after action executed)
+    outcome_type TEXT,                -- 'positive', 'negative', 'neutral'
+    score_change REAL,
+    was_correct INTEGER,              -- 1 if good outcome, 0 if bad
+
+    -- Retrospective analysis (which alternative would have been better)
+    better_alternative_index INTEGER, -- 0-4 index into alternatives if one was better
+    retrospective_notes TEXT,
+
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_deliberation_game ON deliberation_audit_log(game_type);
+CREATE INDEX IF NOT EXISTS idx_deliberation_outcome ON deliberation_audit_log(outcome_type);
+CREATE INDEX IF NOT EXISTS idx_deliberation_wrong ON deliberation_audit_log(was_correct) WHERE was_correct = 0;
+CREATE INDEX IF NOT EXISTS idx_deliberation_frame ON deliberation_audit_log(frame_hash);
+CREATE INDEX IF NOT EXISTS idx_deliberation_timestamp ON deliberation_audit_log(timestamp DESC);

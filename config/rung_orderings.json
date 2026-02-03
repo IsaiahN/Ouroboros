@@ -1,8 +1,11 @@
 {
   "_comment": "Custom decision rung orderings. Lower priority number = evaluated first.",
+  "_updated": "2026-02-03: Added palette_detection and sparse_grid rungs (two-stage + sparse representation)",
 
   "experimental_curiosity_first": [
     ["infinite_loop_breaker", 1],
+    ["palette_detection", 2],
+    ["sparse_grid", 2],
     ["frame_interpretation", 3],
     ["exploration_phase", 5],
     ["survey", 10],
@@ -22,6 +25,8 @@
 
   "minimal_fear": [
     ["infinite_loop_breaker", 1],
+    ["palette_detection", 3],
+    ["sparse_grid", 3],
     ["survey", 5],
     ["discovery_exploitation", 10],
     ["embedding_suggestion", 15],
@@ -36,9 +41,11 @@
   "maximum_caution": [
     ["infinite_loop_breaker", 1],
     ["death_avoidance", 2],
-    ["prior_lessons", 3],
-    ["frame_interpretation", 4],
-    ["questioning_engine", 5],
+    ["palette_detection", 3],
+    ["sparse_grid", 3],
+    ["prior_lessons", 4],
+    ["frame_interpretation", 5],
+    ["questioning_engine", 6],
     ["survey", 10],
     ["network_wisdom", 15],
     ["embedding_suggestion", 20],
@@ -51,6 +58,8 @@
 
   "network_learner": [
     ["infinite_loop_breaker", 1],
+    ["palette_detection", 3],
+    ["sparse_grid", 3],
     ["network_wisdom", 5],
     ["embedding_suggestion", 10],
     ["death_avoidance", 15],
@@ -64,6 +73,8 @@
 
   "pure_exploration": [
     ["infinite_loop_breaker", 1],
+    ["palette_detection", 3],
+    ["sparse_grid", 3],
     ["survey", 5],
     ["exploration_phase", 10],
     ["questioning_engine", 15],
@@ -76,6 +87,8 @@
   "world_model_heavy": [
     ["infinite_loop_breaker", 1],
     ["coordinate_oscillation", 2],
+    ["palette_detection", 3],
+    ["sparse_grid", 3],
     ["frame_interpretation", 4],
     ["survey", 8],
     ["event_understanding", 15],

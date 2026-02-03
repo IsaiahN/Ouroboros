@@ -2401,6 +2401,368 @@ class StateMatchingRung(DecisionRung):
 # EVENT UNDERSTANDING RUNGS - World Model Building
 # =============================================================================
 
+class PaletteDetectionRung(DecisionRung):
+    """
+    TWO-STAGE DECOMPOSITION: Stage 1 - Detect palette/legend blocks.
+
+    Based on ARC-AGI-2 insights (76.11% success):
+    "~70% of models cluster around wrong solutions where they use the 'palette'
+    as top-to-bottom instead of inside-out."
+
+    This rung runs EARLY to:
+    1. Extract all objects from the frame (hollow frames, fills, irregular)
+    2. Detect multi-colored palette/legend blocks
+    3. Determine correct mapping direction (inside-out vs top-to-bottom)
+    4. Populate context for downstream rungs
+
+    Sets context fields:
+    - detected_palette: PaletteInfo dict or None
+    - extracted_objects: Dict with categorized objects
+    - detected_transformations: List of detected transformation rules
+    """
+    name = "palette_detection"
+    category = "orientation"
+    default_priority = 3  # Very early - before frame_interpretation
+    confidence_threshold = 0.0  # Context setter, not action suggester
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._palette_detector: Optional[Any] = None
+        self._cached_analysis: Dict[str, Any] = {}  # Cache by frame hash
+
+    def _get_palette_detector(self) -> Optional[Any]:
+        """Lazy-load palette detector."""
+        if self._palette_detector is None:
+            try:
+                from engines.perception.palette_detector import PaletteDetector
+                self._palette_detector = PaletteDetector()
+            except ImportError as e:
+                logger.debug(f"[PALETTE-RUNG] PaletteDetector not available: {e}")
+        return self._palette_detector
+
+    def _frame_to_hash(self, frame: Any) -> str:
+        """Generate hash for frame caching."""
+        if frame is None:
+            return "none"
+        try:
+            import hashlib
+            if hasattr(frame, 'tobytes'):
+                return hashlib.md5(frame.tobytes()).hexdigest()[:16]
+            return hashlib.md5(str(frame).encode()).hexdigest()[:16]
+        except Exception:
+            return "unknown"
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        # Get frame from game_state
+        frame = None
+        if hasattr(game_state, 'frame'):
+            frame = game_state.frame
+        elif hasattr(game_state, 'observation'):
+            obs = game_state.observation
+            if isinstance(obs, dict) and 'frame' in obs:
+                frame = obs['frame']
+
+        if frame is None:
+            return RungResult(
+                confidence=0.0,
+                reason="No frame available for palette detection"
+            )
+
+        # Check cache
+        frame_hash = self._frame_to_hash(frame)
+        if frame_hash in self._cached_analysis:
+            cached = self._cached_analysis[frame_hash]
+            context['detected_palette'] = cached.get('detected_palette')
+            context['extracted_objects'] = cached.get('extracted_objects')
+            context['detected_transformations'] = cached.get('detected_transformations')
+            return RungResult(
+                confidence=0.1,
+                reason=f"Cached palette analysis: {'found' if cached.get('detected_palette') else 'none'}",
+                metadata={'cached': True, **cached}
+            )
+
+        # Get detector
+        detector = self._get_palette_detector()
+        if detector is None:
+            return RungResult(
+                confidence=0.0,
+                reason="Palette detector not available"
+            )
+
+        try:
+            import numpy as np
+            frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
+        except Exception as e:
+            return RungResult(
+                confidence=0.0,
+                reason=f"Could not convert frame to array: {e}"
+            )
+
+        # Stage 1: Extract objects
+        try:
+            extracted = detector.extract_objects(frame_arr)
+            extracted_dict = {
+                'palettes': [o.to_dict() for o in extracted.get('palettes', [])],
+                'hollow_frames': [o.to_dict() for o in extracted.get('hollow_frames', [])],
+                'filled_shapes': [o.to_dict() for o in extracted.get('filled_shapes', [])],
+                'irregular_shapes': [o.to_dict() for o in extracted.get('irregular_shapes', [])],
+                'object_count': len(extracted.get('all_objects', [])),
+            }
+        except Exception as e:
+            extracted_dict = {'error': str(e), 'object_count': 0}
+            extracted = {}
+
+        # Stage 1.5: Detect palette
+        palette_dict = None
+        try:
+            palette = detector.detect_palette(frame_arr)
+            if palette:
+                palette_dict = palette.to_dict()
+        except Exception as e:
+            logger.debug(f"[PALETTE-RUNG] Palette detection failed: {e}")
+
+        # Stage 2: Detect transformations
+        transformations = []
+        try:
+            if palette and extracted:
+                trans = detector.detect_transformations(extracted, palette, frame_arr)
+                transformations = [t.to_dict() for t in trans]
+        except Exception as e:
+            logger.debug(f"[PALETTE-RUNG] Transformation detection failed: {e}")
+
+        # Set context
+        context['detected_palette'] = palette_dict
+        context['extracted_objects'] = extracted_dict
+        context['detected_transformations'] = transformations
+
+        # Cache result
+        analysis = {
+            'detected_palette': palette_dict,
+            'extracted_objects': extracted_dict,
+            'detected_transformations': transformations,
+        }
+        self._cached_analysis[frame_hash] = analysis
+
+        # Limit cache size
+        if len(self._cached_analysis) > 100:
+            oldest = list(self._cached_analysis.keys())[:50]
+            for k in oldest:
+                del self._cached_analysis[k]
+
+        # Build reason
+        parts = []
+        if palette_dict:
+            parts.append(f"palette={palette_dict.get('palette_type', 'unknown')}")
+            parts.append(f"direction={palette_dict.get('mapping_direction', 'unknown')}")
+            parts.append(f"conf={palette_dict.get('confidence', 0):.2f}")
+        else:
+            parts.append("no_palette")
+
+        parts.append(f"objects={extracted_dict.get('object_count', 0)}")
+        if transformations:
+            parts.append(f"transforms={len(transformations)}")
+
+        return RungResult(
+            confidence=0.1 if palette_dict else 0.0,  # Low - context setter
+            reason=f"Two-stage analysis: {', '.join(parts)}",
+            metadata={
+                'palette_found': palette_dict is not None,
+                'object_count': extracted_dict.get('object_count', 0),
+                'transformation_count': len(transformations),
+                'analysis': analysis,
+            }
+        )
+
+    def clear_cache(self):
+        """Clear analysis cache (call on game/level change)."""
+        self._cached_analysis.clear()
+
+
+class SparseGridRung(DecisionRung):
+    """
+    SPARSE GRID REPRESENTATION: Efficient frame analysis for pattern matching.
+
+    Converts frames to sparse representation (only non-background cells) for:
+    1. Efficient structural comparison between frames
+    2. Position-invariant pattern hashing
+    3. Color-invariant pattern matching
+    4. Connected component extraction
+
+    Sets context fields:
+    - sparse_grid: SparseGrid object for current frame
+    - sparse_hash: Structural hash of current frame
+    - sparse_cell_count: Number of non-background cells
+    - sparse_colors: Set of colors used (excluding background)
+    - sparse_components: List of connected component bounding boxes
+    """
+    name = "sparse_grid"
+    category = "orientation"
+    default_priority = 3  # Very early - alongside palette_detection
+    confidence_threshold = 0.0  # Context setter, not action suggester
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._cached_sparse: Dict[str, Any] = {}  # Cache by frame hash
+        self._previous_sparse: Optional[Any] = None  # For diff calculation
+
+    def _frame_to_hash(self, frame: Any) -> str:
+        """Generate hash for frame caching."""
+        if frame is None:
+            return "none"
+        try:
+            import hashlib
+            if hasattr(frame, 'tobytes'):
+                return hashlib.md5(frame.tobytes()).hexdigest()[:16]
+            return hashlib.md5(str(frame).encode()).hexdigest()[:16]
+        except Exception:
+            return "unknown"
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        # Get frame from game_state
+        frame = None
+        if hasattr(game_state, 'frame'):
+            frame = game_state.frame
+        elif hasattr(game_state, 'observation'):
+            obs = game_state.observation
+            if isinstance(obs, dict) and 'frame' in obs:
+                frame = obs['frame']
+
+        if frame is None:
+            return RungResult(
+                confidence=0.0,
+                reason="No frame available for sparse grid"
+            )
+
+        # Check cache
+        frame_hash = self._frame_to_hash(frame)
+        if frame_hash in self._cached_sparse:
+            cached = self._cached_sparse[frame_hash]
+            context['sparse_grid'] = cached.get('sparse_grid')
+            context['sparse_hash'] = cached.get('sparse_hash')
+            context['sparse_cell_count'] = cached.get('sparse_cell_count')
+            context['sparse_colors'] = cached.get('sparse_colors')
+            context['sparse_components'] = cached.get('sparse_components')
+            context['sparse_diff'] = cached.get('sparse_diff')
+            return RungResult(
+                confidence=0.1,
+                reason=f"Cached sparse: {cached.get('sparse_cell_count', 0)} cells",
+                metadata={'cached': True, **cached}
+            )
+
+        # Import sparse grid module
+        try:
+            from engines.perception.sparse_grid import SparseGrid, sparse_from_frame
+        except ImportError as e:
+            return RungResult(
+                confidence=0.0,
+                reason=f"Sparse grid module not available: {e}"
+            )
+
+        try:
+            import numpy as np
+            frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
+        except Exception as e:
+            return RungResult(
+                confidence=0.0,
+                reason=f"Could not convert frame to array: {e}"
+            )
+
+        # Create sparse grid
+        try:
+            sparse = sparse_from_frame(frame_arr)
+            sparse_hash = sparse.structural_hash()
+            cell_count = len(sparse)
+            colors = sparse.colors  # Property, not method
+
+            # Extract connected components
+            components = []
+            try:
+                comps = sparse.extract_connected_components()
+                for comp in comps:
+                    bbox = comp.bounding_box  # Property, not method
+                    if bbox:
+                        components.append({
+                            'min_y': bbox[0], 'min_x': bbox[1],
+                            'max_y': bbox[2], 'max_x': bbox[3],
+                            'cell_count': len(comp),
+                            'colors': list(comp.colors),  # Property, not method
+                        })
+            except Exception as e:
+                logger.debug(f"[SPARSE-RUNG] Component extraction failed: {e}")
+
+            # Calculate diff from previous frame
+            diff_info = None
+            if self._previous_sparse is not None:
+                try:
+                    diff = self._previous_sparse.diff(sparse)  # Use method, not function
+                    diff_info = {
+                        'added_count': len(diff.added),
+                        'removed_count': len(diff.removed),
+                        'changed_count': len(diff.changed),
+                        'total_changes': diff.total_changes,  # Correct property name
+                    }
+                except Exception as e:
+                    logger.debug(f"[SPARSE-RUNG] Diff calculation failed: {e}")
+
+            # Store for next diff
+            self._previous_sparse = sparse
+
+        except Exception as e:
+            return RungResult(
+                confidence=0.0,
+                reason=f"Sparse grid creation failed: {e}"
+            )
+
+        # Set context
+        context['sparse_grid'] = sparse
+        context['sparse_hash'] = sparse_hash
+        context['sparse_cell_count'] = cell_count
+        context['sparse_colors'] = colors
+        context['sparse_components'] = components
+        context['sparse_diff'] = diff_info
+
+        # Cache result
+        sparse_data = {
+            'sparse_grid': sparse,
+            'sparse_hash': sparse_hash,
+            'sparse_cell_count': cell_count,
+            'sparse_colors': colors,
+            'sparse_components': components,
+            'sparse_diff': diff_info,
+        }
+        self._cached_sparse[frame_hash] = sparse_data
+
+        # Limit cache size
+        if len(self._cached_sparse) > 100:
+            oldest = list(self._cached_sparse.keys())[:50]
+            for k in oldest:
+                del self._cached_sparse[k]
+
+        # Build reason
+        parts = [f"cells={cell_count}", f"colors={len(colors)}"]
+        if components:
+            parts.append(f"components={len(components)}")
+        if diff_info:
+            parts.append(f"delta={diff_info['total_changes']}")
+
+        return RungResult(
+            confidence=0.1,  # Low - context setter
+            reason=f"Sparse grid: {', '.join(parts)}",
+            metadata={
+                'sparse_hash': sparse_hash,
+                'cell_count': cell_count,
+                'color_count': len(colors),
+                'component_count': len(components),
+                'diff_info': diff_info,
+            }
+        )
+
+    def clear_cache(self):
+        """Clear sparse cache (call on game/level change)."""
+        self._cached_sparse.clear()
+        self._previous_sparse = None
+
+
 class FrameInterpretationRung(DecisionRung):
     """
     HIGH PRIORITY: Interpret dramatic frame changes and set context.
@@ -4100,6 +4462,7 @@ ORDERING_PRESETS = {
     'efficiency': [
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 3),
+        ('palette_detection', 3),  # Two-stage: extract objects + detect palette FIRST
         ('frontier_checkpoint', 4),  # Skip explored territory on frontier
         ('three_try_sequence', 5),
         ('discovery_exploitation', 10),
@@ -4119,8 +4482,9 @@ ORDERING_PRESETS = {
     'llm_optimal': [
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 2),
-        ('self_trust_boost', 3),  # Manage wA based on frontier/replay context
-        ('imagination_budget', 4),
+        ('palette_detection', 3),  # Two-stage: extract objects + detect palette FIRST
+        ('self_trust_boost', 4),  # Manage wA based on frontier/replay context
+        ('imagination_budget', 5),
         ('breakthrough_budget', 5),
         ('regulatory_signal', 6),
         ('survey', 7),
@@ -4167,9 +4531,10 @@ ORDERING_PRESETS = {
     'human_brain': [
         ('infinite_loop_breaker', 1),   # Panic response
         ('coordinate_oscillation', 2),  # Repetitive behavior detection
-        ('death_avoidance', 3),         # Amygdala - fast fear (12ms)
-        ('terminal_pattern', 4),        # Pattern recognition of danger
-        ('survey', 5),                  # Attention - what's salient?
+        ('palette_detection', 3),       # Object extraction + palette detection
+        ('death_avoidance', 4),         # Amygdala - fast fear (12ms)
+        ('terminal_pattern', 5),        # Pattern recognition of danger
+        ('survey', 6),                  # Attention - what's salient?
         ('embedding_suggestion', 8),    # Pattern recognition - I've seen this
         ('network_wisdom', 10),         # Social learning - what did others do?
         ('pariah_avoidance', 12),       # Social learning - what to avoid
@@ -4185,21 +4550,23 @@ ORDERING_PRESETS = {
         ('smart_action_selection', 99),
     ],
 
-    # Full 48-rung comprehensive ordering (includes wired metacognition rungs)
+    # Full 49-rung comprehensive ordering (includes wired metacognition rungs + palette detection)
     'comprehensive': [
         # EMERGENCY (Priority 1-5)
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 2),
-        ('self_trust_boost', 3),  # Manage wA based on context
-        ('frame_interpretation', 4),  # Context setting for dramatic frame changes
+        ('palette_detection', 3),  # Two-stage: extract objects + detect palette FIRST
+        ('sparse_grid', 3),        # Sparse grid representation for efficient pattern matching
+        ('self_trust_boost', 4),  # Manage wA based on context
+        ('frame_interpretation', 5),  # Context setting for dramatic frame changes
 
         # ORIENTATION - Understanding the world (Priority 5-20)
-        ('imagination_budget', 5),
-        ('breakthrough_budget', 6),
-        ('regulatory_signal', 7),
-        ('survey', 8),
-        ('network_exploration_stats', 9),
-        ('questioning_engine', 10),
+        ('imagination_budget', 6),
+        ('breakthrough_budget', 7),
+        ('regulatory_signal', 8),
+        ('survey', 9),
+        ('network_exploration_stats', 10),
+        ('questioning_engine', 11),
         ('exploration_phase', 12),
         ('frustration_detection', 13),
 
@@ -4303,13 +4670,14 @@ ORDERING_PRESETS = {
         ('smart_action_selection', 99),
     ],
 
-    # Exploration-heavy for frontier games (includes trust boost)
+    # Exploration-heavy for frontier games (includes trust boost + palette detection)
     'frontier_exploration': [
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 2),
-        ('self_trust_boost', 3),  # Boost wA on frontier entry
-        ('frontier_checkpoint', 4),  # Replay best known progress on frontier
-        ('survey', 5),
+        ('palette_detection', 3),  # Two-stage: objects + palette FIRST
+        ('self_trust_boost', 4),  # Boost wA on frontier entry
+        ('frontier_checkpoint', 5),  # Replay best known progress on frontier
+        ('survey', 6),
         ('network_exploration_stats', 8),
         ('exploration_phase', 10),
         ('assumption_formation', 11),  # Form assumptions during exploration
@@ -4370,6 +4738,8 @@ class DecisionRungSystem:
         'i_thread': IThreadRung,
         'near_miss_analyzer': NearMissAnalyzerRung,
         'state_matching': StateMatchingRung,         # Symbolic reasoning - compare properties to goals
+        'palette_detection': PaletteDetectionRung,   # Two-stage: extract objects + detect palette FIRST
+        'sparse_grid': SparseGridRung,               # Sparse grid representation for pattern matching
         'frame_interpretation': FrameInterpretationRung,  # Context setting for dramatic frame changes
         'event_understanding': EventUnderstandingRung,    # Causal world model for physics games
         'spatial_relationship': SpatialRelationshipRung,  # Click effect patterns for puzzles
@@ -4466,6 +4836,14 @@ class DecisionRungSystem:
         self._current_generation: int = 0
         self._current_action_in_generation: int = 0
 
+        # =====================================================================
+        # DELIBERATION AUDIT - Record alternative interpretations for analysis
+        # Record top 5 alternatives per decision for post-hoc analysis
+        # of where the system goes wrong
+        # =====================================================================
+        self._deliberation_auditor = None  # Lazy-loaded
+        self._current_deliberation: Optional[Any] = None  # Active deliberation record
+
         # Load default ordering
         self.load_ordering('comprehensive')
 
@@ -4504,6 +4882,28 @@ class DecisionRungSystem:
                 logger.debug("[RUNG-SYSTEM] TemporalIntegrator not available")
                 self._temporal_integrator = None
         return self._temporal_integrator
+
+    @property
+    def deliberation_auditor(self):
+        """Lazy-load deliberation auditor for recording alternative interpretations."""
+        if self._deliberation_auditor is None:
+            try:
+                from engines.reasoning.deliberation_audit import (
+                    get_deliberation_auditor,
+                )
+
+                # Try to get DB from engine registry
+                db = None
+                if self._engine_registry is not None:
+                    try:
+                        db = self._engine_registry._get_db_interface()
+                    except Exception:
+                        pass
+                self._deliberation_auditor = get_deliberation_auditor(db)
+            except ImportError:
+                logger.debug("[RUNG-SYSTEM] DeliberationAuditor not available")
+                self._deliberation_auditor = None
+        return self._deliberation_auditor
 
     def set_temporal_context(
         self,
@@ -4550,6 +4950,32 @@ class DecisionRungSystem:
                 action_in_generation=self._current_action_in_generation,
                 outcome_value=outcome_value
             )
+
+        # =====================================================================
+        # DELIBERATION AUDIT - Record outcome for current deliberation
+        # =====================================================================
+        if self.deliberation_auditor is not None and self._current_deliberation is not None:
+            try:
+                # Map outcome_value to outcome type string
+                if outcome_value > 0.0:
+                    outcome_type_str = "positive"
+                elif outcome_value < 0.0:
+                    outcome_type_str = "negative"
+                else:
+                    outcome_type_str = "neutral"
+
+                # Record outcome
+                self.deliberation_auditor.record_outcome(
+                    outcome_type=outcome_type_str,
+                    score_change=outcome_value,
+                )
+
+                # Finalize and save to database
+                self.deliberation_auditor.finalize()
+                self._current_deliberation = None
+
+            except Exception as e:
+                logger.debug(f"[RUNG-SYSTEM] Deliberation outcome recording failed: {e}")
 
     def _get_category_modulation(self, agent_id: str, game_type: str) -> Dict[str, float]:
         """
@@ -4748,6 +5174,22 @@ class DecisionRungSystem:
         game_type = context.get('game_type', 'unknown')
         modulation = self._get_category_modulation(agent_id, game_type)
 
+        # =====================================================================
+        # DELIBERATION AUDIT - Start recording alternatives
+        # =====================================================================
+        if self.deliberation_auditor is not None:
+            game_id = context.get('game_id', context.get('scorecard_id', 'unknown'))
+            level_number = context.get('level_number', context.get('level', 0))
+            action_number = context.get('action_count', 0)
+            self.deliberation_auditor.start_deliberation(
+                game_id=game_id,
+                game_type=game_type[:4] if len(game_type) >= 4 else game_type,
+                level_number=level_number,
+                action_number=action_number,
+                agent_id=agent_id,
+                context=context,
+            )
+
         # Inject exploration appetite into context for rungs that want it
         if self.temporal_integrator is not None:
             context['exploration_appetite'] = self.temporal_integrator.get_exploration_appetite(
@@ -4759,6 +5201,9 @@ class DecisionRungSystem:
 
         # Track which rung contributed most to final decision
         rung_contributions: Dict[str, Tuple[DecisionRung, float, str]] = {}  # action -> (rung, weight, name)
+
+        # Track all alternatives for deliberation audit (action -> (confidence, reason, rung))
+        all_alternatives: Dict[str, Tuple[float, str, str]] = {}
 
         for rung in self.rungs:
             if not rung.enabled:
@@ -4786,6 +5231,10 @@ class DecisionRungSystem:
                 if result.action not in rung_contributions or weight > rung_contributions[result.action][1]:
                     rung_contributions[result.action] = (rung, weight, rung.name)
 
+                # Track for deliberation audit (best confidence per action)
+                if result.action not in all_alternatives or result.confidence > all_alternatives[result.action][0]:
+                    all_alternatives[result.action] = (result.confidence, result.reason, rung.name)
+
             # Add explicit weights (only for available actions)
             if result.weights:
                 for action, w in result.weights.items():
@@ -4794,6 +5243,50 @@ class DecisionRungSystem:
 
         # Pick highest voted action
         best_action = max(action_votes, key=lambda k: action_votes[k])
+
+        # =====================================================================
+        # DELIBERATION AUDIT - Record alternatives and choice
+        # =====================================================================
+        if self.deliberation_auditor is not None:
+            # Record all alternatives (sorted by vote weight)
+            sorted_actions = sorted(action_votes.items(), key=lambda x: x[1], reverse=True)
+            for action, vote_weight in sorted_actions[:5]:  # Top 5 alternatives
+                if action in all_alternatives:
+                    conf, reason, rung_name = all_alternatives[action]
+                    why_rejected = None if action == best_action else f"lower_vote:{vote_weight:.2f}"
+                    self.deliberation_auditor.add_alternative(
+                        action=action,
+                        confidence=conf,
+                        reason=reason,
+                        rung=rung_name,
+                        why_rejected=why_rejected,
+                    )
+
+            # Record the final choice
+            if best_action in all_alternatives:
+                conf, reason, rung_name = all_alternatives[best_action]
+            else:
+                conf, reason, rung_name = action_votes.get(best_action, 0.0), "weighted_vote", "aggregate"
+            self.deliberation_auditor.record_choice(
+                chosen_action=best_action,
+                confidence=conf,
+                reason=reason,
+                rung=rung_name,
+            )
+
+            # Add sparse grid context if available
+            sparse_cell_count = context.get('sparse_cell_count', 0)
+            sparse_colors = context.get('sparse_colors', set())
+            sparse_hash = context.get('sparse_hash', '')
+            if sparse_cell_count > 0:
+                self.deliberation_auditor.set_sparse_context(
+                    cell_count=sparse_cell_count,
+                    colors=list(sparse_colors) if isinstance(sparse_colors, set) else sparse_colors,
+                    sparse_hash=sparse_hash,
+                )
+
+            # Store current deliberation for outcome recording
+            self._current_deliberation = self.deliberation_auditor._current_record
 
         # Track the strongest contributor to winning action
         if best_action in rung_contributions:

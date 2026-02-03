@@ -1,10 +1,26 @@
 # Decision and Cognitive Architecture
 
-**Version**: 1.4
+**Version**: 1.6
 **Date**: 2026-02-03
 **Purpose**: Complete documentation of how the Decision Rung System, Cognitive Stage System, CognitiveCore facade, and Evolution-level engines work together from game start to post-game learning.
 
-**Recent Changes (v1.4)**:
+**Recent Changes (v1.6)**:
+- **Sparse Grid Representation**: Added `sparse_grid` rung for efficient frame analysis (Phase 3)
+- **Deliberation Audit Trail**: Added `DeliberationAuditor` to record top 5 alternatives per decision (Phase 4)
+- New modules: `engines/perception/sparse_grid.py`, `engines/reasoning/deliberation_audit.py`
+- New table: `deliberation_audit_log` for post-hoc analysis of wrong predictions
+- Rung count now 54 (added sparse_grid)
+- DecisionContext now includes: `sparse_grid`, `sparse_hash`, `sparse_cell_count`, `sparse_colors`, `sparse_components`, `sparse_diff`
+- `_decide_weighted()` now records deliberation alternatives and outcomes
+
+**Previous Changes (v1.5)**:
+- **Two-Stage Analysis**: Added `palette_detection` rung implementing two-stage decomposition
+- New module: `engines/perception/palette_detector.py` for object extraction + palette detection
+- Rung count was 52 (added palette_detection)
+- DecisionContext added: `detected_palette`, `extracted_objects`, `detected_transformations`
+- Updated all ORDERING_PRESETS to include palette_detection at priority 3
+
+**Previous Changes (v1.4)**:
 - **Evolution Runner Integration**: Documented 10 evolution-level engines now integrated into evolution_runner.py
 - Added new section: Evolution-Level Engine Orchestration
 - Updated System Overview diagram to show evolution layer
@@ -115,7 +131,7 @@ The BitterTruth-AI system uses a modular, layered architecture to make action de
 - `KnowledgeProvenance` - Tracks HOW knowledge became knowable (epistemological provenance)
 - `DecisionRungSystem` - Orchestrates rung execution with strategy selection
 
-**Current Rung Count**: 52 rungs across 6 categories
+**Current Rung Count**: 54 rungs across 6 categories
 
 ### 2. Cognitive Stage System (`engines/cognition/cognitive_stages.py`)
 
@@ -758,6 +774,8 @@ class CognitiveCore:
 |------|----------|---------|
 | `infinite_loop_breaker` | 1 | Break stuck loops after 15+ repeated actions |
 | `coordinate_oscillation` | 3 | Detect bouncing between coordinates |
+| `palette_detection` | 3 | Two-stage analysis: extract objects THEN detect palette/transformations |
+| `sparse_grid` | 3 | Sparse grid representation for efficient frame analysis |
 
 ### Category: ORIENTATION (Priority 3-47)
 
@@ -880,6 +898,7 @@ All knowledge flows through SQLite:
 | `collective_proposals` | Proposals from collective reasoning |
 | `knowledge_redundancy` | Knowledge backup tracking |
 | `game_lessons` | Lessons extracted by GamesAsTeachersEngine |
+| `deliberation_audit_log` | **NEW** Records top 5 alternatives per decision for post-hoc analysis |
 | `detected_events` | **NEW** Events detected between frames (MOVEMENT, COLLISION, etc.) |
 | `causal_links` | **NEW** Links between actions and detected events |
 | `process_classifications` | **NEW** Process type classifications (PHYSICS_SIMULATION, etc.) |
@@ -900,8 +919,12 @@ ContextBuilder.build_context()
     │
     ├── Cognitive: cognitive_stage, cull_distance, stream_weights
     │
-    └── Event Understanding: recent_events, frame_delta_count
-        (populated from ActionOutcome.detected_events via update())
+    ├── Event Understanding: recent_events, frame_delta_count
+    │   (populated from ActionOutcome.detected_events via update())
+    │
+    └── Sparse Grid: sparse_grid, sparse_hash, sparse_cell_count,
+        sparse_colors, sparse_components, sparse_diff
+        (efficient frame representation for pattern matching)
 ```
 
 ### 4. Event Understanding Data Flow
@@ -994,3 +1017,8 @@ Action → Outcome → Learning → Knowledge → Decision
 - [engines/perception/object_tracker.py](../engines/perception/object_tracker.py)
 - [engines/perception/event_detector.py](../engines/perception/event_detector.py)
 - [engines/perception/spatial_learning.py](../engines/perception/spatial_learning.py)
+
+*ARC-AGI-2 Insight modules (Phases 1-4):*
+- [engines/perception/palette_detector.py](../engines/perception/palette_detector.py) - Phase 1-2: Two-stage decomposition
+- [engines/perception/sparse_grid.py](../engines/perception/sparse_grid.py) - Phase 3: Sparse grid representation
+- [engines/reasoning/deliberation_audit.py](../engines/reasoning/deliberation_audit.py) - Phase 4: Deliberation audit trail

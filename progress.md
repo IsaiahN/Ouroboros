@@ -1,5 +1,316 @@
 # Progress Log
 
+## February 3, 2026
+
+### Session: ARC-AGI-2 Insights Implementation (Phases 1-2)
+
+**Started**: ~1:00 PM
+**Last Update**: 2:15 PM
+
+---
+
+## Approach
+
+Based on analysis of top ARC-AGI-2 solutions (76.11% success rate), implementing key architectural improvements. The approach identified that:
+
+> "~70% of models cluster around wrong solutions where they use the 'palette' as top-to-bottom instead of inside-out"
+
+The core insight is **two-stage decomposition**: extract objects FIRST, THEN detect transformations. This session implements Phases 1-2:
+
+1. **Phase 1**: Explicit Palette/Legend Detection - create `engines/perception/palette_detector.py`
+2. **Phase 2**: Two-Stage Decomposition - refactor `frame_interpretation` rung, add `palette_detection` rung
+
+---
+
+## Steps Completed
+
+### 1. Created Palette Detector Module (1:30 PM)
+**File**: `engines/perception/palette_detector.py` (~940 lines)
+
+Created comprehensive palette/legend detection with:
+
+- **Data Classes**:
+  - `PaletteType` enum: HORIZONTAL_2ROW, VERTICAL_2COL, GRID, SINGLE_ROW, SINGLE_COLUMN
+  - `MappingDirection` enum: TOP_TO_BOTTOM, BOTTOM_TO_TOP, LEFT_TO_RIGHT, etc.
+  - `PaletteInfo`: Complete palette description with color_mapping, position, confidence
+  - `ExtractedObject`: Object with bounding_box, is_hollow, is_rectangular, possible_roles
+  - `DetectedTransformation`: Transformation rule with color_mapping, rule_description
+
+- **PaletteDetector Class**:
+  - `extract_objects(frame)` - Stage 1: Find all connected components, classify by role
+  - `detect_palette(frame)` - Stage 1.5: Find multi-colored reference blocks
+  - `detect_transformations(objects, palette, frame)` - Stage 2: Identify transformation rules
+
+- **Convenience Functions**:
+  - `detect_palette(frame)` - Quick palette detection
+  - `extract_objects(frame)` - Quick object extraction
+  - `two_stage_analysis(frame)` - Full two-stage approach
+
+### 2. Created PaletteDetectionRung (1:45 PM)
+**File**: Added to `decision_rung_system.py` (~175 lines at line 2400)
+
+New rung that:
+- Runs at priority 3 (very early, before frame_interpretation)
+- Performs two-stage analysis on each frame
+- Caches results by frame hash for efficiency
+- Populates context fields:
+  - `detected_palette`: PaletteInfo as dict
+  - `extracted_objects`: Categorized objects (palettes, hollow_frames, filled_shapes, etc.)
+  - `detected_transformations`: List of detected transformation rules
+
+### 3. Updated DecisionContext (1:50 PM)
+**File**: `context_builder.py`
+
+Added new fields:
+```python
+# Two-stage analysis
+detected_palette: Optional[Dict[str, Any]] = None
+extracted_objects: Optional[Dict[str, Any]] = None
+detected_transformations: List[Dict[str, Any]] = field(default_factory=lambda: [])
+```
+
+### 4. Updated RUNG_REGISTRY (1:55 PM)
+**File**: `decision_rung_system.py`
+
+Added `'palette_detection': PaletteDetectionRung` to registry.
+
+### 5. Updated ORDERING_PRESETS (2:00 PM)
+**File**: `decision_rung_system.py`
+
+Added `palette_detection` to all major presets:
+- `efficiency`: priority 3
+- `llm_optimal`: priority 3
+- `human_brain`: priority 3
+- `comprehensive`: priority 3 (now 51 rungs total)
+- `frontier_exploration`: priority 3
+
+### 6. Updated Custom Orderings (2:05 PM)
+**File**: `config/rung_orderings.json`
+
+Added `palette_detection` to all 6 custom orderings.
+
+---
+
+## Test Results
+
+Verified with live tests:
+
+1. **Palette Detection Test**:
+   - Correctly detects 2-row horizontal palettes
+   - Identifies mapping direction (TOP_TO_BOTTOM)
+   - Builds correct color mapping: 1→4, 2→5, 3→6
+   - Detects hollow frames as separate objects
+   - Identifies transformation rules (fill hollow frames per palette)
+
+2. **Rung Integration Test**:
+   - `PaletteDetectionRung` in registry: ✓
+   - Position in comprehensive ordering: 3 of 51
+   - Context populated correctly: ✓
+   - Confidence: 0.10 (context setter, not action suggester)
+
+---
+
+## Architecture Changes
+
+**Before (interleaved):**
+```
+frame → primitives (is_reference, rule_detection mixed in) → action
+```
+
+**After (two-stage):**
+```
+frame → PaletteDetectionRung → extracted_objects + detected_palette
+                             ↓
+       → FrameInterpretationRung → use palette context
+                             ↓
+       → EventUnderstandingRung → use transformation context
+                             ↓
+       → Other rungs → informed decisions
+```
+
+---
+
+## Files Changed
+
+| File | Changes |
+|------|---------|
+| `engines/perception/palette_detector.py` | NEW: ~940 lines |
+| `decision_rung_system.py` | +175 lines (PaletteDetectionRung), updated registry and presets |
+| `context_builder.py` | +6 lines (new DecisionContext fields) |
+| `config/rung_orderings.json` | Updated all 6 orderings |
+
+---
+
+## Current Status
+
+**ARC-AGI-2 Insights Implementation**: All 4 Phases COMPLETE
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Palette/Legend Detection | COMPLETE |
+| 2 | Two-Stage Decomposition | COMPLETE |
+| 3 | Sparse Grid Representation | COMPLETE |
+| 4 | Deliberation Audit Trail | COMPLETE |
+
+---
+
+## Session 2: ARC-AGI-2 Insights Implementation (Phases 3-4)
+
+**Started**: ~3:00 PM
+**Last Update**: 3:45 PM
+
+### Steps Completed
+
+#### 1. Created Sparse Grid Module (3:05 PM)
+**File**: `engines/perception/sparse_grid.py` (~740 lines)
+
+Created efficient sparse representation for ARC grids:
+
+- **Data Classes**:
+  - `Cell`: Single cell with position and color
+  - `CellChange`: Tracks changes between grids (position, old_color, new_color)
+  - `SparseGridDiff`: Full diff with added, removed, changed cells
+  - `PatternMatch`: Pattern location with match_type and details
+
+- **SparseGrid Class**:
+  - `from_dense(grid, background=0)` - Convert numpy array to sparse dict
+  - `to_dense(height, width)` - Convert back to numpy array
+  - `diff(other)` - Calculate differences between grids
+  - `find_pattern(pattern)` - Search for subpatterns
+  - `structural_hash()` - Position-invariant hash for comparison
+  - `color_invariant_hash()` - Color-agnostic structural hash
+  - `extract_connected_components()` - Find connected regions
+  - `find_repeated_structures()` - Detect recurring patterns
+
+- **Convenience Functions**:
+  - `sparse_from_frame(frame)` - Quick conversion from game frame
+  - `sparse_diff(grid1, grid2)` - Calculate diff between two grids
+  - `compare_grids_detailed(grid1, grid2)` - Comprehensive comparison
+  - `find_common_structure(grids)` - Find patterns across multiple grids
+
+#### 2. Created SparseGridRung (3:15 PM)
+**File**: Added to `decision_rung_system.py` (~165 lines at line 2580)
+
+New rung that:
+- Runs at priority 3 (alongside palette_detection)
+- Creates SparseGrid from current frame
+- Caches results by frame hash
+- Calculates diffs from previous frame
+- Extracts connected components
+- Populates context fields:
+  - `sparse_grid`: SparseGrid object
+  - `sparse_hash`: Structural hash for comparison
+  - `sparse_cell_count`: Non-background cells
+  - `sparse_colors`: Set of colors used
+  - `sparse_components`: Connected component bounding boxes
+  - `sparse_diff`: Changes from previous frame
+
+#### 3. Created Deliberation Audit Table (3:20 PM)
+**File**: `complete_database_schema.sql`
+
+Added `deliberation_audit_log` table:
+- 24 columns tracking full deliberation context
+- 5 indexes for efficient querying
+- Stores top 5 alternatives per decision
+- Links outcomes for retrospective analysis
+
+#### 4. Created Deliberation Auditor Module (3:30 PM)
+**File**: `engines/reasoning/deliberation_audit.py` (~715 lines)
+
+Created audit system for recording decision deliberations:
+
+- **Data Classes**:
+  - `OutcomeType` enum: POSITIVE, NEGATIVE, NEUTRAL
+  - `AlternativeInterpretation`: Single alternative with action, confidence, reason, rung
+  - `DeliberationRecord`: Complete deliberation with all context and 5 alternatives
+
+- **DeliberationAuditor Class**:
+  - `start_deliberation(context)` - Begin recording a decision
+  - `add_alternative(action, confidence, reason, rung)` - Record alternative
+  - `record_choice(action, confidence, reason, rung)` - Record final choice
+  - `record_outcome(outcome_type, score_change)` - Record action result
+  - `finalize()` - Save to database
+  - `analyze_wrong_predictions(game_type)` - Post-hoc analysis
+  - `get_rung_performance(rung_name)` - Per-rung accuracy stats
+
+- **Convenience Functions**:
+  - `get_deliberation_auditor(db)` - Get singleton instance
+  - `record_deliberation()` - Quick recording
+
+#### 5. Integrated into DecisionRungSystem (3:40 PM)
+**File**: `decision_rung_system.py`
+
+- Added `sparse_grid` to RUNG_REGISTRY
+- Added `sparse_grid` to ORDERING_PRESETS (priority 3)
+- Added `_deliberation_auditor` property with lazy loading
+- Updated `_decide_weighted()` to:
+  - Call `start_deliberation()` at decision start
+  - Record all alternatives with `add_alternative()`
+  - Record final choice with `record_choice()`
+- Updated `record_outcome()` to:
+  - Call `record_outcome()` on auditor
+  - Call `finalize()` to save to database
+
+#### 6. Updated Context Builder (3:45 PM)
+**File**: `context_builder.py`
+
+Added sparse grid context fields:
+```python
+sparse_grid: Optional[Any] = None
+sparse_hash: str = ""
+sparse_cell_count: int = 0
+sparse_colors: Set[int] = field(default_factory=set)
+sparse_components: List[Dict[str, Any]] = field(default_factory=list)
+sparse_diff: Optional[Dict[str, Any]] = None
+```
+
+#### 7. Updated Custom Orderings (3:45 PM)
+**File**: `config/rung_orderings.json`
+
+Added `sparse_grid` (priority 3) to all 6 custom orderings.
+
+---
+
+## Files Changed (Phases 3-4)
+
+| File | Changes |
+|------|---------|
+| `engines/perception/sparse_grid.py` | NEW: ~740 lines |
+| `engines/reasoning/deliberation_audit.py` | NEW: ~715 lines |
+| `complete_database_schema.sql` | +35 lines (deliberation_audit_log table) |
+| `decision_rung_system.py` | +200 lines (SparseGridRung, auditor integration) |
+| `context_builder.py` | +14 lines (sparse grid context fields) |
+| `config/rung_orderings.json` | Updated all 6 orderings |
+
+---
+
+## Architecture Enhancement
+
+**Frame Analysis Pipeline:**
+```
+frame → PaletteDetectionRung → palette + objects + transformations
+      → SparseGridRung → sparse_hash + components + diff
+                      ↓
+      → All other rungs → use rich context
+                      ↓
+      → _decide_weighted() → record 5 alternatives
+                      ↓
+      → record_outcome() → save deliberation to DB
+```
+
+**Post-Hoc Analysis Enabled:**
+```
+deliberation_audit_log
+        ↓
+analyze_wrong_predictions(game_type)
+        ↓
+"When context had X, we chose Y but Z was better"
+        ↓
+Learning signal for future decisions
+```
+
+---
+
 ## January 31, 2026
 
 ### Session: Engines Refactoring & CODS Deprecation

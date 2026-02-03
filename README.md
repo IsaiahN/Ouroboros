@@ -23,6 +23,7 @@ Three integrated subsystems:
 
 - **ARC-AGI** - [Francois Chollet's ARC Prize](https://arcprize.org/) - The challenge driving this project
 - **RLVR** - [Reinforcement Learning with Verifiable Rewards](https://arxiv.org/abs/2506.14245) - Core feedback mechanism
+- **Johan Land** - [beetree/ARC-AGI](https://github.com/beetree/ARC-AGI) - Two-stage decomposition and sparse grid insights
 
 ---
 
