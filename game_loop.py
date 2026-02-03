@@ -452,9 +452,25 @@ class GameLoop:
         # Handle complex actions
         data = None
         if action.is_complex():
-            # Get coordinates from context or use defaults
-            # In full implementation, this would come from the decision system
-            data = {"x": 32, "y": 32}
+            # Get coordinates from decision system metadata
+            metadata = self._get_decision_metadata() or {}
+
+            # Try different coordinate formats from rungs
+            if 'pixel_position' in metadata:
+                px, py = metadata['pixel_position']
+                data = {'x': int(px), 'y': int(py)}
+            elif 'target' in metadata:
+                target = metadata['target']
+                data = {'x': int(target.get('x', 32)), 'y': int(target.get('y', 32))}
+            elif 'grid_target' in metadata:
+                # GridExplorationRung provides coordinates in grid_target
+                grid_target = metadata['grid_target']
+                data = {'x': int(grid_target.get('x', 32)), 'y': int(grid_target.get('y', 32))}
+            elif 'x' in metadata and 'y' in metadata:
+                data = {'x': int(metadata['x']), 'y': int(metadata['y'])}
+            else:
+                # Fallback: center of screen
+                data = {"x": 32, "y": 32}
 
         return self._env.step(action, data=data)
 

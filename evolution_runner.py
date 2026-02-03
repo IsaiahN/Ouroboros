@@ -937,6 +937,10 @@ class EvolutionRunner:
                         elif 'target' in metadata:
                             target = metadata['target']
                             action_data = {'x': int(target.get('x', 32)), 'y': int(target.get('y', 32))}
+                        elif 'grid_target' in metadata:
+                            # GridExplorationRung provides coordinates in grid_target
+                            grid_target = metadata['grid_target']
+                            action_data = {'x': int(grid_target.get('x', 32)), 'y': int(grid_target.get('y', 32))}
                         elif 'x' in metadata and 'y' in metadata:
                             action_data = {'x': int(metadata['x']), 'y': int(metadata['y'])}
                         else:

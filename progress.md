@@ -1382,3 +1382,97 @@ The system now has a proper **two-level architecture**:
 ```
 
 The "Network Intelligence" theory is now actually implemented, not just documented.
+
+---
+
+## February 3, 2026 (Session 2)
+
+### Session: ACTION6 Coordinate Bug Fix
+
+**Started**: ~2:00 PM
+**Last Update**: 2:15 PM
+
+---
+
+## Problem Statement
+
+User noticed games ending at exactly 50 actions for vc33-9851e02b. Investigation revealed:
+1. The 50-action limit is the game's internal "RoA" (Remaining Actions) mechanic - NOT a bug
+2. However, agents were clicking the same spot (32, 32) all 50 times instead of exploring
+
+---
+
+## Root Cause
+
+**Metadata key mismatch** between rungs and action executors:
+
+- `GridExplorationRung` sets coordinates in: `metadata={'grid_target': {...}}`
+- `evolution_runner.py` and `game_loop.py` only checked for:
+  - `pixel_position`
+  - `target`
+  - `x` and `y` directly
+
+The `grid_target` key was **never extracted**, so coordinates fell through to the hardcoded default `{"x": 32, "y": 32}`.
+
+---
+
+## Fix Applied
+
+Added `grid_target` extraction to both files:
+
+### evolution_runner.py (lines 938-941)
+```python
+elif 'grid_target' in metadata:
+    # GridExplorationRung provides coordinates in grid_target
+    grid_target = metadata['grid_target']
+    action_data = {'x': int(grid_target.get('x', 32)), 'y': int(grid_target.get('y', 32))}
+```
+
+### game_loop.py (lines 462-465)
+```python
+elif 'grid_target' in metadata:
+    # GridExplorationRung provides coordinates in grid_target
+    grid_target = metadata['grid_target']
+    data = {'x': int(grid_target.get('x', 32)), 'y': int(grid_target.get('y', 32))}
+```
+
+---
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `evolution_runner.py` | Added `grid_target` metadata extraction for ACTION6 coordinates |
+| `game_loop.py` | Added `grid_target` metadata extraction, replaced hardcoded (32,32) with decision system metadata lookup |
+
+---
+
+## Impact
+
+| Before | After |
+|--------|-------|
+| Always click (32, 32) | Explore different grid positions |
+| GridExplorationRung useless | GridExplorationRung coordinates used |
+| 50 identical clicks | Systematic 8x8 grid exploration |
+
+---
+
+## Current Status
+
+| Item | Status |
+|------|--------|
+| Bug identified | Metadata key mismatch |
+| evolution_runner.py | FIXED |
+| game_loop.py | FIXED |
+| Syntax errors | None |
+
+---
+
+## Why This Matters
+
+The `GridExplorationRung` (priority 47) systematically generates unexplored click coordinates via `visual_analyzer.get_grid_exploration_targets()`. This enables:
+- Systematic exploration of click-based games (vc33, etc.)
+- Tracking of `clicked_coordinates` and `dead_coordinates` to avoid repeats
+- With 50 actions per level, agents can now explore ~50 different positions
+
+**Agents should now be able to beat vc33 games** by exploring different click targets instead of clicking the same spot repeatedly.
