@@ -238,8 +238,18 @@ class GameLoop:
         new_obs = self._execute(action)
 
         if new_obs is None:
-            self._log(f"Action {action.name} returned None")
+            # API failure - track consecutive failures
+            self._consecutive_api_failures = getattr(self, '_consecutive_api_failures', 0) + 1
+            self._log(f"Action {action.name} returned None (API failure #{self._consecutive_api_failures})")
+
+            # After 3 consecutive failures, terminate the game
+            if self._consecutive_api_failures >= 3:
+                self._log(f"Terminating game after {self._consecutive_api_failures} consecutive API failures")
+                self._phase = LoopPhase.GAME_OVER
             return
+
+        # Reset failure counter on success
+        self._consecutive_api_failures = 0
 
         # Process outcome
         outcome = self._outcome_processor.process(state, action, new_obs)

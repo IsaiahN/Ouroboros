@@ -466,8 +466,8 @@ class DecisionRung(ABC):
 class SurveyRung(DecisionRung):
     """Survey the environment at level start - ORIENTATION
 
-    NOTE: Uses self.core._build_survey_context() private method.
-    Kept as core access since it reads internal survey state.
+    Uses grid_analyzer engine to analyze frame and build survey context.
+    Identifies objects, colors, and grid structure for the agent's world model.
     """
     name = "survey"
     category = "orientation"
@@ -475,16 +475,13 @@ class SurveyRung(DecisionRung):
     confidence_threshold = 0.0  # Always runs, modifies context not action
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
-            return RungResult()
-
         # Check if survey already done for this level
         if context.get('survey_complete', False):
             return RungResult(confidence=0.0, reason="Survey already complete")
 
-        # Build survey context
+        # Build survey context using grid_analyzer
         try:
-            survey: Dict[str, Any] = self.core._build_survey_context() if hasattr(self.core, '_build_survey_context') else {}
+            survey: Dict[str, Any] = self._build_survey_context(game_state, context)
             context['survey'] = survey
             context['survey_complete'] = True
             return RungResult(
@@ -494,6 +491,82 @@ class SurveyRung(DecisionRung):
             )
         except Exception as e:
             return RungResult(reason=f"Survey failed: {e}")
+
+    def _build_survey_context(self, game_state: Any, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Build survey context from frame analysis using grid_analyzer."""
+        survey: Dict[str, Any] = {
+            'detected_features': {},
+            'unique_colors': set(),
+            'object_count': 0,
+            'grid_size': (0, 0),
+            'has_boundary': False
+        }
+
+        # Get frame from game_state
+        frame = None
+        if hasattr(game_state, 'frame'):
+            frame = game_state.frame
+        elif hasattr(game_state, 'observation'):
+            obs = game_state.observation
+            if isinstance(obs, dict) and 'frame' in obs:
+                frame = obs['frame']
+
+        if frame is None:
+            return survey
+
+        # Convert numpy array to list if needed
+        if hasattr(frame, 'tolist'):
+            frame = frame.tolist()
+
+        # Analyze grid structure
+        if isinstance(frame, list) and len(frame) > 0:
+            survey['grid_size'] = (len(frame), len(frame[0]) if frame else 0)
+
+            # Find unique colors and objects
+            colors: set = set()
+            object_positions: Dict[int, List[tuple]] = {}
+
+            for y, row in enumerate(frame):
+                for x, color in enumerate(row):
+                    if color > 0:  # Non-background
+                        colors.add(color)
+                        if color not in object_positions:
+                            object_positions[color] = []
+                        object_positions[color].append((y, x))
+
+            survey['unique_colors'] = colors
+            survey['object_count'] = len(object_positions)
+
+            # Detect features for each color
+            for color, positions in object_positions.items():
+                feature = {
+                    'color': color,
+                    'pixel_count': len(positions),
+                    'positions': positions[:10],  # Sample for memory
+                    'is_single': len(positions) <= 4,
+                    'is_large': len(positions) > 20
+                }
+
+                # Check if on boundary (potential boundary marker)
+                boundary_positions = [p for p in positions if p[0] == 0 or p[1] == 0
+                                      or p[0] == len(frame) - 1 or p[1] == len(frame[0]) - 1]
+                if len(boundary_positions) > len(positions) * 0.5:
+                    feature['likely_boundary'] = True
+                    survey['has_boundary'] = True
+
+                survey['detected_features'][f'color_{color}'] = feature
+
+        # Try to use grid_analyzer for more sophisticated analysis
+        grid_analyzer = self.engines.grid_analyzer
+        if grid_analyzer and frame:
+            try:
+                if hasattr(grid_analyzer, 'analyze_grid_structure'):
+                    analysis = grid_analyzer.analyze_grid_structure(frame)
+                    survey['grid_analysis'] = analysis
+            except Exception:
+                pass  # Grid analyzer enhancement is optional
+
+        return survey
 
 
 class QuestioningRung(DecisionRung):
@@ -652,8 +725,8 @@ class PriorLessonsRung(DecisionRung):
 class DiscoveryExploitationRung(DecisionRung):
     """Exploit recent discoveries immediately - EXPLOITATION
 
-    NOTE: Uses self.core._last_discovery private attribute.
-    Kept as core access since it reads ephemeral discovery state.
+    Uses discovery_engine to get current discovery state and suggest actions
+    that exploit what the agent has learned about object behaviors.
     """
     name = "discovery_exploitation"
     category = "exploitation"
@@ -661,13 +734,40 @@ class DiscoveryExploitationRung(DecisionRung):
     confidence_threshold = 0.3
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
+        discovery_engine = self.engines.discovery_engine
+        if discovery_engine is None:
             return RungResult()
 
         try:
-            discovery = getattr(self.core, '_last_discovery', None)
-            if not discovery:
-                return RungResult()
+            # Get current discovery state from the engine
+            discovery_state = discovery_engine.get_state() if hasattr(discovery_engine, 'get_state') else None
+
+            if not discovery_state:
+                # Also check context for discovery info from evolution runner
+                discovery = context.get('last_discovery')
+                if not discovery:
+                    return RungResult()
+            else:
+                # Extract discovery info from state
+                discoveries = discovery_state.discoveries if hasattr(discovery_state, 'discoveries') else {}
+                if not discoveries:
+                    return RungResult()
+
+                # Find the most recently discovered controllable object
+                discovery = None
+                for obj_id, behavior in discoveries.items():
+                    if str(behavior) == 'ObjectBehavior.PLAYER_CONTROLLED':
+                        discovery = {
+                            'controlled_object': obj_id,
+                            'behavior': str(behavior),
+                            'reliability_score': 0.8,
+                            'validated': True,
+                            'action': 'ACTION1'  # Movement discovery suggests movement
+                        }
+                        break
+
+                if not discovery:
+                    return RungResult()
 
             action = discovery.get('action', '')
             reliability = discovery.get('reliability_score', 0.0)
@@ -681,17 +781,19 @@ class DiscoveryExploitationRung(DecisionRung):
                 return RungResult(reason=f"Discovery action {action} not available")
 
             if reliability >= 0.6 or validated:
+                obj_info = discovery.get('controlled_object', discovery.get('controlled_color', '?'))
                 return RungResult(
                     action=action,
                     confidence=0.9,
-                    reason=f"Exploiting discovery: {discovery.get('controlled_color', '?')} (rel={reliability:.2f})",
+                    reason=f"Exploiting discovery: {obj_info} (rel={reliability:.2f})",
                     metadata={'discovery': discovery}
                 )
             elif reliability >= 0.3:
+                obj_info = discovery.get('controlled_object', discovery.get('controlled_color', '?'))
                 return RungResult(
                     action=action,
                     confidence=0.5,
-                    reason=f"Testing hypothesis: {discovery.get('controlled_color', '?')} (rel={reliability:.2f})",
+                    reason=f"Testing hypothesis: {obj_info} (rel={reliability:.2f})",
                     metadata={'discovery': discovery}
                 )
             return RungResult()
@@ -791,8 +893,11 @@ class ScientificMethodRung(DecisionRung):
 class TwoStreamsRung(DecisionRung):
     """Stream A (private) vs Stream B (network) conflict detection - HYPOTHESIS
 
-    NOTE: Uses self.core._wA and self.core._wB private attributes.
-    Kept as core access since it reads stream weight state.
+    Implements the two-stream consciousness model from the unified theory:
+    - Stream A: Private memory (agent's personal experience)
+    - Stream B: Collective wisdom (network knowledge)
+
+    Uses i_thread engine for stream weights (wA, wB).
     """
     name = "two_streams"
     category = "hypothesis"
@@ -800,12 +905,18 @@ class TwoStreamsRung(DecisionRung):
     confidence_threshold = 0.4
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
-            return RungResult()
+        i_thread = self.engines.i_thread
+        agent_id = context.get('agent_id', '')
+
+        # Default weights if i_thread not available
+        wA, wB = 0.5, 0.5
 
         try:
-            wA = getattr(self.core, '_wA', 0.5)
-            wB = getattr(self.core, '_wB', 0.5)
+            if i_thread and agent_id:
+                state = i_thread.get_state(agent_id)
+                if state:
+                    wA = state.w_a
+                    wB = state.w_b
 
             stream_a_actions = context.get('stream_a_proposals', set())
             stream_b_actions = context.get('stream_b_proposals', set())
@@ -825,10 +936,12 @@ class TwoStreamsRung(DecisionRung):
 
 
 class NetworkWisdomRung(DecisionRung):
-    """Historical action traces from network - EXPLOITATION
+    """Query network-wide action wisdom from action traces - EXPLOITATION
 
-    NOTE: This rung uses self.core._get_network_action_wisdom() which is a private
-    method on CoreGameplay. Kept as core access for now.
+    This is Stream B (collective wisdom) in the two-stream model.
+    Queries action_traces and winning_sequences to find what worked across all agents.
+
+    Uses engines.memory.episodic_memory.EpisodicMemory for database queries.
     """
     name = "network_wisdom"
     category = "exploitation"
@@ -836,38 +949,39 @@ class NetworkWisdomRung(DecisionRung):
     confidence_threshold = 0.4
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        # Uses private method on core, not an engine
-        if not self.core or not hasattr(self.core, '_get_network_action_wisdom'):
+        # Use episodic_memory engine to query network wisdom
+        episodic = self.engines.episodic_memory
+        if episodic is None:
             return RungResult()
 
         try:
             game_type = context.get('game_type', '')
-            level = context.get('level', 1)
+            available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
 
-            wisdom = self.core._get_network_action_wisdom(game_type, level)
+            # Query network wisdom for each available action
+            best_action = None
+            best_confidence = 0.0
+            best_reason = ""
 
-            if wisdom and wisdom.get('confidence', 0) >= self.confidence_threshold:
-                suggested_action = wisdom.get('action')
-                # CRITICAL: Validate action is available in this game
-                if not is_action_available(suggested_action, context):
-                    return RungResult(reason=f"Network wisdom suggested unavailable action: {suggested_action}")
+            for action_num in available:
+                action_name = f"ACTION{action_num}"
+                if hasattr(episodic, '_get_network_action_wisdom'):
+                    wisdom = episodic._get_network_action_wisdom(game_type, action_name)
+                    if wisdom.get('recommendation') == 'use':
+                        conf = wisdom.get('confidence', 0)
+                        if conf > best_confidence:
+                            best_confidence = conf
+                            best_action = action_name
+                            best_reason = wisdom.get('reasoning', '')
+
+            if best_action and best_confidence >= self.confidence_threshold:
                 return RungResult(
-                    action=suggested_action,
-                    confidence=wisdom.get('confidence', 0),
-                    reason=f"Network wisdom: {suggested_action} (conf={wisdom.get('confidence', 0):.2f})",
-                    metadata={'wisdom': wisdom}
+                    action=best_action,
+                    confidence=best_confidence,
+                    reason=f"Network wisdom: {best_action} ({best_reason})",
+                    metadata={'source': 'episodic_memory'}
                 )
-            elif wisdom and wisdom.get('is_least_bad', False):
-                suggested_action = wisdom.get('action')
-                # CRITICAL: Validate action is available in this game
-                if not is_action_available(suggested_action, context):
-                    return RungResult(reason=f"Network wisdom suggested unavailable action: {suggested_action}")
-                return RungResult(
-                    action=suggested_action,
-                    confidence=wisdom.get('confidence', 0),
-                    reason=f"Least-bad network wisdom: {suggested_action}",
-                    metadata={'wisdom': wisdom, 'is_least_bad': True}
-                )
+
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Network wisdom failed: {e}")
@@ -1267,8 +1381,8 @@ class InfiniteLoopBreakerRung(DecisionRung):
 class MapIntelCollisionRung(DecisionRung):
     """Obstacle avoidance when last action caused no frame change - EXPLOITATION
 
-    NOTE: Uses self.core._last_action_no_change private attribute.
-    Kept as core access since it reads collision state.
+    Uses context 'frame_changed' flag to detect collisions and suggest
+    perpendicular movement alternatives.
     """
     name = "map_intel_collision"
     category = "exploitation"
@@ -1276,17 +1390,18 @@ class MapIntelCollisionRung(DecisionRung):
     confidence_threshold = 0.5
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
-            return RungResult()
-
         try:
-            last_no_change = getattr(self.core, '_last_action_no_change', False)
+            # Check if last action caused no frame change (collision detection)
+            # This is set by evolution_runner when it detects no change between frames
+            frame_changed = context.get('frame_changed', True)
             last_action = context.get('last_action', '')
             available = context.get('available_actions', [1, 2, 3, 4])
 
             # Only applies to movement actions (1-4) that are available
             movement_available = [f'ACTION{a}' for a in available if a in [1, 2, 3, 4]]
-            if not last_no_change or last_action not in movement_available:
+
+            # If frame changed or last action wasn't movement, no collision recovery needed
+            if frame_changed or last_action not in movement_available:
                 return RungResult()
 
             # Get perpendicular alternatives (filtered by available)
@@ -1314,7 +1429,11 @@ class MapIntelCollisionRung(DecisionRung):
 
 
 class TheoryGateRung(DecisionRung):
-    """Working theory must score proposals, contradicted = force exploration - FINALIZER"""
+    """Working theory must score proposals, contradicted = force exploration - FINALIZER
+
+    Uses scientific_method_engine to check current theory status and force
+    exploration when theory is contradicted.
+    """
     name = "theory_gate"
     category = "hypothesis"
     default_priority = 32
@@ -1326,7 +1445,14 @@ class TheoryGateRung(DecisionRung):
             return RungResult()
 
         try:
-            theory = sme.get_working_theory() if hasattr(sme, 'get_working_theory') else None
+            # Get game context for theory lookup
+            game_type = context.get('game_type', '')
+            level = context.get('level', 1)
+
+            # get_working_theory requires game_type and level_number
+            theory = None
+            if hasattr(sme, 'get_working_theory') and game_type:
+                theory = sme.get_working_theory(game_type, level)
 
             if theory and theory.get('stage') == 'contradicted':
                 # Force exploration/revision
@@ -1609,8 +1735,10 @@ class MultiStageMatchingRung(DecisionRung):
 class ThreeLayerFilterRung(DecisionRung):
     """Meta-learning filter preventing wasted actions - FILTER
 
-    NOTE: Uses self.core._action_filter_layer* private methods.
-    Kept as core access since these are tightly coupled filter methods.
+    Implements three filtering layers using context and prior lessons:
+    Layer 1: Failed action cache - penalize recently failed actions
+    Layer 2: Object prefilter - penalize click actions with no valid target
+    Layer 3: Pattern prediction - penalize actions with low success history
     """
     name = "three_layer_filter"
     category = "filter"
@@ -1618,44 +1746,73 @@ class ThreeLayerFilterRung(DecisionRung):
     confidence_threshold = 0.0  # Modifies weights, doesn't suggest
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
-            return RungResult()
-
         try:
             weights: Dict[str, float] = {}
-            frame = game_state.frame if hasattr(game_state, 'frame') else None
+            frame = None
+            if hasattr(game_state, 'frame'):
+                frame = game_state.frame
+                # Convert numpy array to list if needed
+                if hasattr(frame, 'tolist'):
+                    frame = frame.tolist()
             position = context.get('position', (0, 0))
+            # Ensure position is a tuple of ints
+            if hasattr(position, '__iter__') and not isinstance(position, str):
+                position = tuple(int(p) for p in position[:2]) if len(list(position)) >= 2 else (0, 0)
+            else:
+                position = (0, 0)
             available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
 
-            # Layer 1: Cache check (only for available actions)
-            if hasattr(self.core, '_action_filter_layer1_cache_check'):
-                for i in available:
-                    action = f'ACTION{i}'
-                    failed = self.core._action_filter_layer1_cache_check(action, position, frame)
-                    weights[action] = 0.1 if failed else 1.0
+            # Layer 1: Cache check - penalize recently failed actions
+            # Uses 'failed_actions' from context (set by evolution_runner)
+            failed_actions = context.get('failed_actions', set())
+            recent_actions = context.get('recent_actions', [])
 
-            # Layer 2: Object prefilter (for click actions, if available)
-            if hasattr(self.core, '_action_filter_layer2_object_prefilter'):
+            for i in available:
+                action = f'ACTION{i}'
+                if action in failed_actions:
+                    weights[action] = 0.1  # Heavily penalize failed actions
+                else:
+                    weights[action] = 1.0
+
+            # Layer 2: Object prefilter for click actions
+            # Penalize ACTION5/6/7 if there's no non-background pixel at position
+            if frame and isinstance(frame, list):
                 for action_num in [5, 6, 7]:
                     if action_num in available:
                         action = f'ACTION{action_num}'
-                        has_object = self.core._action_filter_layer2_object_prefilter(action, position, frame)
+                        # Check if there's something to click at current position
+                        y, x = position if len(position) >= 2 else (0, 0)
+                        has_object = False
+
+                        # Check 3x3 region around position
+                        for dy in range(-1, 2):
+                            for dx in range(-1, 2):
+                                check_y, check_x = y + dy, x + dx
+                                if (0 <= check_y < len(frame) and
+                                    0 <= check_x < len(frame[0]) and
+                                    frame[check_y][check_x] > 0):
+                                    has_object = True
+                                    break
+                            if has_object:
+                                break
+
                         if not has_object:
                             weights[action] = weights.get(action, 1.0) * 0.3
 
-            # Layer 3: Pattern prediction (only for available actions)
-            if hasattr(self.core, '_action_filter_layer3_pattern_predict'):
-                for i in available:
-                    action = f'ACTION{i}'
-                    prob = self.core._action_filter_layer3_pattern_predict(action, context)
-                    if prob < 0.15:
-                        weights[action] = weights.get(action, 1.0) * 0.2
+            # Layer 3: Pattern prediction using prior lessons
+            prior_lessons = context.get('prior_lessons', [])
+            for lesson in prior_lessons[:5]:
+                key_action = lesson.get('key_action', '')
+                if key_action in weights and lesson.get('caused_death', False):
+                    severity = lesson.get('severity', 1)
+                    weights[key_action] = weights.get(key_action, 1.0) * max(0.2, 1.0 - severity * 0.2)
 
-            if weights:
+            penalized_count = sum(1 for w in weights.values() if w < 1.0)
+            if penalized_count > 0:
                 return RungResult(
                     confidence=0.3,
                     weights=weights,
-                    reason=f"3-layer filter applied: {sum(1 for w in weights.values() if w < 1.0)} actions penalized",
+                    reason=f"3-layer filter applied: {penalized_count} actions penalized",
                     metadata={'filter_weights': weights}
                 )
             return RungResult()
@@ -1676,9 +1833,13 @@ class PariahAvoidanceRung(DecisionRung):
             return RungResult()
 
         try:
-            game_type = context.get('game_type', '')
+            agent_id = context.get('agent_id', '')
+            game_id = context.get('game_id', '')
             level = context.get('level', 1)
             role = context.get('agent_role', 'generalist')
+
+            if not agent_id:
+                return RungResult()
 
             # Role-adjusted penalty multipliers
             role_multipliers = {
@@ -1689,23 +1850,41 @@ class PariahAvoidanceRung(DecisionRung):
             }
             multiplier = role_multipliers.get(role, 0.7)
 
-            if hasattr(vpe, 'get_pariahs'):
-                pariahs = vpe.get_pariahs(game_type, level)
-                weights: Dict[str, float] = {}
-                for pariah in pariahs:
-                    action = pariah.get('failed_action')
-                    toxicity = pariah.get('toxicity', 0.5)
-                    # Apply role-adjusted penalty
-                    penalty = toxicity * multiplier
-                    weights[action] = max(0.05, 1.0 - penalty)
+            # Use the correct API: get_role_adjusted_pariah_penalties or get_pariah_action_penalties
+            if hasattr(vpe, 'get_role_adjusted_pariah_penalties'):
+                penalties = vpe.get_role_adjusted_pariah_penalties(
+                    agent_id=agent_id,
+                    agent_role=role,
+                    game_id=game_id,
+                    current_level=level
+                )
+            elif hasattr(vpe, 'get_pariah_action_penalties'):
+                penalties = vpe.get_pariah_action_penalties(
+                    agent_id=agent_id,
+                    game_id=game_id,
+                    current_level=level
+                )
+            else:
+                return RungResult()
 
-                if weights:
-                    return RungResult(
-                        confidence=0.4,
-                        weights=weights,
-                        reason=f"Pariah avoidance: {len(pariahs)} patterns, role={role}",
-                        metadata={'pariahs': len(pariahs), 'role_multiplier': multiplier}
-                    )
+            if not penalties:
+                return RungResult()
+
+            # Convert penalties to weights (penalty -> weight inversion)
+            weights: Dict[str, float] = {}
+            for action_num, penalty in penalties.items():
+                action = f'ACTION{action_num}'
+                # Apply role multiplier to penalty, then convert to weight
+                adjusted_penalty = penalty * multiplier
+                weights[action] = max(0.05, 1.0 - min(0.95, adjusted_penalty))
+
+            if weights:
+                return RungResult(
+                    confidence=0.4,
+                    weights=weights,
+                    reason=f"Pariah avoidance: {len(penalties)} actions penalized, role={role}",
+                    metadata={'penalties': len(penalties), 'role_multiplier': multiplier}
+                )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Pariah avoidance failed: {e}")
@@ -3102,8 +3281,8 @@ class NetworkObjectInventoryRung(DecisionRung):
 class DeliberationSystemRung(DecisionRung):
     """TRM-inspired iterative refinement - HYPOTHESIS
 
-    NOTE: Uses self.core._last_deliberation_result private attribute.
-    Kept as core access since it reads ephemeral deliberation state.
+    Uses scientific_method_engine to get theory hints and deliberation results
+    for multi-agent reasoning convergence.
     """
     name = "deliberation_system"
     category = "hypothesis"
@@ -3111,23 +3290,41 @@ class DeliberationSystemRung(DecisionRung):
     confidence_threshold = 0.5
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
-        if not self.core:
+        sme = self.engines.scientific_method_engine
+        if sme is None:
             return RungResult()
 
         try:
-            deliberation = getattr(self.core, '_last_deliberation_result', None)
+            # Use scientific method engine's theory hint for deliberation guidance
+            if hasattr(sme, 'get_active_theory_hint'):
+                hint = sme.get_active_theory_hint()
 
-            if deliberation:
-                if deliberation.get('convergence_achieved', False):
-                    action = deliberation.get('consensus_action')
+                if hint and hint.get('prediction'):
+                    # Theory has a prediction - this is deliberation output
+                    action = hint.get('prediction', {}).get('action')
+                    confidence = hint.get('weight', 0.5) + 0.3  # Boost confidence
+
                     # CRITICAL: Validate action is available in this game
                     if action and is_action_available(action, context):
                         return RungResult(
                             action=action,
-                            confidence=deliberation.get('refinement_confidence', 0.6),
-                            reason=f"Deliberation converged: {deliberation.get('refinement_passes', 0)} passes",
-                            metadata={'deliberation': deliberation}
+                            confidence=min(0.9, confidence),
+                            reason=f"Deliberation hint: {hint.get('reason', 'theory-guided')}",
+                            metadata={'deliberation_hint': hint}
                         )
+
+            # Fallback: Check context for deliberation results from other systems
+            deliberation = context.get('deliberation_result')
+            if deliberation and deliberation.get('convergence_achieved', False):
+                action = deliberation.get('consensus_action')
+                # CRITICAL: Validate action is available in this game
+                if action and is_action_available(action, context):
+                    return RungResult(
+                        action=action,
+                        confidence=deliberation.get('refinement_confidence', 0.6),
+                        reason=f"Deliberation converged: {deliberation.get('refinement_passes', 0)} passes",
+                        metadata={'deliberation': deliberation}
+                    )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Deliberation system failed: {e}")

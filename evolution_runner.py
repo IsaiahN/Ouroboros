@@ -13,6 +13,7 @@ Usage:
 
 import os
 import sys
+import time
 
 # Rule 1: No pycache
 sys.dont_write_bytecode = True
@@ -30,6 +31,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import requests
 
 # Load .env
 try:
@@ -49,6 +51,13 @@ from decision_rung_system import DecisionRungSystem
 # Symbolic reasoning components (Phase 0-1)
 from engines.perception.player_localizer import PlayerLocalizer
 from engines.perception.property_extractor import PropertyExtractor, properties_to_json
+
+# Viral package engine for network knowledge sharing
+try:
+    from engines.social.viral_package_engine import ViralPackageEngine
+    VIRAL_PACKAGE_AVAILABLE = True
+except ImportError:
+    VIRAL_PACKAGE_AVAILABLE = False
 
 
 @dataclass
@@ -146,6 +155,16 @@ class EvolutionRunner:
         self.property_extractor = PropertyExtractor(color_quantization=16)
         self._prev_frame: Optional[np.ndarray] = None  # For localization
         self._prev_properties: Optional[dict] = None   # For change detection
+
+        # Viral package engine for network knowledge sharing
+        self.viral_package_engine = None
+        if VIRAL_PACKAGE_AVAILABLE:
+            try:
+                self.viral_package_engine = ViralPackageEngine(self.db)
+                if self.verbose:
+                    print("[INIT] Viral package engine initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize viral package engine: {e}")
 
     def _compute_frame_hash(self, obs: Any) -> str:
         """Compute hash of frame state for topology matching."""
@@ -677,6 +696,11 @@ class EvolutionRunner:
         prev_levels = 0
         prev_score = 0.0  # Track score for learning
 
+        # Track state for decision context (used by rungs like MapIntelCollisionRung)
+        last_action_str = ''
+        last_frame_changed = True  # Assume first frame is "changed"
+        failed_actions: set = set()  # Track actions that resulted in no change
+
         # Reset symbolic reasoning state for new game
         self.player_localizer.reset()
         self._prev_frame = None
@@ -716,16 +740,25 @@ class EvolutionRunner:
             # Build context for decision system with available_actions
             context = {
                 'game_id': game_id,
+                'game_type': game_id[:4] if game_id and len(game_id) >= 4 else '',  # Extract game type prefix
                 'agent_id': agent.agent_id,
                 'actions_taken': actions_taken,
                 'state': str(obs.state) if obs else 'UNKNOWN',
                 'frame_data': obs,
                 'available_actions': current_available,  # Current, not initial
                 'levels_completed': getattr(obs, 'levels_completed', 0),
+                'level': (getattr(obs, 'levels_completed', 0) or 0) + 1,  # Current level (1-indexed)
                 'win_levels': win_levels,
+                # State tracking for MapIntelCollisionRung and ThreeLayerFilterRung
+                'last_action': last_action_str,
+                'frame_changed': last_frame_changed,
+                'failed_actions': failed_actions,
+                # Position tracking (default to center if unknown)
+                'position': (32, 32),
             }
 
             # Get action from decision system
+            action_data = None  # For ACTION6 coordinates
             try:
                 # Note: decide(game_state, context) - pass obs as game_state, context as context
                 result = self.decision_system.decide(obs, context)
@@ -738,6 +771,25 @@ class EvolutionRunner:
                         action_num = int(action_str.replace('ACTION', ''))
                     else:
                         action_num = random.choice(current_available)
+
+                    # Extract ACTION6 coordinates from decision system metadata
+                    if action_num == 6 and hasattr(self.decision_system, 'last_decision_metadata'):
+                        metadata = self.decision_system.last_decision_metadata or {}
+                        # Try different coordinate formats from rungs
+                        if 'pixel_position' in metadata:
+                            px, py = metadata['pixel_position']
+                            action_data = {'x': int(px), 'y': int(py)}
+                        elif 'target' in metadata:
+                            target = metadata['target']
+                            action_data = {'x': int(target.get('x', 32)), 'y': int(target.get('y', 32))}
+                        elif 'x' in metadata and 'y' in metadata:
+                            action_data = {'x': int(metadata['x']), 'y': int(metadata['y'])}
+                        else:
+                            # Fallback: center of screen
+                            action_data = {'x': 32, 'y': 32}
+                            if self.verbose:
+                                print(f"    [WARN] ACTION6 without coordinates, using default (32, 32)")
+
                 elif hasattr(result, 'action'):
                     action_num = result.action
                 else:
@@ -763,74 +815,132 @@ class EvolutionRunner:
                 action_num = random.choice(available_actions)
                 action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
 
-            # Take action
-            try:
-                obs_before = last_obs if last_obs else initial_obs
-                obs = env.step(action)
-                actions_taken += 1
-                action_sequence.append(action.name)
-                last_obs = obs
+            # Take action with retry logic for transient API errors
+            obs = None
+            max_step_retries = 3
+            step_retry_delay = 2.0
 
-                # Track level progress
-                current_levels = getattr(obs, 'levels_completed', 0) or 0
-                level_up = current_levels > prev_levels
+            for step_attempt in range(max_step_retries):
+                try:
+                    obs_before = last_obs if last_obs else initial_obs
+                    # Pass action_data for ACTION6 coordinates
+                    obs = env.step(action, data=action_data)
 
-                # Calculate score for this step (levels completed as fraction)
-                current_score = current_levels / win_levels if win_levels > 0 else 0.0
+                    # Check if step returned None (SDK may catch errors internally)
+                    if obs is None:
+                        if step_attempt < max_step_retries - 1:
+                            wait_time = step_retry_delay * (2 ** step_attempt)
+                            print(f"    [API] Step returned None for {action.name}, retry {step_attempt + 1}/{max_step_retries} in {wait_time:.1f}s")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            print(f"    [API] Step keeps failing after {max_step_retries} retries, ending game")
+                            break
 
-                # CRITICAL: Record action trace for learning
-                is_game_over = obs and obs.state in (GameState.WIN, GameState.GAME_OVER)
-                self._record_action_trace(
-                    game_id=game_id,
-                    action_num=action_num,
-                    obs_before=obs_before,
-                    obs_after=obs,
-                    score_before=prev_score,
-                    score_after=current_score,
-                    level_before=prev_levels,
-                    level_after=current_levels,
-                    is_game_over=is_game_over,
-                )
+                    break  # Success - exit retry loop
 
-                # NEW: Record player state for symbolic reasoning (Phase 0-1)
-                action_result = 'continue'
-                if is_game_over:
-                    action_result = 'win' if obs.state == GameState.WIN else 'death'
-                elif level_up:
-                    action_result = 'success'
+                except Exception as e:
+                    # Check if it's a server error by inspecting exception message
+                    err_str = str(e)
+                    err_lower = err_str.lower()
+                    is_server_error = any(code in err_lower for code in ['500', '502', '503', '504', 'server error', 'internal server'])
+                    is_rate_limit = '429' in err_lower or 'rate limit' in err_lower
 
-                self._record_player_state(
-                    game_id=game_id,
-                    action_num=actions_taken,
-                    action_taken=action.name,
-                    obs_before=obs_before,
-                    obs_after=obs,
-                    action_result=action_result,
-                    level_number=current_levels,
-                )
+                    if is_server_error or is_rate_limit:
+                        # Transient error - retry with backoff
+                        if step_attempt < max_step_retries - 1:
+                            wait_time = step_retry_delay * (2 ** step_attempt)
+                            print(f"    [API] Server error on {action.name}, retry {step_attempt + 1}/{max_step_retries} in {wait_time:.1f}s")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            print(f"    [API] Server error persists after {max_step_retries} retries, ending game")
+                            obs = None
+                            break
+                    else:
+                        # Non-transient error - don't retry
+                        print(f"    [ERROR] Step failed: {type(e).__name__}: {e}")
+                        obs = None
+                        break
 
-                prev_levels = current_levels
-                prev_score = current_score
+            # If step failed completely, end the game
+            if obs is None:
+                print(f"    [ABORT] Ending game {game_id} due to API failure")
+                break
 
-                # Verbose output
+            actions_taken += 1
+            action_sequence.append(action.name)
+
+            # Update state tracking for decision context
+            last_action_str = action.name
+
+            # Detect if frame changed (for collision detection)
+            frame_hash_before = self._compute_frame_hash(obs_before)
+            frame_hash_after = self._compute_frame_hash(obs)
+            last_frame_changed = frame_hash_before != frame_hash_after
+
+            # Track failed actions (no change = potential collision/invalid)
+            if not last_frame_changed and action.name.startswith('ACTION'):
+                failed_actions.add(action.name)
+
+            last_obs = obs
+
+            # Track level progress
+            current_levels = getattr(obs, 'levels_completed', 0) or 0
+            level_up = current_levels > prev_levels
+
+            # Calculate score for this step (levels completed as fraction)
+            current_score = current_levels / win_levels if win_levels > 0 else 0.0
+
+            # CRITICAL: Record action trace for learning
+            is_game_over = obs and obs.state in (GameState.WIN, GameState.GAME_OVER)
+            self._record_action_trace(
+                game_id=game_id,
+                action_num=action_num,
+                obs_before=obs_before,
+                obs_after=obs,
+                score_before=prev_score,
+                score_after=current_score,
+                level_before=prev_levels,
+                level_after=current_levels,
+                is_game_over=is_game_over,
+            )
+
+            # NEW: Record player state for symbolic reasoning (Phase 0-1)
+            action_result = 'continue'
+            if is_game_over:
+                action_result = 'win' if obs.state == GameState.WIN else 'death'
+            elif level_up:
+                action_result = 'success'
+
+            self._record_player_state(
+                game_id=game_id,
+                action_num=actions_taken,
+                action_taken=action.name,
+                obs_before=obs_before,
+                obs_after=obs,
+                action_result=action_result,
+                level_number=current_levels,
+            )
+
+            prev_levels = current_levels
+            prev_score = current_score
+
+            # Verbose output
+            if self.verbose:
+                levels = current_levels
+                state_str = str(obs.state).replace('GameState.', '') if obs else '?'
+                level_indicator = ' [LEVEL UP!]' if level_up else ''
+                print(f"    [{actions_taken:3d}] {action.name:8s} -> levels={levels}/{win_levels} state={state_str}{level_indicator}")
+
+            # Check for game end
+            if obs and obs.state == GameState.WIN:
                 if self.verbose:
-                    levels = current_levels
-                    state_str = str(obs.state).replace('GameState.', '') if obs else '?'
-                    level_indicator = ' [LEVEL UP!]' if level_up else ''
-                    print(f"    [{actions_taken:3d}] {action.name:8s} -> levels={levels}/{win_levels} state={state_str}{level_indicator}")
-
-                # Check for game end
-                if obs and obs.state == GameState.WIN:
-                    if self.verbose:
-                        print(f"    [WIN!] Game won after {actions_taken} actions!")
-                    break
-                if obs and obs.state == GameState.GAME_OVER:
-                    if self.verbose:
-                        print(f"    [GAME OVER] after {actions_taken} actions")
-                    break
-
-            except Exception as e:
-                print(f"  [ERROR] Step failed: {e}")
+                    print(f"    [WIN!] Game won after {actions_taken} actions!")
+                break
+            if obs and obs.state == GameState.GAME_OVER:
+                if self.verbose:
+                    print(f"    [GAME OVER] after {actions_taken} actions")
                 break
 
         # Extract results - use levels_completed as the score metric
@@ -952,19 +1062,49 @@ class EvolutionRunner:
 
             # Store winning sequence if won
             if result.is_win and result.action_sequence:
+                # Generate sequence_id as required by schema
+                import json as json_lib
+                sequence_id = f"seq_{uuid.uuid4().hex[:12]}"
+                game_type = result.game_id[:4] if len(result.game_id) >= 4 else result.game_id
+
+                # First, insert the winning sequence with proper schema
                 self.db.execute_query("""
                     INSERT INTO winning_sequences (
-                        game_id, sequence_data, score, generation, agent_id,
-                        is_active, created_at
-                    ) VALUES (?, ?, ?, ?, ?, TRUE, datetime('now'))
+                        sequence_id, game_id, game_type, level_number,
+                        action_sequence, total_actions, total_score, efficiency_score,
+                        agent_id, session_id, generation_discovered, is_active,
+                        initial_frame, final_frame, discovered_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', '[]', datetime('now'))
                 """, (
+                    sequence_id,
                     result.game_id,
-                    ','.join(result.action_sequence),
+                    game_type,
+                    result.levels_completed,
+                    json_lib.dumps(result.action_sequence),  # JSON array
+                    result.actions_taken,
                     result.score,
-                    self.current_generation,
+                    result.score / max(1, result.actions_taken),  # efficiency
                     result.agent_id,
+                    self._current_session_id or 'unknown',
+                    self.current_generation,
                 ))
-                print(f"    [SAVED] Winning sequence for {result.game_id}")
+                print(f"    [SAVED] Winning sequence {sequence_id[:12]} for {result.game_id}")
+
+                # CRITICAL: Create viral package to share with network
+                # This enables network-level knowledge transfer per theory
+                if self.viral_package_engine:
+                    try:
+                        package_id = self.viral_package_engine.create_viral_package_from_sequence(
+                            sequence_id=sequence_id,
+                            agent_id=result.agent_id,
+                            generation=self.current_generation,
+                            skip_if_exists=True  # Deduplication
+                        )
+                        if package_id:
+                            print(f"    [VIRAL] Created package {package_id[:12]} for network sharing")
+                    except Exception as vpe:
+                        if self.verbose:
+                            print(f"    [VIRAL-ERR] Could not create package: {vpe}")
 
         except Exception as e:
             print(f"  [WARN] Failed to store result: {e}")

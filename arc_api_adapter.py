@@ -31,11 +31,13 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set
 
 # Import from official arc_agi SDK (no stubs available)
 import arc_agi  # type: ignore
+import requests
 from arc_agi import Arcade, OperationMode  # type: ignore
 from arcengine import FrameDataRaw, GameAction, GameState  # type: ignore
 
@@ -302,11 +304,63 @@ class GameEnvironment:
                 f"Action {action.name} is complex and requires data with 'x' and 'y' coordinates"
             )
 
-        raw = self._env.step(action, data=data, reasoning=reasoning)
-        if raw:
-            self._step_count += 1
-            self._last_observation = Observation(raw)
-            return self._last_observation
+        logger = logging.getLogger(__name__)
+        max_retries = 3
+        retry_delay = 2.0
+
+        for attempt in range(max_retries):
+            try:
+                raw = self._env.step(action, data=data, reasoning=reasoning)
+                if raw:
+                    self._step_count += 1
+                    self._last_observation = Observation(raw)
+                    return self._last_observation
+                return None
+
+            except requests.exceptions.HTTPError as e:
+                status_code = e.response.status_code if e.response is not None else 0
+                if status_code == 500:
+                    # Server error - retry with exponential backoff
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt)
+                        logger.warning(
+                            f"[API] 500 Server Error on {action.name}, retrying in {wait_time:.1f}s "
+                            f"(attempt {attempt + 1}/{max_retries})"
+                        )
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        # Final attempt failed - return None to signal failure
+                        logger.error(
+                            f"[API] 500 Server Error on {action.name} after {max_retries} attempts, "
+                            f"marking game as failed"
+                        )
+                        return None
+                elif status_code == 429:
+                    # Rate limit - longer backoff
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (3 ** attempt)  # Longer wait for rate limit
+                        logger.warning(
+                            f"[API] Rate limit (429) on {action.name}, waiting {wait_time:.1f}s"
+                        )
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"[API] Rate limit exceeded after {max_retries} attempts")
+                        return None
+                else:
+                    # Other HTTP errors - don't retry
+                    logger.error(f"[API] HTTP error {status_code} on {action.name}: {e}")
+                    return None
+
+            except Exception as e:
+                # Catch other unexpected errors
+                logger.error(f"[API] Unexpected error on {action.name}: {type(e).__name__}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                return None
+
         return None
 
     def get_available_actions(self) -> List[str]:
