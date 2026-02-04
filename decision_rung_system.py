@@ -1096,11 +1096,38 @@ class ExplorationPhaseRung(DecisionRung):
                 exploration_actions = filter_available_actions(
                     ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION6'], context
                 )
+                chosen_action = random.choice(exploration_actions)
+
+                # If ACTION6 (click), provide coordinates from visual_analyzer
+                metadata: Dict[str, Any] = {
+                    'phase': 'discovery',
+                    'budget_used': budget_used,
+                    'coverage': coverage
+                }
+                if chosen_action == 'ACTION6':
+                    # Try to get grid exploration targets for coordinates
+                    va = self.engines.visual_analyzer if self.engines else None
+                    if va and hasattr(va, 'get_grid_exploration_targets'):
+                        targets = va.get_grid_exploration_targets()
+                        if targets:
+                            target = targets[0]
+                            metadata['x'] = target.get('x', 32)
+                            metadata['y'] = target.get('y', 32)
+                            metadata['grid_target'] = target
+                        else:
+                            # Fallback: random position in 64x64 grid
+                            metadata['x'] = random.randint(4, 60)
+                            metadata['y'] = random.randint(4, 60)
+                    else:
+                        # No visual analyzer - use random position
+                        metadata['x'] = random.randint(4, 60)
+                        metadata['y'] = random.randint(4, 60)
+
                 return RungResult(
-                    action=random.choice(exploration_actions),
+                    action=chosen_action,
                     confidence=0.6,
                     reason=f"Discovery phase: budget={budget_used:.0%}, coverage={coverage:.0%}",
-                    metadata={'phase': 'discovery', 'budget_used': budget_used, 'coverage': coverage}
+                    metadata=metadata
                 )
             return RungResult(metadata={'phase': 'intermediate' if budget_used < 0.7 else 'final'})
         except Exception as e:
@@ -1308,6 +1335,17 @@ class SmartActionSelectionRung(DecisionRung):
     default_priority = 99  # Always last
     confidence_threshold = 0.0  # Always provides answer
 
+    def _get_action6_coordinates(self) -> Dict[str, int]:
+        """Get coordinates for ACTION6 from visual_analyzer or random fallback."""
+        va = self.engines.visual_analyzer if self.engines else None
+        if va and hasattr(va, 'get_grid_exploration_targets'):
+            targets = va.get_grid_exploration_targets()
+            if targets:
+                target = targets[0]
+                return {'x': target.get('x', 32), 'y': target.get('y', 32), 'grid_target': target}
+        # Fallback: random position
+        return {'x': random.randint(4, 60), 'y': random.randint(4, 60)}
+
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         try:
             strategy = context.get('fallback_strategy', 'balanced')
@@ -1335,18 +1373,30 @@ class SmartActionSelectionRung(DecisionRung):
             for action, weight in weights.items():
                 cumulative += weight
                 if r <= cumulative:
+                    # Add coordinates if ACTION6
+                    metadata: Dict[str, Any] = {'strategy': strategy}
+                    if action == 'ACTION6':
+                        metadata.update(self._get_action6_coordinates())
                     return RungResult(
                         action=action,
                         confidence=0.1,
                         reason=f"Fallback ({strategy}): {action}",
-                        weights=weights
+                        weights=weights,
+                        metadata=metadata
                     )
 
             fallback_action = get_random_available_action(context)
-            return RungResult(action=fallback_action, confidence=0.1, reason="Ultimate fallback")
+            # Add coordinates if ACTION6
+            metadata = {'strategy': 'ultimate_fallback'}
+            if fallback_action == 'ACTION6':
+                metadata.update(self._get_action6_coordinates())
+            return RungResult(action=fallback_action, confidence=0.1, reason="Ultimate fallback", metadata=metadata)
         except Exception as e:
             fallback_action = get_random_available_action(context)
-            return RungResult(action=fallback_action, confidence=0.1, reason=f"Fallback error: {e}")
+            metadata = {'error': str(e)}
+            if fallback_action == 'ACTION6':
+                metadata.update({'x': random.randint(4, 60), 'y': random.randint(4, 60)})
+            return RungResult(action=fallback_action, confidence=0.1, reason=f"Fallback error: {e}", metadata=metadata)
 
 
 class InfiniteLoopBreakerRung(DecisionRung):
