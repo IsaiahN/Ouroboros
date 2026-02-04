@@ -279,13 +279,13 @@ ENGINE_CONFIGS: Dict[str, EngineConfig] = {
         fallback_legacy_attr='scientific_method_engine'
     ),
     'hypothesis_system': EngineConfig(
-        module='engines.reasoning.hypothesis_system',
-        class_name='HypothesisSystem',
+        module='engines.social.hypothesis_system',
+        class_name='AgentHypothesisSystem',
         requires_db=True,
         fallback_legacy_attr='hypothesis_system'
     ),
     'symbolic_tracker': EngineConfig(
-        module='engines.reasoning.symbolic_tracker',
+        module='engines.self_model.symbolic_tracker',
         class_name='SymbolicStateTracker',
         requires_db=True
     ),

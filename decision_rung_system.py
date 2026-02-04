@@ -5851,6 +5851,123 @@ ORDERING_PRESETS = {
         ('smart_action_selection', 99),
     ],
 
+    # ==========================================================================
+    # ACTION6 WORLD - For games where ACTION6 is available/primary
+    # ==========================================================================
+    # When ACTION6 is available, the game transforms from "move in direction"
+    # to "interact with a world of objects". This is a fundamentally different
+    # cognitive paradigm requiring:
+    # 1. Object detection and categorization (what's in the world?)
+    # 2. Self-model (what do I control? what can I select?)
+    # 3. World model (what are the physics? what happens when I click X?)
+    # 4. Causality understanding (click A -> enables B -> unlocks C)
+    # 5. Button/trigger detection (what's interactive?)
+    # 6. Strategic targeting (click meaningful things, not random)
+    #
+    # Think of ACTION6 as a touchpad - every frame is a touchscreen interface
+    # where objects have different roles: player, obstacles, triggers, goals.
+    # ==========================================================================
+    'action6_world': [
+        # EMERGENCY - Still need these
+        ('infinite_loop_breaker', 1),
+        ('coordinate_oscillation', 2),
+
+        # PERCEPTION - Understand the visual world FIRST
+        ('palette_detection', 3),  # Extract objects and colors from frame
+        ('sparse_grid', 4),        # Efficient spatial representation
+        ('visual_analyzer', 5),    # Deep frame analysis
+
+        # SELF-MODEL - What do I control? What can I select?
+        ('control_tracker', 6),    # "I am this object" / "I can select these"
+        ('frame_interpretation', 7),  # What changed? What did my click cause?
+
+        # WORLD MODEL - What are the rules of this world?
+        ('event_understanding', 8),  # Causal chains: click X -> Y happens
+        ('trigger_sequences', 9),   # Learn trigger/button chains
+        ('click_behavior_learning', 10),  # What do clicks DO in this game?
+        ('belief_system', 11),      # Current beliefs about the world
+        ('symbolic_tracker', 12),   # Key/lock, button/door relationships
+
+        # OBJECT TARGETING - Find meaningful click targets
+        ('action6_object_exploration', 13),  # Find clickable objects
+        ('network_object_inventory', 14),    # What objects does network know?
+        ('primitive_suggester', 15),         # Primitive-to-action mapping
+
+        # HYPOTHESIS - Form theories about unknown objects
+        ('hypothesis_system', 16),  # "I think clicking blue opens the door"
+        ('scientific_method', 17),  # Test and validate theories
+        ('theory_gate', 18),        # Score proposals against working theory
+        ('assumption_formation', 19),  # Form assumptions from observations
+
+        # NETWORK KNOWLEDGE - What has the colony learned?
+        ('network_wisdom', 20),     # Community knowledge about this game
+        ('network_sharing', 21),    # Cross-agent self-model sharing
+        ('few_shot_relations', 22), # Control invariants from examples
+        ('resonance_detector', 23), # Patterns that resonate across games
+
+        # VALENCE - What's good/bad to click?
+        ('valence_goals', 24),      # Good/bad associations
+        ('death_avoidance', 25),    # Don't click things that kill
+        ('pariah_avoidance', 26),   # Avoid known-bad patterns
+
+        # EXPLORATION - Systematic when all else fails
+        ('grid_exploration', 30),   # Systematic grid walking
+        ('exploration_phase', 35),  # Budget-based exploration
+
+        # METACOGNITION - Am I stuck? Am I learning?
+        ('frustration_detection', 40),
+        ('metacognitive_prediction', 41),
+
+        # FALLBACK
+        ('smart_action_selection', 99),
+    ],
+
+    # ACTION6-only game (like vc33) - everything is about understanding the touchscreen
+    'action6_only': [
+        # EMERGENCY
+        ('infinite_loop_breaker', 1),
+        ('coordinate_oscillation', 2),
+
+        # PERCEPTION - What's on the screen?
+        ('palette_detection', 3),
+        ('sparse_grid', 4),
+        ('visual_analyzer', 5),
+
+        # OBJECT UNDERSTANDING - This is the core for click-only games
+        ('action6_object_exploration', 6),  # ELEVATED: Primary action
+        ('click_behavior_learning', 7),     # ELEVATED: Learn what clicks do
+        ('trigger_sequences', 8),           # ELEVATED: Button chains
+        ('network_object_inventory', 9),    # What objects exist?
+
+        # WORLD MODEL - Causality is everything
+        ('event_understanding', 10),  # What causes what?
+        ('belief_system', 11),
+        ('symbolic_tracker', 12),     # Key/lock relationships
+        ('control_tracker', 13),      # What can I select/control?
+
+        # HYPOTHESIS - Test theories about objects
+        ('hypothesis_system', 14),
+        ('scientific_method', 15),
+        ('theory_gate', 16),
+
+        # NETWORK - Community knowledge
+        ('network_wisdom', 17),
+        ('network_sharing', 18),
+        ('primitive_suggester', 19),
+        ('valence_goals', 20),
+
+        # SAFETY
+        ('death_avoidance', 25),
+        ('pariah_avoidance', 26),
+
+        # EXPLORATION - Systematic coverage
+        ('grid_exploration', 30),
+        ('exploration_phase', 35),
+
+        # FALLBACK
+        ('smart_action_selection', 99),
+    ],
+
     # Exploration-heavy for frontier games (includes trust boost + palette detection)
     'frontier_exploration': [
         ('infinite_loop_breaker', 1),
@@ -6291,18 +6408,93 @@ class DecisionRungSystem:
         """
         self.total_decisions += 1
 
-        if self.strategy == DecisionStrategy.LADDER:
-            return self._decide_ladder(game_state, context)
-        elif self.strategy == DecisionStrategy.WEIGHTED:
-            return self._decide_weighted(game_state, context)
-        elif self.strategy == DecisionStrategy.PHASED:
-            return self._decide_phased(game_state, context)
-        elif self.strategy == DecisionStrategy.PARALLEL:
-            return self._decide_parallel(game_state, context)
-        elif self.strategy == DecisionStrategy.CONTEXT_ADAPTIVE:
-            return self._decide_context_adaptive(game_state, context)
-        else:
-            return self._decide_ladder(game_state, context)
+        # =================================================================
+        # DYNAMIC ORDERING SWITCHING FOR ACTION6 GAMES
+        # =================================================================
+        # When ACTION6 is the only available action, this is a fundamentally
+        # different game paradigm - a "touchscreen world" where understanding
+        # objects, causality, and triggers is paramount. Switch to the
+        # action6-optimized ordering automatically.
+        # =================================================================
+        available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+        current_ordering = self.ordering_name
+
+        # Detect if we need to switch ordering for this decision
+        target_ordering = self._select_ordering_for_context(available, context)
+        if target_ordering != current_ordering:
+            self._switch_ordering_temporarily(target_ordering)
+
+        try:
+            if self.strategy == DecisionStrategy.LADDER:
+                return self._decide_ladder(game_state, context)
+            elif self.strategy == DecisionStrategy.WEIGHTED:
+                return self._decide_weighted(game_state, context)
+            elif self.strategy == DecisionStrategy.PHASED:
+                return self._decide_phased(game_state, context)
+            elif self.strategy == DecisionStrategy.PARALLEL:
+                return self._decide_parallel(game_state, context)
+            elif self.strategy == DecisionStrategy.CONTEXT_ADAPTIVE:
+                return self._decide_context_adaptive(game_state, context)
+            else:
+                return self._decide_ladder(game_state, context)
+        finally:
+            # Restore original ordering if we switched
+            if target_ordering != current_ordering:
+                self._switch_ordering_temporarily(current_ordering)
+
+    def _select_ordering_for_context(
+        self,
+        available_actions: List[int],
+        context: Dict[str, Any]
+    ) -> str:
+        """
+        Select the best ordering based on available actions and context.
+
+        This implements the "innate understanding" that different action
+        profiles require fundamentally different cognitive approaches.
+        """
+        # ACTION6-only game (vc33 style) - touchscreen world
+        if available_actions == [6]:
+            return 'action6_only'
+
+        # ACTION6 is available alongside other actions - hybrid world
+        if 6 in available_actions:
+            # If current ordering is already action6-aware, keep it
+            if self.ordering_name in ('action6_world', 'action6_only', 'frontier_exploration'):
+                return self.ordering_name
+            # If it's a frontier game, use action6_world
+            if context.get('frontier_mode', False):
+                return 'action6_world'
+            # Otherwise, let it use whatever was set
+            return self.ordering_name
+
+        # No ACTION6 - standard directional game
+        return self.ordering_name
+
+    def _switch_ordering_temporarily(self, target_ordering: str) -> None:
+        """
+        Switch to a different ordering without permanent state change.
+
+        This re-sorts rungs by the new ordering's priorities without
+        reinstantiating them (which would lose state).
+        """
+        if target_ordering not in ORDERING_PRESETS:
+            return
+
+        ordering = ORDERING_PRESETS[target_ordering]
+        priority_map = {name: priority for name, priority in ordering}
+
+        # Update priorities for existing rungs
+        for rung in self.rungs:
+            if rung.name in priority_map:
+                rung.priority_override = priority_map[rung.name]
+            else:
+                # Rung not in this ordering - give it very low priority
+                rung.priority_override = 200
+
+        # Re-sort by new priorities
+        self.rungs.sort(key=lambda r: r.get_priority())
+        self.ordering_name = target_ordering
 
     def _decide_ladder(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
         """First confident answer wins, with temporal modulation of rung priorities."""
