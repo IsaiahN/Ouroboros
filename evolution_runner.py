@@ -855,6 +855,36 @@ class EvolutionRunner:
         last_action_str = ''
         last_frame_changed = True  # Assume first frame is "changed"
         failed_actions: set = set()  # Track actions that resulted in no change
+        recent_actions: list = []  # Track last N actions for context
+        last_score_delta = 0.0  # Track score change from last action
+        last_outcome_type = 'neutral'  # 'positive', 'negative', 'neutral', 'death'
+        has_full_win = False  # Track if this game type has been fully won before
+        active_sequence: list = []  # Current winning sequence to follow (if any)
+        sequence_position = 0  # Current position in active_sequence
+        is_replay_mode = False  # True when following a known sequence
+        stuck_count = 0  # Count of consecutive stuck frames
+        tried_colors: set = set()  # Colors we've tried clicking (for ACTION6 exploration)
+
+        # Check if game already has a winning sequence (for frontier_mode)
+        try:
+            result = self.db.execute_query("""
+                SELECT winning_sequence FROM winning_sequences_full_game
+                WHERE game_id = ? AND is_active = 1
+                ORDER BY efficiency_score DESC LIMIT 1
+            """, (game_id,))
+            if result:
+                has_full_win = True
+                # Load the best sequence for replay
+                seq_data = result[0][0]
+                if seq_data:
+                    import json
+                    if isinstance(seq_data, str):
+                        active_sequence = json.loads(seq_data)
+                    else:
+                        active_sequence = list(seq_data)
+                    is_replay_mode = True
+        except Exception:
+            has_full_win = False
 
         # Reset symbolic reasoning state for new game
         self.player_localizer.reset()
@@ -898,18 +928,43 @@ class EvolutionRunner:
                 'game_type': game_id[:4] if game_id and len(game_id) >= 4 else '',  # Extract game type prefix
                 'agent_id': agent.agent_id,
                 'actions_taken': actions_taken,
+                'action_count': actions_taken,  # Alias for budget tracking
                 'state': str(obs.state) if obs else 'UNKNOWN',
                 'frame_data': obs,
                 'available_actions': current_available,  # Current, not initial
                 'levels_completed': getattr(obs, 'levels_completed', 0),
                 'level': (getattr(obs, 'levels_completed', 0) or 0) + 1,  # Current level (1-indexed)
+                'level_number': (getattr(obs, 'levels_completed', 0) or 0) + 1,  # Alias
                 'win_levels': win_levels,
                 # State tracking for MapIntelCollisionRung and ThreeLayerFilterRung
                 'last_action': last_action_str,
+                'last_actions': recent_actions[-5:] if recent_actions else [],  # Last 5 actions
                 'frame_changed': last_frame_changed,
                 'failed_actions': failed_actions,
                 # Position tracking (default to center if unknown)
                 'position': (32, 32),
+                'player_position': (32, 32),  # Alias
+                # Score tracking
+                'score': getattr(obs, 'score', 0.0),
+                'score_delta': last_score_delta,
+                'last_outcome': last_outcome_type,  # 'positive', 'negative', 'neutral', 'death'
+                # Frontier/mode flags
+                'frontier_mode': not has_full_win,  # Frontier if no full game win yet
+                'is_frontier': not has_full_win,
+                'is_novel_game': actions_taken < 50,  # Novel for first 50 actions
+                'optimization_mode': has_full_win,  # Optimization mode if we have a win
+                # Session tracking
+                'session_id': self._current_session_id,
+                'scorecard_id': scorecard_id,
+                # Sequence tracking (for ThreeTrySequenceRung, MultiStageMatchingRung)
+                'active_sequence': active_sequence,
+                'sequence_position': sequence_position,
+                'is_replay': is_replay_mode,
+                'replay_mode': is_replay_mode,  # Alias
+                # Stuck tracking
+                'recent_stuck_count': stuck_count,
+                # Click exploration tracking
+                'tried_colors': tried_colors,
             }
 
             # Get action from decision system
@@ -1032,6 +1087,9 @@ class EvolutionRunner:
 
             # Update state tracking for decision context
             last_action_str = action.name
+            recent_actions.append(action.name)
+            if len(recent_actions) > 10:
+                recent_actions.pop(0)  # Keep last 10
 
             # Detect if frame changed (for collision detection)
             frame_hash_before = self._compute_frame_hash(obs_before)
@@ -1041,6 +1099,13 @@ class EvolutionRunner:
             # Track failed actions (no change = potential collision/invalid)
             if not last_frame_changed and action.name.startswith('ACTION'):
                 failed_actions.add(action.name)
+                stuck_count += 1  # Increment stuck counter
+            else:
+                stuck_count = 0  # Reset on successful action
+
+            # Update sequence position if following a sequence
+            if is_replay_mode and active_sequence and sequence_position < len(active_sequence):
+                sequence_position += 1
 
             last_obs = obs
 
@@ -1051,8 +1116,22 @@ class EvolutionRunner:
             # Calculate score for this step (levels completed as fraction)
             current_score = current_levels / win_levels if win_levels > 0 else 0.0
 
-            # CRITICAL: Record action trace for learning
+            # Update score tracking for context
+            last_score_delta = current_score - prev_score
             is_game_over = obs and obs.state in (GameState.WIN, GameState.GAME_OVER)
+            is_death = obs and obs.state == GameState.GAME_OVER and not level_up
+
+            # Determine outcome type for context
+            if is_death:
+                last_outcome_type = 'death'
+            elif last_score_delta > 0 or level_up:
+                last_outcome_type = 'positive'
+            elif last_score_delta < 0:
+                last_outcome_type = 'negative'
+            else:
+                last_outcome_type = 'neutral'
+
+            # CRITICAL: Record action trace for learning
             self._record_action_trace(
                 game_id=game_id,
                 action_num=action_num,

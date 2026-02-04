@@ -2651,7 +2651,7 @@ class SparseGridRung(DecisionRung):
 
         # Import sparse grid module
         try:
-            from engines.perception.sparse_grid import SparseGrid, sparse_from_frame
+            from engines.perception.sparse_grid import sparse_from_frame
         except ImportError as e:
             return RungResult(
                 confidence=0.0,
@@ -3602,6 +3602,126 @@ class GridExplorationRung(DecisionRung):
             return RungResult(reason=f"Grid exploration failed: {e}")
 
 
+class Action6ObjectExplorationRung(DecisionRung):
+    """
+    Use Action6BehaviorEngine to find clickable objects - EXPLORATION
+
+    This rung uses the sophisticated pseudobutton/object selection system to:
+    1. Find objects in the current frame that match known selectable shapes
+    2. Prioritize unexplored objects for frontier exploration
+    3. Return specific click coordinates for ACTION6
+
+    This is critical for ACTION6-only games like vc33.
+    """
+    name = "action6_object_exploration"
+    category = "exploration"
+    default_priority = 38  # Higher priority than GridExplorationRung (47)
+    confidence_threshold = 0.35
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        # Check if ACTION6 is available
+        available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+        if 6 not in available:
+            return RungResult()
+
+        # Get the action6_behavior engine
+        a6e = self.engines.action6_behavior
+        if a6e is None:
+            return RungResult()
+
+        try:
+            game_type = context.get('game_type', '')
+            level = context.get('level', 1)
+
+            # Get current frame from game_state
+            frame = None
+            if hasattr(game_state, 'frame'):
+                frame = game_state.frame
+            elif isinstance(game_state, dict):
+                frame = game_state.get('frame')
+
+            if not frame:
+                return RungResult()
+
+            # First try: Get objects matching known selectable shapes for this game
+            if hasattr(a6e, 'get_untried_objects_for_frontier'):
+                tried_colors = context.get('tried_colors', [])
+                objects = a6e.get_untried_objects_for_frontier(
+                    game_type=game_type,
+                    level=level,
+                    frame=frame,
+                    tried_colors=tried_colors
+                )
+                if objects:
+                    obj = objects[0]  # Highest confidence match
+                    # Get center coordinates of the object
+                    x = obj.get('center_x', obj.get('x', 32))
+                    y = obj.get('center_y', obj.get('y', 32))
+                    return RungResult(
+                        action='ACTION6',
+                        confidence=0.55 + (obj.get('shape_confidence', 0) * 0.2),
+                        reason=f"Object exploration: color={obj.get('color')} shape={obj.get('shape_signature')} at ({x},{y})",
+                        metadata={
+                            'x': x,
+                            'y': y,
+                            'target_object': obj,
+                            'source': 'shape_matching'
+                        }
+                    )
+
+            # Second try: Get known pseudo-buttons for this game/level
+            if hasattr(a6e, 'get_all_pseudo_buttons'):
+                buttons = a6e.get_all_pseudo_buttons(game_type, level)
+                if buttons:
+                    # Find highest-confidence button that produces useful action
+                    for button in buttons:
+                        if button.get('confidence', 0) >= 0.5:
+                            # Region coords are 0-7, convert to pixel coords (center of 8x8 region)
+                            region_x = button.get('region_x', 4)
+                            region_y = button.get('region_y', 4)
+                            x = region_x * 8 + 4  # Center of region
+                            y = region_y * 8 + 4
+                            return RungResult(
+                                action='ACTION6',
+                                confidence=0.50 + button.get('confidence', 0) * 0.3,
+                                reason=f"Pseudo-button at region ({region_x},{region_y}) -> ({x},{y})",
+                                metadata={
+                                    'x': x,
+                                    'y': y,
+                                    'pseudo_button': button,
+                                    'source': 'pseudo_button'
+                                }
+                            )
+
+            # Third try: Get selectable objects from network knowledge
+            if hasattr(a6e, 'get_selectable_objects'):
+                objects = a6e.get_selectable_objects(game_type, level, min_confidence=0.4)
+                if objects:
+                    obj = objects[0]
+                    coords = obj.get('coordinates', '')
+                    # Parse coordinates like "(32,45)"
+                    if coords:
+                        import re
+                        match = re.match(r'\((\d+),(\d+)\)', coords)
+                        if match:
+                            x, y = int(match.group(1)), int(match.group(2))
+                            return RungResult(
+                                action='ACTION6',
+                                confidence=0.45 + obj.get('confidence', 0) * 0.3,
+                                reason=f"Selectable object color={obj.get('object_color')} at ({x},{y})",
+                                metadata={
+                                    'x': x,
+                                    'y': y,
+                                    'selectable_object': obj,
+                                    'source': 'network_knowledge'
+                                }
+                            )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Action6 object exploration failed: {e}")
+
+
 class NetworkObjectInventoryRung(DecisionRung):
     """Query network knowledge about interactable objects - EXPLOITATION"""
     name = "network_object_inventory"
@@ -3629,15 +3749,791 @@ class NetworkObjectInventoryRung(DecisionRung):
                     # Bias toward interacting with known objects
                     interactable = inventory.get('interactable', [])
                     if interactable:
+                        # Extract coordinates from first interactable object
+                        first_obj = interactable[0]
+                        x = first_obj.get('x', first_obj.get('center_x', 32))
+                        y = first_obj.get('y', first_obj.get('center_y', 32))
                         return RungResult(
                             action='ACTION6',
                             confidence=0.5,
-                            reason=f"Network inventory: {len(interactable)} interactable positions",
-                            metadata={'inventory': inventory}
+                            reason=f"Network inventory: {len(interactable)} interactable at ({x},{y})",
+                            metadata={
+                                'x': x,
+                                'y': y,
+                                'inventory': inventory,
+                                'target_object': first_obj
+                            }
                         )
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Network object inventory failed: {e}")
+
+
+class ClickBehaviorLearningRung(DecisionRung):
+    """Learn and predict click behaviors using ClickBehaviorClassifier - EXPLOITATION
+
+    Uses engines/self_model/click_behavior.py to:
+    1. Predict what clicking an object will do (collect, toggle, trigger, etc.)
+    2. Suggest clicks on objects with positive behaviors (score+)
+    3. Avoid clicks on objects with negative behaviors (score-)
+
+    This enables intelligent clicking based on learned object behaviors.
+    """
+    name = "click_behavior_learning"
+    category = "exploitation"
+    default_priority = 36  # Just above NetworkObjectInventoryRung
+    confidence_threshold = 0.4
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        cb = self.engines.click_behavior
+        if cb is None:
+            return RungResult()
+
+        try:
+            # ACTION6 is typically 'click' - only suggest if available
+            available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+            if 6 not in available:
+                return RungResult()  # Click not available for this game
+
+            game_type = context.get('game_type', '')
+            if not game_type:
+                return RungResult()
+
+            # First: Check for collectible objects (positive score impact)
+            if hasattr(cb, 'get_collectible_objects'):
+                collectibles = cb.get_collectible_objects(game_type)
+                if collectibles:
+                    # Click on the most valuable collectible
+                    best = collectibles[0]
+                    x = best.get('x', best.get('center_x', 32))
+                    y = best.get('y', best.get('center_y', 32))
+                    return RungResult(
+                        action='ACTION6',
+                        confidence=0.6 + best.get('avg_score_impact', 0) * 0.2,
+                        reason=f"Collectible object at ({x},{y}) - avg impact: {best.get('avg_score_impact', 0):.2f}",
+                        metadata={
+                            'x': x,
+                            'y': y,
+                            'collectible': best,
+                            'behavior_type': 'collect'
+                        }
+                    )
+
+            # Second: Check for trigger objects (chain reactions)
+            if hasattr(cb, 'get_trigger_objects'):
+                triggers = cb.get_trigger_objects(game_type)
+                if triggers:
+                    best = triggers[0]
+                    x = best.get('x', best.get('center_x', 32))
+                    y = best.get('y', best.get('center_y', 32))
+                    return RungResult(
+                        action='ACTION6',
+                        confidence=0.5,
+                        reason=f"Trigger object at ({x},{y}) - may cause chain reaction",
+                        metadata={
+                            'x': x,
+                            'y': y,
+                            'trigger': best,
+                            'behavior_type': 'trigger'
+                        }
+                    )
+
+            # Third: Predict behavior for objects in current frame
+            frame = getattr(game_state, 'frame', None)
+            if frame is not None and hasattr(cb, 'predict_click_behavior'):
+                # Try center region first as likely interactive area
+                prediction = cb.predict_click_behavior(
+                    object_id='center_region',
+                    color=-1,  # Unknown
+                    game_type=game_type
+                )
+                if prediction and prediction.behavior.value not in ('unknown', 'no_effect', 'destroy'):
+                    return RungResult(
+                        action='ACTION6',
+                        confidence=prediction.confidence * 0.8,
+                        reason=f"Predicted behavior: {prediction.behavior.value} at center",
+                        metadata={
+                            'x': 32,
+                            'y': 32,
+                            'prediction': prediction.behavior.value,
+                            'behavior_type': 'predicted'
+                        }
+                    )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Click behavior learning failed: {e}")
+
+
+class ControlTrackerRung(DecisionRung):
+    """Track which objects the agent controls - ORIENTATION (self-model)
+
+    Uses engines/self_model/control_tracker.py to:
+    1. Track action-movement correlations to identify controlled objects
+    2. Provide "I am this object" identity information
+    3. Suggest actions that move the controlled object toward goals
+
+    This is CRITICAL for agents to understand their embodiment in the game.
+    """
+    name = "control_tracker"
+    category = "orientation"
+    default_priority = 8  # Early - need to know what we control
+    confidence_threshold = 0.3
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        ct = self.engines.control_tracker
+        if ct is None:
+            return RungResult()
+
+        try:
+            game_id = context.get('game_id', context.get('game_type', ''))
+            level = context.get('level', context.get('level_number', 1))
+
+            if not game_id:
+                return RungResult()
+
+            # Get controlled objects for this game/level
+            if hasattr(ct, 'get_controlled_objects'):
+                controlled = ct.get_controlled_objects(game_id, level)
+
+                if controlled:
+                    # We know what we control - add to context for other rungs
+                    best = controlled[0]  # Highest confidence
+                    action_map = best.action_map
+
+                    # If we have a goal/target, suggest action to move toward it
+                    target = context.get('target_position') or context.get('goal_position')
+                    player_pos = context.get('player_position')
+
+                    if target and player_pos:
+                        dx = target[0] - player_pos[0]
+                        dy = target[1] - player_pos[1]
+
+                        # Find action that moves in correct direction
+                        for action, direction in action_map.items():
+                            if direction == 'right' and dx > 0:
+                                return RungResult(
+                                    action=action,
+                                    confidence=0.6,
+                                    reason=f"Move {best.object_id} right toward target",
+                                    metadata={'controlled_object': best.to_dict(), 'direction': 'right'}
+                                )
+                            elif direction == 'left' and dx < 0:
+                                return RungResult(
+                                    action=action,
+                                    confidence=0.6,
+                                    reason=f"Move {best.object_id} left toward target",
+                                    metadata={'controlled_object': best.to_dict(), 'direction': 'left'}
+                                )
+                            elif direction == 'down' and dy > 0:
+                                return RungResult(
+                                    action=action,
+                                    confidence=0.6,
+                                    reason=f"Move {best.object_id} down toward target",
+                                    metadata={'controlled_object': best.to_dict(), 'direction': 'down'}
+                                )
+                            elif direction == 'up' and dy < 0:
+                                return RungResult(
+                                    action=action,
+                                    confidence=0.6,
+                                    reason=f"Move {best.object_id} up toward target",
+                                    metadata={'controlled_object': best.to_dict(), 'direction': 'up'}
+                                )
+
+                    # No target - just return info about what we control
+                    return RungResult(
+                        confidence=0.3,
+                        reason=f"Control tracker: {best.object_id} ({best.confidence.value})",
+                        metadata={
+                            'controlled_objects': [c.to_dict() for c in controlled],
+                            'primary_control': best.to_dict()
+                        }
+                    )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Control tracker failed: {e}")
+
+
+class BeliefSystemRung(DecisionRung):
+    """Track and use agent beliefs - HYPOTHESIS
+
+    Uses engines/self_model/belief_system.py to:
+    1. Query current beliefs about the game
+    2. Use high-confidence beliefs to guide action selection
+    3. Track belief invalidation cascades
+
+    Beliefs provide persistent knowledge across actions.
+    """
+    name = "belief_system"
+    category = "hypothesis"
+    default_priority = 25
+    confidence_threshold = 0.4
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        bs = self.engines.belief_system
+        if bs is None:
+            return RungResult()
+
+        try:
+            game_type = context.get('game_type', '')
+            if not game_type:
+                return RungResult()
+
+            # Get active beliefs for this game
+            if hasattr(bs, 'get_active_beliefs'):
+                beliefs = bs.get_active_beliefs(game_type)
+
+                if beliefs:
+                    # Find high-confidence beliefs with action implications
+                    for belief in beliefs:
+                        if belief.get('confidence', 0) > 0.7:
+                            # Check if belief suggests an action
+                            statement = belief.get('statement', '')
+                            if 'ACTION' in statement.upper():
+                                # Extract action suggestion
+                                for i in range(1, 8):
+                                    if f'ACTION{i}' in statement.upper():
+                                        return RungResult(
+                                            action=f'ACTION{i}',
+                                            confidence=belief.get('confidence', 0.5) * 0.7,
+                                            reason=f"Belief: {statement[:50]}...",
+                                            metadata={'belief': belief}
+                                        )
+
+                    # Return belief context for other rungs
+                    return RungResult(
+                        confidence=0.3,
+                        reason=f"Belief system: {len(beliefs)} active beliefs",
+                        metadata={'active_beliefs': beliefs[:5]}  # Top 5
+                    )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Belief system failed: {e}")
+
+
+class HypothesisSystemRung(DecisionRung):
+    """Manage agent hypotheses - HYPOTHESIS
+
+    Uses engines/social/hypothesis_system.py to:
+    1. Get untested hypotheses that need validation
+    2. Suggest actions to test hypotheses
+    3. Record test results for learning
+
+    This enables agents to actively test their theories.
+    """
+    name = "hypothesis_system"
+    category = "hypothesis"
+    default_priority = 26
+    confidence_threshold = 0.4
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        hs = self.engines.hypothesis_system
+        if hs is None:
+            return RungResult()
+
+        try:
+            agent_id = context.get('agent_id', '')
+            game_type = context.get('game_type', '')
+
+            if not agent_id or not game_type:
+                return RungResult()
+
+            # Get testable hypotheses for this game
+            if hasattr(hs, 'get_agent_hypotheses'):
+                hypotheses = hs.get_agent_hypotheses(agent_id, game_type, status='testing')
+
+                if hypotheses:
+                    # Find hypothesis with predicted action
+                    for hyp in hypotheses:
+                        predicted_action = hyp.get('predicted_action')
+                        if predicted_action:
+                            return RungResult(
+                                action=predicted_action,
+                                confidence=0.55,
+                                reason=f"Testing hypothesis: {hyp.get('hypothesis_text', '')[:40]}...",
+                                metadata={
+                                    'hypothesis_id': hyp.get('hypothesis_id'),
+                                    'hypothesis': hyp,
+                                    'testing_mode': True
+                                }
+                            )
+
+                        # Check for action sequence
+                        sequence = hyp.get('action_sequence')
+                        if sequence and isinstance(sequence, list) and len(sequence) > 0:
+                            # Get position in sequence
+                            seq_pos = context.get('hypothesis_sequence_position', 0)
+                            if seq_pos < len(sequence):
+                                return RungResult(
+                                    action=sequence[seq_pos],
+                                    confidence=0.5,
+                                    reason=f"Hypothesis sequence step {seq_pos + 1}/{len(sequence)}",
+                                    metadata={
+                                        'hypothesis_id': hyp.get('hypothesis_id'),
+                                        'sequence_position': seq_pos,
+                                        'full_sequence': sequence
+                                    }
+                                )
+
+            # Check for hypothesis suggestions from patterns
+            if hasattr(hs, 'suggest_hypothesis_from_pattern'):
+                observations = context.get('recent_observations', [])
+                if observations:
+                    suggestion = hs.suggest_hypothesis_from_pattern(agent_id, game_type, observations)
+                    if suggestion:
+                        return RungResult(
+                            confidence=0.3,
+                            reason=f"Hypothesis suggestion: {suggestion.get('suggested_hypothesis', '')[:40]}...",
+                            metadata={'hypothesis_suggestion': suggestion}
+                        )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Hypothesis system failed: {e}")
+
+
+class TriggerSequencesRung(DecisionRung):
+    """Learn and use trigger chains - EXPLOITATION
+
+    Uses engines/self_model/trigger_sequences.py to:
+    1. Record trigger chains (X causes Y which causes Z)
+    2. Replay proven action sequences for levels
+    3. Predict trigger effects
+
+    Critical for puzzle games with cause-effect chains.
+    """
+    name = "trigger_sequences"
+    category = "exploitation"
+    default_priority = 43
+    confidence_threshold = 0.5
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        ts = self.engines.trigger_sequences
+        if ts is None:
+            return RungResult()
+
+        try:
+            game_type = context.get('game_type', '')
+            level = context.get('level', context.get('level_number', 1))
+
+            if not game_type:
+                return RungResult()
+
+            # Check for proven trigger sequence for this level
+            if hasattr(ts, 'get_proven_sequence'):
+                proven = ts.get_proven_sequence(game_type, level)
+                if proven:
+                    # Get current position in sequence
+                    action_count = context.get('action_count', 0)
+                    if action_count < len(proven):
+                        step = proven[action_count]
+                        return RungResult(
+                            action=step.get('action', f'ACTION{step.get("step_number", 1)}'),
+                            confidence=0.75,
+                            reason=f"Proven trigger sequence step {action_count + 1}/{len(proven)}",
+                            metadata={
+                                'trigger_step': step,
+                                'full_sequence': proven,
+                                'sequence_position': action_count
+                            }
+                        )
+
+            # Check for known trigger effects
+            if hasattr(ts, 'predict_trigger_effect'):
+                frame = getattr(game_state, 'frame', None)
+                if frame is not None:
+                    # Get available actions
+                    available = context.get('available_actions', list(range(1, 8)))
+                    for action_num in available:
+                        action = f'ACTION{action_num}'
+                        prediction = ts.predict_trigger_effect(game_type, level, action)
+                        if prediction and prediction.get('effect') == 'score_change':
+                            if prediction.get('score_delta', 0) > 0:
+                                return RungResult(
+                                    action=action,
+                                    confidence=0.6,
+                                    reason=f"Trigger predicts +score: {prediction.get('effect_target')}",
+                                    metadata={'trigger_prediction': prediction}
+                                )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Trigger sequences failed: {e}")
+
+
+class SymbolicTrackerRung(DecisionRung):
+    """Track symbolic state for transformation puzzles - HYPOTHESIS
+
+    Uses engines/self_model/symbolic_tracker.py to:
+    1. Identify key objects (controllable) vs lock objects (target)
+    2. Track symbolic properties: shape, color, orientation
+    3. Suggest actions to make key match lock
+
+    Essential for transformation/matching puzzles.
+    """
+    name = "symbolic_tracker"
+    category = "hypothesis"
+    default_priority = 24
+    confidence_threshold = 0.45
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        st = self.engines.symbolic_tracker
+        if st is None:
+            return RungResult()
+
+        try:
+            frame = getattr(game_state, 'frame', None)
+            if frame is None:
+                return RungResult()
+
+            # Identify symbolic objects
+            if hasattr(st, 'identify_symbolic_objects'):
+                controlled_colors = context.get('controlled_colors', [])
+                objects = st.identify_symbolic_objects(frame, controlled_colors)
+
+                keys = objects.get('keys', {})
+                locks = objects.get('locks', {})
+                tools = objects.get('tools', {})
+
+                if keys and locks:
+                    # Check match score
+                    if hasattr(st, 'calculate_match_score'):
+                        match_score = st.calculate_match_score()
+
+                        if match_score < 1.0:
+                            # Not matching - try to identify transformation needed
+                            if hasattr(st, 'suggest_transformation'):
+                                suggestion = st.suggest_transformation()
+                                if suggestion:
+                                    action = suggestion.get('action')
+                                    if action:
+                                        return RungResult(
+                                            action=action,
+                                            confidence=0.55,
+                                            reason=f"Symbolic match {match_score:.0%} - {suggestion.get('reason', 'transform')}",
+                                            metadata={
+                                                'match_score': match_score,
+                                                'keys': keys,
+                                                'locks': locks,
+                                                'suggestion': suggestion
+                                            }
+                                        )
+
+                        # Near match - return status
+                        return RungResult(
+                            confidence=0.3 + match_score * 0.3,
+                            reason=f"Symbolic tracking: {len(keys)} keys, {len(locks)} locks, match={match_score:.0%}",
+                            metadata={'keys': keys, 'locks': locks, 'tools': tools, 'match_score': match_score}
+                        )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Symbolic tracker failed: {e}")
+
+
+class EmbeddingMatcherRung(DecisionRung):
+    """Use frame embeddings to find similar past situations - EXPLOITATION
+
+    Uses engines/self_model/embedding_matcher.py to:
+    1. Find similar past game frames using neural embeddings
+    2. Return what action worked best in those situations
+    3. Apply recency weighting (recent experiences weighted higher)
+
+    This enables implicit generalization through learned representations.
+    """
+    name = "embedding_matcher"
+    category = "exploitation"
+    default_priority = 44
+    confidence_threshold = 0.4
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        em = self.engines.embedding_matcher
+        if em is None:
+            return RungResult()
+
+        try:
+            frame = getattr(game_state, 'frame', None)
+            if frame is None:
+                return RungResult()
+
+            game_type = context.get('game_type', '')
+            level = context.get('level', context.get('level_number', 1))
+
+            if not game_type:
+                return RungResult()
+
+            # Get embedding-based action suggestion
+            if hasattr(em, 'get_embedding_suggested_action'):
+                suggestion = em.get_embedding_suggested_action(
+                    game_type=game_type,
+                    level=level,
+                    current_frame=frame,
+                    top_k=5
+                )
+
+                if suggestion and suggestion.get('suggested_action'):
+                    action = suggestion['suggested_action']
+                    confidence = suggestion.get('confidence', 0.5)
+                    similar_count = len(suggestion.get('similar_situations', []))
+
+                    return RungResult(
+                        action=f'ACTION{action}' if isinstance(action, int) else action,
+                        confidence=confidence * 0.8,
+                        reason=f"Embedding match: {similar_count} similar situations suggest action {action}",
+                        metadata={
+                            'similar_situations': suggestion.get('similar_situations', [])[:3],
+                            'embedding_confidence': confidence
+                        }
+                    )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Embedding matcher failed: {e}")
+
+
+class FewShotRelationsRung(DecisionRung):
+    """Use few-shot invariants for quick control bootstrapping - EXPLOITATION
+
+    Uses engines/self_model/few_shot_relations.py to:
+    1. Get control invariants (what ALWAYS works for this action)
+    2. Get control variants (what CHANGES based on context)
+    3. Suggest actions based on proven invariants
+
+    Enables quick learning from small numbers of examples.
+    """
+    name = "few_shot_relations"
+    category = "exploitation"
+    default_priority = 52
+    confidence_threshold = 0.45
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        fsr = self.engines.few_shot_relations
+        if fsr is None:
+            return RungResult()
+
+        try:
+            game_id = context.get('game_id', context.get('game_type', ''))
+            level = context.get('level', context.get('level_number', 1))
+
+            if not game_id:
+                return RungResult()
+
+            # Get few-shot control relations
+            if hasattr(fsr, 'get_few_shot_control_relations'):
+                relations = fsr.get_few_shot_control_relations(game_id, level)
+
+                if relations and relations.get('confidence', 0) > 0.5:
+                    invariants = relations.get('invariants', {})
+
+                    # Find an action with strong invariants
+                    for action, props in invariants.items():
+                        if props and props.get('success_rate', 0) > 0.7:
+                            return RungResult(
+                                action=action,
+                                confidence=props.get('success_rate', 0.6) * 0.7,
+                                reason=f"Few-shot invariant: {action} has {props.get('success_rate', 0):.0%} success",
+                                metadata={
+                                    'invariants': invariants,
+                                    'variants': relations.get('variants', {}),
+                                    'relation_confidence': relations.get('confidence')
+                                }
+                            )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Few-shot relations failed: {e}")
+
+
+class NetworkSharingRung(DecisionRung):
+    """Query network for shared control hypotheses - EXPLOITATION
+
+    Uses engines/self_model/network_sharing.py to:
+    1. Get validated control hypotheses from other agents
+    2. Learn from network "I am this object" discoveries
+    3. Use high-reliability patterns from the network
+
+    Implements the thought process colony for self-model knowledge.
+    """
+    name = "network_sharing"
+    category = "exploitation"
+    default_priority = 50
+    confidence_threshold = 0.45
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        ns = self.engines.network_sharing
+        if ns is None:
+            return RungResult()
+
+        try:
+            game_id = context.get('game_id', context.get('game_type', ''))
+            level = context.get('level', context.get('level_number', 1))
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+
+            if not game_type:
+                return RungResult()
+
+            # Get network control hypotheses
+            if hasattr(ns, 'get_network_control_hypotheses'):
+                hypotheses = ns.get_network_control_hypotheses(game_type, level)
+
+                if hypotheses:
+                    # Find highest-reliability hypothesis
+                    best = max(hypotheses, key=lambda h: h.get('reliability_score', 0))
+
+                    if best.get('reliability_score', 0) > 0.6:
+                        action_map = best.get('action_response_map', {})
+
+                        # Suggest first action from the map
+                        if action_map:
+                            action = list(action_map.keys())[0]
+                            return RungResult(
+                                action=action,
+                                confidence=best.get('reliability_score', 0.5) * 0.7,
+                                reason=f"Network hypothesis: {best.get('hypothesis_id', 'unknown')[:20]}",
+                                metadata={
+                                    'hypothesis': best,
+                                    'action_map': action_map,
+                                    'validation_count': best.get('validation_attempts', 0)
+                                }
+                            )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Network sharing failed: {e}")
+
+
+class PrimitiveSuggesterRung(DecisionRung):
+    """Use primitives directly for action suggestions - EXPLOITATION
+
+    Uses engines/social/primitive_suggester.py to:
+    1. Apply seed primitives to the current frame
+    2. Map primitive outputs to action suggestions
+    3. Use learned effectiveness (RLVR feedback)
+
+    Simple, direct primitive-to-action mapping without CODS complexity.
+    """
+    name = "primitive_suggester"
+    category = "exploitation"
+    default_priority = 48
+    confidence_threshold = 0.35
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        ps = self.engines.primitive_suggester
+        if ps is None:
+            return RungResult()
+
+        try:
+            frame = getattr(game_state, 'frame', None)
+            if frame is None:
+                return RungResult()
+
+            game_type = context.get('game_type', '')
+            recent_actions = context.get('last_actions', [])
+
+            # Get primitive-based suggestion
+            if hasattr(ps, 'suggest_action'):
+                result = ps.suggest_action(
+                    frame=frame,
+                    game_type=game_type,
+                    recent_actions=recent_actions
+                )
+
+                if result and result.action:
+                    # Convert to dict if it's a dataclass
+                    result_dict = result.to_dict() if hasattr(result, 'to_dict') else {}
+
+                    return RungResult(
+                        action=f'ACTION{result.action}',
+                        confidence=result.confidence * 0.8,
+                        reason=f"Primitive {result.primitive}: {result.reasoning[:50]}",
+                        metadata={
+                            'primitive': result.primitive,
+                            'primitives_applied': result_dict.get('primitives_applied', []),
+                            'candidates': result_dict.get('candidates', [])[:3]
+                        }
+                    )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Primitive suggester failed: {e}")
+
+
+class ValenceGoalsRung(DecisionRung):
+    """Use valence associations and inferred goals - FILTER/EXPLOITATION
+
+    Uses engines/self_model/valence_goals.py to:
+    1. Check valence of nearby objects (good/bad/neutral)
+    2. Use inferred goals to guide action selection
+    3. Avoid negative-valence objects, approach positive ones
+
+    Provides emotional coloring to guide exploration.
+    """
+    name = "valence_goals"
+    category = "exploitation"
+    default_priority = 35
+    confidence_threshold = 0.4
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        vg = self.engines.valence_goals
+        if vg is None:
+            return RungResult()
+
+        try:
+            game_type = context.get('game_type', '')
+            level = context.get('level', context.get('level_number', 1))
+            player_pos = context.get('player_position')
+
+            if not game_type:
+                return RungResult()
+
+            # Check for inferred goals
+            if hasattr(vg, 'get_inferred_goal'):
+                goal = vg.get_inferred_goal(game_type, level)
+
+                if goal and goal.get('confidence', 0) > 0.5:
+                    goal_type = goal.get('goal_type')
+                    targets = goal.get('target_regions', [])
+
+                    if targets and player_pos:
+                        # Move toward goal target
+                        target = targets[0]
+                        dx = target[1] - player_pos[0] if len(target) > 1 else 0
+                        dy = target[0] - player_pos[1] if len(target) > 0 else 0
+
+                        if abs(dx) > abs(dy):
+                            action = 'ACTION3' if dx > 0 else 'ACTION4'
+                            direction = 'right' if dx > 0 else 'left'
+                        else:
+                            action = 'ACTION2' if dy > 0 else 'ACTION1'
+                            direction = 'down' if dy > 0 else 'up'
+
+                        return RungResult(
+                            action=action,
+                            confidence=goal.get('confidence', 0.5) * 0.6,
+                            reason=f"Goal {goal_type}: move {direction} toward target",
+                            metadata={'goal': goal, 'target': target}
+                        )
+
+            # Check valence of nearby objects for avoidance
+            if hasattr(vg, 'get_negative_valence_objects'):
+                dangers = vg.get_negative_valence_objects(game_type)
+
+                if dangers:
+                    # Return as filter info rather than action
+                    return RungResult(
+                        confidence=0.3,
+                        reason=f"Valence: {len(dangers)} negative objects to avoid",
+                        metadata={
+                            'negative_objects': dangers[:5],
+                            'filter_mode': True
+                        }
+                    )
+
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Valence goals failed: {e}")
 
 
 class DeliberationSystemRung(DecisionRung):
@@ -4484,11 +5380,12 @@ ORDERING_PRESETS = {
         ('coordinate_oscillation', 2),
         ('palette_detection', 3),  # Two-stage: extract objects + detect palette FIRST
         ('self_trust_boost', 4),  # Manage wA based on frontier/replay context
-        ('imagination_budget', 5),
-        ('breakthrough_budget', 5),
-        ('regulatory_signal', 6),
-        ('survey', 7),
-        ('network_exploration_stats', 7),
+        ('control_tracker', 5),  # "I am this object" - self-model
+        ('imagination_budget', 6),
+        ('breakthrough_budget', 6),
+        ('regulatory_signal', 7),
+        ('survey', 8),
+        ('network_exploration_stats', 8),
         ('scientific_method', 10),
         ('questioning_engine', 12),
         ('frustration_detection', 14),
@@ -4496,9 +5393,13 @@ ORDERING_PRESETS = {
         ('i_thread', 18),
         ('metacognitive_prediction', 20),
         ('deliberation_system', 22),
+        ('symbolic_tracker', 23),  # Key/lock symbolic matching
         ('theory_gate', 24),
-        ('sensation_engine', 26),
+        ('belief_system', 25),  # Belief tracking
+        ('hypothesis_system', 26),  # Agent-initiated hypothesis testing
+        ('sensation_engine', 27),
         ('resonance_detector', 28),
+        ('valence_goals', 29),  # Good/bad valence and goals
         ('network_wisdom', 30),
         ('death_avoidance', 32),
         ('terminal_pattern', 34),
@@ -4509,21 +5410,28 @@ ORDERING_PRESETS = {
         ('three_try_sequence', 40),
         ('rule_transfer', 41),  # Apply rules from other games
         ('discovery_exploitation', 42),
+        ('trigger_sequences', 43),  # Trigger chain learning
         ('embedding_suggestion', 44),
+        ('embedding_matcher', 45),  # Neural frame similarity
         ('multi_stage_matching', 46),
-        ('replay_learning', 48),
-        ('primitive_suggester', 50),
+        ('primitive_suggester', 48),  # Direct primitive-to-action
+        ('network_sharing', 49),  # Network control hypotheses
+        ('replay_learning', 50),
+        ('network_wisdom', 51),
         ('abstraction_templates', 54),
+        ('few_shot_relations', 55),  # Control invariants from examples
         ('few_shot_invariants', 56),
         ('subgoal_planning', 58),
         ('visual_analyzer', 60),
         ('network_object_inventory', 62),
-        ('near_miss_analyzer', 64),
-        ('completion_prediction', 66),
-        ('frontier_topology', 68),
-        ('map_intel_collision', 70),
-        ('exploration_phase', 72),
-        ('grid_exploration', 74),
+        ('action6_object_exploration', 64),  # Use Action6BehaviorEngine for click targets
+        ('click_behavior_learning', 65),  # Learn click patterns (collectibles, triggers)
+        ('near_miss_analyzer', 66),
+        ('completion_prediction', 68),
+        ('frontier_topology', 70),
+        ('map_intel_collision', 72),
+        ('exploration_phase', 74),
+        ('grid_exploration', 76),  # Fallback: systematic grid walking
         ('smart_action_selection', 99),
     ],
 
@@ -4563,55 +5471,66 @@ ORDERING_PRESETS = {
         # ORIENTATION - Understanding the world (Priority 5-20)
         ('imagination_budget', 6),
         ('breakthrough_budget', 7),
-        ('regulatory_signal', 8),
-        ('survey', 9),
-        ('network_exploration_stats', 10),
-        ('questioning_engine', 11),
-        ('exploration_phase', 12),
-        ('frustration_detection', 13),
+        ('control_tracker', 8),  # "I am this object" - self-model
+        ('regulatory_signal', 9),
+        ('survey', 10),
+        ('network_exploration_stats', 11),
+        ('questioning_engine', 12),
+        ('exploration_phase', 13),
+        ('frustration_detection', 14),
 
         # FILTER - Modify action weights (Priority 15-25)
-        ('contextual_failure', 14),   # Context-aware failure avoidance (before death_avoidance)
-        ('death_avoidance', 15),
-        ('terminal_pattern', 16),
-        ('theory_contradiction', 17),  # Filter contradicted actions
-        ('pariah_avoidance', 18),
-        ('three_layer_filter', 19),
+        ('contextual_failure', 15),   # Context-aware failure avoidance (before death_avoidance)
+        ('death_avoidance', 16),
+        ('terminal_pattern', 17),
+        ('theory_contradiction', 18),  # Filter contradicted actions
+        ('pariah_avoidance', 19),
+        ('three_layer_filter', 20),
 
         # HYPOTHESIS - Form and test theories (Priority 25-40)
         ('event_understanding', 23),  # Causal world model
-        ('assumption_formation', 24), # Form assumptions from observations
-        ('scientific_method', 25),
-        ('theory_gate', 26),
-        ('metacognitive_prediction', 27),
-        ('hypothesis_testing', 28),  # Test untested assumptions
-        ('deliberation_system', 28),
-        ('two_streams', 29),
-        ('i_thread', 30),
-        ('sensation_engine', 31),
-        ('resonance_detector', 32),
+        ('symbolic_tracker', 24),  # Key/lock symbolic matching
+        ('assumption_formation', 25), # Form assumptions from observations
+        ('belief_system', 26),  # Belief tracking
+        ('hypothesis_system', 27),  # Agent-initiated hypothesis testing
+        ('scientific_method', 28),
+        ('theory_gate', 29),
+        ('metacognitive_prediction', 30),
+        ('hypothesis_testing', 31),  # Test untested assumptions
+        ('deliberation_system', 32),
+        ('two_streams', 33),
+        ('i_thread', 34),
+        ('valence_goals', 35),  # Good/bad valence and goals
+        ('sensation_engine', 36),
+        ('resonance_detector', 37),
 
         # EXPLOITATION - Use known knowledge (Priority 40-80)
         ('three_try_sequence', 40),
         ('rule_transfer', 41),  # Apply rules from other games
         ('state_matching', 42), # Symbolic reasoning - property matching
-        ('discovery_exploitation', 43),
-        ('spatial_relationship', 44),  # Click effect patterns for puzzles
-        ('embedding_suggestion', 45),
-        ('multi_stage_matching', 46),
-        ('replay_learning', 47),
-        ('primitive_suggester', 48),
-        ('network_wisdom', 49),
-        ('abstraction_templates', 50),
-        ('few_shot_invariants', 51),
-        ('subgoal_planning', 52),
-        ('visual_analyzer', 53),
-        ('network_object_inventory', 54),
-        ('near_miss_analyzer', 55),
-        ('completion_prediction', 56),
-        ('frontier_topology', 57),
-        ('map_intel_collision', 58),
-        ('grid_exploration', 59),
+        ('trigger_sequences', 43),  # Trigger chain learning
+        ('discovery_exploitation', 44),
+        ('embedding_matcher', 45),  # Neural frame similarity
+        ('spatial_relationship', 46),  # Click effect patterns for puzzles
+        ('embedding_suggestion', 47),
+        ('multi_stage_matching', 48),
+        ('primitive_suggester', 49),  # Direct primitive-to-action
+        ('network_sharing', 50),  # Network control hypotheses
+        ('replay_learning', 51),
+        ('network_wisdom', 52),
+        ('abstraction_templates', 53),
+        ('few_shot_relations', 54),  # Control invariants from examples
+        ('few_shot_invariants', 55),
+        ('subgoal_planning', 56),
+        ('visual_analyzer', 57),
+        ('network_object_inventory', 58),
+        ('action6_object_exploration', 59),  # Use Action6BehaviorEngine for click targets
+        ('click_behavior_learning', 60),  # Learn click patterns (collectibles, triggers)
+        ('near_miss_analyzer', 61),
+        ('completion_prediction', 62),
+        ('frontier_topology', 63),
+        ('map_intel_collision', 64),
+        ('grid_exploration', 65),  # Fallback: systematic grid walking
 
         # FALLBACK (Priority 99)
         ('smart_action_selection', 99),
@@ -4686,7 +5605,9 @@ ORDERING_PRESETS = {
         ('questioning_engine', 15),
         ('scientific_method', 20),
         ('rule_transfer', 22),  # Apply rules from similar games
-        ('grid_exploration', 25),
+        ('action6_object_exploration', 24),  # Use Action6BehaviorEngine for click targets
+        ('click_behavior_learning', 25),  # Learn click patterns for ACTION6 games
+        ('grid_exploration', 26),  # Fallback: systematic grid walking
         ('death_avoidance', 40),  # Lower priority on frontier
         ('discovery_exploitation', 45),
         ('smart_action_selection', 99),
@@ -4753,6 +5674,22 @@ class DecisionRungSystem:
         'coordinate_oscillation': CoordinateOscillationRung,
         'grid_exploration': GridExplorationRung,
         'network_object_inventory': NetworkObjectInventoryRung,
+        'action6_object_exploration': Action6ObjectExplorationRung,  # Use Action6BehaviorEngine for click targets
+        'click_behavior_learning': ClickBehaviorLearningRung,  # Learn click patterns (collectibles, triggers)
+
+        # Self-model and symbolic reasoning (Feb 2026 wiring)
+        'control_tracker': ControlTrackerRung,      # "I am this object" tracking
+        'belief_system': BeliefSystemRung,          # Belief tracking with cascade invalidation
+        'hypothesis_system': HypothesisSystemRung,  # Agent-initiated hypothesis testing
+        'trigger_sequences': TriggerSequencesRung,  # Trigger chain learning
+        'symbolic_tracker': SymbolicTrackerRung,    # Key/lock symbolic matching
+
+        # Remaining orphaned engines wired (Feb 2026)
+        'embedding_matcher': EmbeddingMatcherRung,  # Neural frame similarity
+        'few_shot_relations': FewShotRelationsRung,  # Control invariants from examples
+        'network_sharing': NetworkSharingRung,      # Network control hypotheses
+        'primitive_suggester': PrimitiveSuggesterRung,  # Direct primitive-to-action
+        'valence_goals': ValenceGoalsRung,          # Good/bad valence and goals
 
         # Reasoning log features (Features 37-42)
         'deliberation_system': DeliberationSystemRung,

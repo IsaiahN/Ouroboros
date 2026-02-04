@@ -2,6 +2,118 @@
 
 ## February 3, 2026
 
+### Session: Orphaned Systems Audit & Wiring (Continued)
+
+**Started**: ~3:00 PM
+**Last Update**: 6:00 PM
+
+---
+
+## Summary
+
+Completed comprehensive wiring of orphaned engines. Created 6 new rungs to connect previously-orphaned engines to the decision system:
+
+### New Rungs Created:
+
+| Engine | Rung Created | Category | Priority | Purpose |
+|--------|--------------|----------|----------|---------|
+| `click_behavior` | ClickBehaviorLearningRung | exploitation | 36 | Learn click patterns (collectibles, triggers) |
+| `control_tracker` | ControlTrackerRung | orientation | 8 | "I am this object" - self-model tracking |
+| `belief_system` | BeliefSystemRung | hypothesis | 25 | Belief tracking with cascade invalidation |
+| `hypothesis_system` | HypothesisSystemRung | hypothesis | 26 | Agent-initiated hypothesis testing |
+| `trigger_sequences` | TriggerSequencesRung | exploitation | 43 | Trigger chain learning (X causes Y) |
+| `symbolic_tracker` | SymbolicTrackerRung | hypothesis | 24 | Key/lock symbolic matching |
+
+### Orphan Status:
+- **Before**: 12 orphaned engines
+- **After**: 5 orphaned engines remaining
+  - `embedding_matcher`, `engine_name`, `few_shot_relations`, `network_sharing`, `primitive_suggester`, `valence_goals`
+
+---
+
+## Root Cause Found (Earlier)
+
+Investigation of vc33 games always ending at exactly 50 actions led to discovering:
+1. **50 actions is NOT a bug** - it's the RoA (Remaining on Actions) limit per level
+2. **Real bug**: All ACTION6 clicks were going to (32, 32) default coordinates
+3. **Why**: GridExplorationRung sets `metadata={'grid_target': {...}}` but game_loop.py only checked for `pixel_position`, `target`, or direct `x`/`y`
+
+## Comprehensive Audit Results
+
+Created `manual_tools/audit_orphaned_systems.py` to find ALL disconnected functionality:
+
+### Orphaned Engines (was 12, now 5):
+- ~~`belief_system`~~ - NOW WIRED via BeliefSystemRung
+- ~~`click_behavior`~~ - NOW WIRED via ClickBehaviorLearningRung
+- ~~`control_tracker`~~ - NOW WIRED via ControlTrackerRung
+- `embedding_matcher` - Similarity matching (still orphaned)
+- `few_shot_relations` - Spatial relation learning (still orphaned)
+- ~~`hypothesis_system`~~ - NOW WIRED via HypothesisSystemRung
+- `network_sharing` - Network knowledge sharing (still orphaned)
+- `primitive_suggester` - Primitive recommendation (still orphaned - has stub rung)
+- ~~`symbolic_tracker`~~ - NOW WIRED via SymbolicTrackerRung
+- ~~`trigger_sequences`~~ - NOW WIRED via TriggerSequencesRung
+- `valence_goals` - Goal-directed valence (still orphaned)
+
+### Orphaned Context Keys (35 total - read but never set):
+- `score_delta`, `last_outcome`, `frontier_mode`, `action_count`, `level_number`, etc.
+- **NOW FIXED**: Added population of these keys in evolution_runner.py
+
+### Orphaned Database Tables (131 total - never written to):
+- Documented in `architecture/ORPHANED_SYSTEMS_AUDIT.md`
+
+---
+
+## Files Changed
+
+### 1. evolution_runner.py - Fixed coordinate extraction + context population
+- Added `grid_target` extraction from metadata
+- Added tracking variables: `recent_actions`, `last_score_delta`, `last_outcome_type`, `has_full_win`
+- Expanded context dict with: `action_count`, `level_number`, `last_actions`, `player_position`, `score`, `score_delta`, `last_outcome`, `frontier_mode`, `is_frontier`, `is_novel_game`, `session_id`, `scorecard_id`
+
+### 2. game_loop.py - Fixed coordinate extraction
+- Added `grid_target` extraction from metadata dict
+
+### 3. decision_rung_system.py - 6 new rungs to use orphaned engines
+- **ClickBehaviorLearningRung** (priority 36, exploitation)
+- **ControlTrackerRung** (priority 8, orientation) - "I am this object"
+- **BeliefSystemRung** (priority 25, hypothesis) - Belief cascade
+- **HypothesisSystemRung** (priority 26, hypothesis) - Agent hypotheses
+- **TriggerSequencesRung** (priority 43, exploitation) - Trigger chains
+- **SymbolicTrackerRung** (priority 24, hypothesis) - Key/lock matching
+
+All added to RUNG_REGISTRY and ORDERING_PRESETS (llm_optimal, comprehensive)
+
+### 4. config/rung_orderings.json - Updated
+- Added `click_behavior_learning` to `experimental_curiosity_first` preset
+- Updated date comment
+
+### 5. NEW: manual_tools/audit_orphaned_systems.py
+- Comprehensive audit script for finding orphaned functionality
+- Checks: engine usage, context keys, database tables, method existence
+
+### 6. UPDATED: architecture/ORPHANED_SYSTEMS_AUDIT.md
+- Complete documentation of all orphaned systems
+- Updated with newly wired engines
+- Fix priorities and remediation plans
+
+---
+
+## Remaining Work
+
+5 orphaned engines still need rungs:
+- `embedding_matcher` - Could enhance embedding_suggestion rung
+- `few_shot_relations` - Could create FewShotRelationsRung
+- `network_sharing` - Could create NetworkSharingRung
+- `primitive_suggester` - Has stub, needs real implementation
+- `valence_goals` - Could create ValenceGoalsRung
+- `symbolic_tracker` - needs SymbolicTrackerRung
+- etc.
+
+---
+
+## February 3, 2026
+
 ### Session: ARC-AGI-2 Insights Implementation (Phases 1-2)
 
 **Started**: ~1:00 PM
@@ -1476,3 +1588,122 @@ The `GridExplorationRung` (priority 47) systematically generates unexplored clic
 - With 50 actions per level, agents can now explore ~50 different positions
 
 **Agents should now be able to beat vc33 games** by exploring different click targets instead of clicking the same spot repeatedly.
+
+---
+
+## February 3, 2026 (Session 3)
+
+### Session: ACTION6 System - Deep Fix for Click Coordinates
+
+**Started**: ~3:45 PM
+**Last Update**: 4:10 PM
+
+---
+
+## Problem Statement
+
+Despite adding `grid_target` extraction, agents still showed `[WARN] ACTION6 without coordinates`. Root cause investigation revealed the `grid_target` fix was necessary but insufficient - the deeper problem was that **no rung was actually providing coordinates**.
+
+---
+
+## Root Cause Analysis
+
+1. **GridExplorationRung** needs `visual_analyzer` engine which may be None
+2. **Most rungs returning ACTION6** don't provide coordinates - they just say "click" without specifying where
+3. **Action6BehaviorEngine** exists with sophisticated pseudobutton/object tracking but was **never connected** to any decision rung
+4. **NetworkObjectInventoryRung** had coordinates in `inventory` but didn't extract them into metadata
+
+---
+
+## Fix Applied
+
+### 1. Created `Action6ObjectExplorationRung` (NEW)
+
+New rung that uses `Action6BehaviorEngine` to find clickable objects:
+
+- **Priority**: 38 (before GridExplorationRung at 47)
+- **Confidence**: 0.35-0.75 depending on match quality
+- **Three-tier strategy**:
+  1. `get_untried_objects_for_frontier()` - Objects matching known selectable shapes
+  2. `get_all_pseudo_buttons()` - Known button regions
+  3. `get_selectable_objects()` - Network knowledge about selectable objects
+
+Returns actual `x`, `y` coordinates in metadata.
+
+### 2. Fixed `NetworkObjectInventoryRung`
+
+Now extracts coordinates from first interactable object:
+```python
+first_obj = interactable[0]
+x = first_obj.get('x', first_obj.get('center_x', 32))
+y = first_obj.get('y', first_obj.get('center_y', 32))
+metadata={'x': x, 'y': y, ...}
+```
+
+### 3. Updated ORDERING_PRESETS
+
+Added `action6_object_exploration` to:
+- `comprehensive`: priority 55 (before grid_exploration at 60)
+- `llm_optimal`: priority 64
+- `frontier_exploration`: priority 24
+
+### 4. Updated RUNG_REGISTRY
+
+Added `'action6_object_exploration': Action6ObjectExplorationRung`
+
+### 5. Updated config/rung_orderings.json
+
+Added to `experimental_curiosity_first` ordering.
+
+---
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `decision_rung_system.py` | +100 lines: `Action6ObjectExplorationRung` class, registry entry, ordering updates |
+| `decision_rung_system.py` | Fixed `NetworkObjectInventoryRung` to extract coordinates |
+| `config/rung_orderings.json` | Added `action6_object_exploration` rung |
+
+---
+
+## Architecture: ACTION6 Coordinate Hierarchy
+
+Now rungs provide coordinates via these metadata keys (checked in order):
+
+1. `pixel_position` - Direct pixel coords tuple
+2. `target` - Dict with x/y keys
+3. `grid_target` - From GridExplorationRung
+4. `x` and `y` directly - From Action6ObjectExplorationRung, NetworkObjectInventoryRung
+
+Fallback cascade:
+```
+Action6ObjectExplorationRung (shape/button/network knowledge)
+         ↓ (if no match)
+GridExplorationRung (systematic 8x8 grid)
+         ↓ (if visual_analyzer unavailable)
+Default (32, 32)
+```
+
+---
+
+## Impact
+
+| Before | After |
+|--------|-------|
+| Most ACTION6 from rungs had no coords | Rungs provide specific click targets |
+| Action6BehaviorEngine orphaned | Connected to decision system |
+| Pseudobuttons unused | Used for informed clicking |
+| Always (32,32) | Explores known objects first |
+
+---
+
+## Current Status
+
+| Item | Status |
+|------|--------|
+| Action6ObjectExplorationRung | CREATED |
+| NetworkObjectInventoryRung | FIXED |
+| RUNG_REGISTRY | UPDATED |
+| ORDERING_PRESETS | UPDATED |
+| Import test | PASSED |

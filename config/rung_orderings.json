@@ -1,6 +1,6 @@
 {
   "_comment": "Custom decision rung orderings. Lower priority number = evaluated first.",
-  "_updated": "2026-02-03: Added palette_detection and sparse_grid rungs (two-stage + sparse representation)",
+  "_updated": "2026-02-10: Added click_behavior_learning rung for ACTION6 games",
 
   "experimental_curiosity_first": [
     ["infinite_loop_breaker", 1],
@@ -19,7 +19,10 @@
     ["discovery_exploitation", 45],
     ["embedding_suggestion", 50],
     ["primitive_suggester", 55],
+    ["action6_object_exploration", 58],
+    ["click_behavior_learning", 59],
     ["spatial_relationship", 60],
+    ["grid_exploration", 65],
     ["smart_action_selection", 99]
   ],
 
