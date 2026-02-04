@@ -1,0 +1,627 @@
+{
+  "_meta": {
+    "description": "Rung dependency matrix mapping context slot reads and writes",
+    "generated": "Phase 0 - Cognitive Routing Implementation",
+    "version": "1.0",
+    "total_rungs": 63,
+    "slot_categories": {
+      "orientation": "Initial game state understanding (survey, palette, sparse)",
+      "identity": "Self-model and control (controlled_object, player_position)",
+      "hypothesis": "Beliefs, theories, predictions",
+      "exploitation": "Sequences, checkpoints, navigation",
+      "filter": "Safety, avoidance, constraints",
+      "metacognition": "Learning, adaptation, confidence"
+    }
+  },
+
+  "rungs": {
+    "survey": {
+      "category": "orientation",
+      "priority": 5,
+      "writes": ["survey", "survey_complete"],
+      "reads": [],
+      "description": "Grid analysis at level start - identifies objects, colors, structure"
+    },
+
+    "palette_detection": {
+      "category": "orientation",
+      "priority": 3,
+      "writes": ["detected_palette", "extracted_objects", "detected_transformations"],
+      "reads": [],
+      "description": "Two-stage: extract objects + detect palette/legend blocks"
+    },
+
+    "sparse_grid": {
+      "category": "orientation",
+      "priority": 3,
+      "writes": ["sparse_grid", "sparse_hash", "sparse_cell_count", "sparse_colors", "sparse_components", "sparse_diff"],
+      "reads": [],
+      "description": "Sparse representation for efficient pattern matching"
+    },
+
+    "frame_interpretation": {
+      "category": "orientation",
+      "priority": 4,
+      "writes": ["likely_physics_game", "expect_large_deltas", "detected_process_type", "likely_direct_control"],
+      "reads": ["frame_delta_count", "recent_events"],
+      "description": "Interpret frame changes - physics vs direct control"
+    },
+
+    "control_tracker": {
+      "category": "orientation",
+      "priority": 8,
+      "writes": ["controlled_objects", "primary_control"],
+      "reads": ["game_id", "game_type", "level", "level_number", "target_position", "goal_position", "player_position"],
+      "description": "Track which objects agent controls - I am this object"
+    },
+
+    "questioning_engine": {
+      "category": "orientation",
+      "priority": 10,
+      "writes": ["blocking_questions", "allowed_actions"],
+      "reads": [],
+      "description": "Q1-Q9 questioning - can BLOCK actions"
+    },
+
+    "death_avoidance": {
+      "category": "filter",
+      "priority": 15,
+      "writes": ["death_weights", "avoided_positions"],
+      "reads": ["player_position"],
+      "description": "Position-bucket death pattern avoidance"
+    },
+
+    "prior_lessons": {
+      "category": "exploitation",
+      "priority": 12,
+      "writes": ["applied_lessons", "lesson_weights"],
+      "reads": ["game_type", "level"],
+      "description": "Apply lessons as graduated weights"
+    },
+
+    "discovery_exploitation": {
+      "category": "exploitation",
+      "priority": 20,
+      "writes": ["discovery_action", "exploitation_action"],
+      "reads": ["last_discovery", "game_type"],
+      "description": "Balance discovery vs exploitation"
+    },
+
+    "belief_system": {
+      "category": "hypothesis",
+      "priority": 25,
+      "writes": ["active_beliefs"],
+      "reads": ["game_type"],
+      "description": "Track and use agent beliefs"
+    },
+
+    "hypothesis_system": {
+      "category": "hypothesis",
+      "priority": 26,
+      "writes": ["untested_hypotheses", "hypothesis_action"],
+      "reads": ["agent_id", "game_type"],
+      "description": "Manage agent hypotheses - suggest test actions"
+    },
+
+    "event_understanding": {
+      "category": "hypothesis",
+      "priority": 23,
+      "writes": ["causal_model", "productive_events", "event_history"],
+      "reads": ["game_type", "recent_events", "frame_delta_count"],
+      "description": "Causal world model from frame changes"
+    },
+
+    "spatial_relationship": {
+      "category": "hypothesis",
+      "priority": 24,
+      "writes": ["click_patterns", "spatial_rules"],
+      "reads": ["extracted_objects", "detected_palette"],
+      "description": "Click effect patterns for puzzles"
+    },
+
+    "embedding_suggestion": {
+      "category": "exploitation",
+      "priority": 30,
+      "writes": ["embedding_action", "embedding_confidence"],
+      "reads": ["game_type", "level", "survey"],
+      "description": "Neural embedding-based action suggestion"
+    },
+
+    "scientific_method": {
+      "category": "hypothesis",
+      "priority": 35,
+      "writes": ["experiment_action", "control_variables"],
+      "reads": ["survey", "game_type"],
+      "description": "Systematic experimentation"
+    },
+
+    "two_streams": {
+      "category": "hypothesis",
+      "priority": 40,
+      "writes": ["stream_a_action", "stream_b_action", "integrated_action"],
+      "reads": ["agent_id", "game_type"],
+      "description": "Stream A (private) vs Stream B (collective) integration"
+    },
+
+    "network_wisdom": {
+      "category": "exploitation",
+      "priority": 45,
+      "writes": ["network_action", "network_confidence"],
+      "reads": ["game_type", "level", "checkpoint_sequence"],
+      "description": "Query network-validated strategies"
+    },
+
+    "primitive_suggester": {
+      "category": "exploitation",
+      "priority": 50,
+      "writes": ["primitive_action", "primitive_name"],
+      "reads": ["survey", "game_type", "sparse_grid"],
+      "description": "Direct primitive-to-action mapping"
+    },
+
+    "metacognitive_prediction": {
+      "category": "metacognition",
+      "priority": 55,
+      "writes": ["predicted_outcome", "confidence_calibration"],
+      "reads": ["survey", "game_type", "action_history"],
+      "description": "Predict action outcomes for calibration"
+    },
+
+    "exploration_phase": {
+      "category": "exploitation",
+      "priority": 60,
+      "writes": ["exploration_action", "frontier_cells"],
+      "reads": ["survey", "sparse_grid", "player_position"],
+      "description": "Systematic frontier exploration"
+    },
+
+    "frontier_topology": {
+      "category": "exploitation",
+      "priority": 65,
+      "writes": ["topology_action", "reachable_cells"],
+      "reads": ["sparse_grid", "player_position", "controlled_objects"],
+      "description": "Topology-aware frontier targeting"
+    },
+
+    "frontier_checkpoint": {
+      "category": "exploitation",
+      "priority": 66,
+      "writes": ["checkpoint_path", "frontier_target"],
+      "reads": ["sparse_grid", "player_position", "winning_sequences"],
+      "description": "Constructive pathfinding using checkpoints"
+    },
+
+    "smart_action_selection": {
+      "category": "fallback",
+      "priority": 70,
+      "writes": ["smart_action", "action_weights"],
+      "reads": ["survey", "game_type", "action_history"],
+      "description": "Weighted random with history awareness"
+    },
+
+    "infinite_loop_breaker": {
+      "category": "emergency",
+      "priority": 1,
+      "writes": ["loop_detected", "escape_action"],
+      "reads": ["action_history", "state_history"],
+      "description": "Detect and break infinite loops"
+    },
+
+    "coordinate_oscillation": {
+      "category": "emergency",
+      "priority": 2,
+      "writes": ["oscillation_detected", "oscillation_escape"],
+      "reads": ["player_position", "position_history"],
+      "description": "Detect A-B-A-B position oscillation"
+    },
+
+    "map_intel_collision": {
+      "category": "filter",
+      "priority": 16,
+      "writes": ["collision_map", "safe_directions"],
+      "reads": ["sparse_grid", "player_position"],
+      "description": "Map intelligence for collision avoidance"
+    },
+
+    "theory_gate": {
+      "category": "filter",
+      "priority": 17,
+      "writes": ["theory_aligned_actions", "theory_blocked_actions"],
+      "reads": ["active_beliefs", "hypothesis_action"],
+      "description": "Filter actions by current theory alignment"
+    },
+
+    "theory_contradiction": {
+      "category": "filter",
+      "priority": 18,
+      "writes": ["contradicted_actions"],
+      "reads": ["active_beliefs", "action_history"],
+      "description": "Filter actions that contradict current theory"
+    },
+
+    "abstraction_templates": {
+      "category": "exploitation",
+      "priority": 32,
+      "writes": ["template_action", "matched_template"],
+      "reads": ["sparse_grid", "detected_palette", "game_type"],
+      "description": "Apply learned abstraction templates"
+    },
+
+    "few_shot_invariants": {
+      "category": "exploitation",
+      "priority": 33,
+      "writes": ["invariant_action", "detected_invariants"],
+      "reads": ["survey", "game_type"],
+      "description": "Control invariants from examples"
+    },
+
+    "few_shot_relations": {
+      "category": "exploitation",
+      "priority": 34,
+      "writes": ["relation_action", "detected_relations"],
+      "reads": ["extracted_objects", "survey"],
+      "description": "Relation detection from examples"
+    },
+
+    "three_try_sequence": {
+      "category": "exploitation",
+      "priority": 80,
+      "writes": ["sequence_action", "sequence_position"],
+      "reads": ["checkpoint_sequence", "active_sequence", "game_type", "level"],
+      "description": "Follow known winning sequences"
+    },
+
+    "multi_stage_matching": {
+      "category": "exploitation",
+      "priority": 75,
+      "writes": ["matched_stage", "stage_action"],
+      "reads": ["sparse_hash", "game_type", "level"],
+      "description": "Match current state to known stages"
+    },
+
+    "three_layer_filter": {
+      "category": "filter",
+      "priority": 19,
+      "writes": ["filtered_actions", "filter_reasons"],
+      "reads": ["death_weights", "pariah_actions", "theory_blocked_actions"],
+      "description": "Combine multiple filter layers"
+    },
+
+    "pariah_avoidance": {
+      "category": "filter",
+      "priority": 14,
+      "writes": ["pariah_actions", "pariah_decay"],
+      "reads": ["game_type", "level", "action_history"],
+      "description": "Avoid known-bad action patterns"
+    },
+
+    "frustration_detection": {
+      "category": "metacognition",
+      "priority": 5,
+      "writes": ["frustration_level", "frustration_action"],
+      "reads": ["score_history", "action_count", "level"],
+      "description": "Detect and respond to frustration signals"
+    },
+
+    "terminal_pattern": {
+      "category": "filter",
+      "priority": 13,
+      "writes": ["terminal_patterns", "terminal_weights"],
+      "reads": ["game_type", "level", "player_position"],
+      "description": "Death/terminal state pattern detection"
+    },
+
+    "sensation_engine": {
+      "category": "metacognition",
+      "priority": 6,
+      "writes": ["sensations", "sensation_weights"],
+      "reads": ["survey", "game_type", "action_history"],
+      "description": "Object-sensation mappings for intuition"
+    },
+
+    "i_thread": {
+      "category": "metacognition",
+      "priority": 7,
+      "writes": ["i_thread_action", "stream_integration"],
+      "reads": ["stream_a_action", "stream_b_action", "agent_id"],
+      "description": "Weave Stream A/B into unified action"
+    },
+
+    "near_miss_analyzer": {
+      "category": "metacognition",
+      "priority": 56,
+      "writes": ["near_miss_patterns", "improvement_hints"],
+      "reads": ["score_history", "action_history", "game_type"],
+      "description": "Analyze near-wins for improvement"
+    },
+
+    "state_matching": {
+      "category": "exploitation",
+      "priority": 72,
+      "writes": ["matched_state", "state_action"],
+      "reads": ["sparse_hash", "sparse_grid", "game_type"],
+      "description": "Symbolic state comparison to goals"
+    },
+
+    "subgoal_planning": {
+      "category": "exploitation",
+      "priority": 67,
+      "writes": ["subgoal_action", "current_subgoal", "subgoal_path"],
+      "reads": ["sparse_grid", "player_position", "goal_position"],
+      "description": "Hierarchical subgoal decomposition"
+    },
+
+    "breakthrough_budget": {
+      "category": "metacognition",
+      "priority": 68,
+      "writes": ["budget_action", "remaining_budget"],
+      "reads": ["action_count", "action_budget", "game_type"],
+      "description": "Allocate extra budget for promising attempts"
+    },
+
+    "regulatory_signal": {
+      "category": "metacognition",
+      "priority": 4,
+      "writes": ["regulatory_action", "energy_level"],
+      "reads": ["frustration_level", "action_count"],
+      "description": "Homeostatic regulation signals"
+    },
+
+    "visual_analyzer": {
+      "category": "orientation",
+      "priority": 9,
+      "writes": ["visual_features", "symmetry_info", "color_blocks"],
+      "reads": ["sparse_grid", "survey"],
+      "description": "Visual feature extraction"
+    },
+
+    "resonance_detector": {
+      "category": "metacognition",
+      "priority": 57,
+      "writes": ["resonance_patterns", "cross_game_matches"],
+      "reads": ["game_type", "sparse_hash", "detected_transformations"],
+      "description": "Cross-domain pattern resonance"
+    },
+
+    "grid_exploration": {
+      "category": "exploitation",
+      "priority": 61,
+      "writes": ["grid_action", "unexplored_cells"],
+      "reads": ["sparse_grid", "player_position", "visited_cells"],
+      "description": "Systematic grid exploration"
+    },
+
+    "network_object_inventory": {
+      "category": "orientation",
+      "priority": 11,
+      "writes": ["object_inventory", "known_objects"],
+      "reads": ["extracted_objects", "survey", "game_type"],
+      "description": "Network-shared object inventory"
+    },
+
+    "action6_object_exploration": {
+      "category": "exploitation",
+      "priority": 62,
+      "writes": ["click_target", "click_action"],
+      "reads": ["extracted_objects", "survey", "clicked_objects"],
+      "description": "Action6 click target selection"
+    },
+
+    "click_behavior_learning": {
+      "category": "hypothesis",
+      "priority": 27,
+      "writes": ["click_rules", "collectible_patterns"],
+      "reads": ["click_target", "action_history", "score_history"],
+      "description": "Learn click patterns (collectibles, triggers)"
+    },
+
+    "trigger_sequences": {
+      "category": "hypothesis",
+      "priority": 28,
+      "writes": ["trigger_chains", "trigger_action"],
+      "reads": ["click_rules", "sparse_diff", "action_history"],
+      "description": "Trigger chain learning"
+    },
+
+    "symbolic_tracker": {
+      "category": "hypothesis",
+      "priority": 29,
+      "writes": ["key_lock_pairs", "symbolic_action"],
+      "reads": ["extracted_objects", "detected_transformations"],
+      "description": "Key/lock symbolic matching"
+    },
+
+    "embedding_matcher": {
+      "category": "exploitation",
+      "priority": 31,
+      "writes": ["embedding_match", "similar_states"],
+      "reads": ["sparse_hash", "game_type"],
+      "description": "Neural frame similarity matching"
+    },
+
+    "network_sharing": {
+      "category": "exploitation",
+      "priority": 46,
+      "writes": ["shared_hypothesis", "network_strategy"],
+      "reads": ["game_type", "active_beliefs"],
+      "description": "Network control hypothesis sharing"
+    },
+
+    "valence_goals": {
+      "category": "hypothesis",
+      "priority": 22,
+      "writes": ["good_objects", "bad_objects", "goal_objects"],
+      "reads": ["extracted_objects", "score_history", "action_history"],
+      "description": "Good/bad valence and goal detection"
+    },
+
+    "deliberation_system": {
+      "category": "metacognition",
+      "priority": 58,
+      "writes": ["deliberation_result", "deliberation_confidence"],
+      "reads": ["survey", "action_history", "game_type"],
+      "description": "Explicit deliberation for complex decisions"
+    },
+
+    "replay_learning": {
+      "category": "metacognition",
+      "priority": 59,
+      "writes": ["replay_insights", "pattern_extractions"],
+      "reads": ["action_history", "score_history", "game_type"],
+      "description": "Learn from action replay analysis"
+    },
+
+    "imagination_budget": {
+      "category": "metacognition",
+      "priority": 69,
+      "writes": ["imagination_action", "simulated_outcomes"],
+      "reads": ["sparse_grid", "player_position", "action_history"],
+      "description": "Mental simulation budget allocation"
+    },
+
+    "completion_prediction": {
+      "category": "metacognition",
+      "priority": 70,
+      "writes": ["completion_probability", "estimated_actions_remaining"],
+      "reads": ["score", "action_count", "game_type", "level"],
+      "description": "Predict completion likelihood"
+    },
+
+    "network_exploration_stats": {
+      "category": "metacognition",
+      "priority": 47,
+      "writes": ["exploration_stats", "coverage_map"],
+      "reads": ["game_type", "level", "action_history"],
+      "description": "Track network-wide exploration statistics"
+    },
+
+    "rule_transfer": {
+      "category": "exploitation",
+      "priority": 48,
+      "writes": ["transferred_rules", "transfer_action"],
+      "reads": ["game_type", "resonance_patterns", "active_beliefs"],
+      "description": "Cross-game rule application"
+    },
+
+    "hypothesis_testing": {
+      "category": "hypothesis",
+      "priority": 26,
+      "writes": ["test_action", "hypothesis_under_test"],
+      "reads": ["untested_hypotheses", "game_type"],
+      "description": "Test untested assumptions"
+    },
+
+    "self_trust_boost": {
+      "category": "metacognition",
+      "priority": 8,
+      "writes": ["trust_weight_a", "trust_weight_b"],
+      "reads": ["stream_a_action", "stream_b_action", "action_history"],
+      "description": "Manage wA/wB based on context"
+    },
+
+    "assumption_formation": {
+      "category": "hypothesis",
+      "priority": 24,
+      "writes": ["new_assumptions", "assumption_confidence"],
+      "reads": ["survey", "game_type", "action_history"],
+      "description": "Form testable assumptions"
+    },
+
+    "contextual_failure": {
+      "category": "filter",
+      "priority": 20,
+      "writes": ["failure_context", "avoided_contexts"],
+      "reads": ["game_type", "level", "action_history", "score_history"],
+      "description": "Context-aware failure avoidance"
+    }
+  },
+
+  "slot_index": {
+    "survey": {"written_by": ["survey"], "read_by": ["embedding_suggestion", "scientific_method", "primitive_suggester", "exploration_phase", "smart_action_selection", "visual_analyzer", "network_object_inventory", "action6_object_exploration", "deliberation_system", "assumption_formation", "few_shot_invariants", "few_shot_relations"]},
+    "survey_complete": {"written_by": ["survey"], "read_by": []},
+    "detected_palette": {"written_by": ["palette_detection"], "read_by": ["spatial_relationship", "abstraction_templates"]},
+    "extracted_objects": {"written_by": ["palette_detection"], "read_by": ["spatial_relationship", "network_object_inventory", "action6_object_exploration", "symbolic_tracker", "valence_goals"]},
+    "detected_transformations": {"written_by": ["palette_detection"], "read_by": ["resonance_detector", "symbolic_tracker"]},
+    "sparse_grid": {"written_by": ["sparse_grid"], "read_by": ["primitive_suggester", "exploration_phase", "frontier_topology", "frontier_checkpoint", "map_intel_collision", "abstraction_templates", "state_matching", "subgoal_planning", "visual_analyzer", "grid_exploration", "imagination_budget"]},
+    "sparse_hash": {"written_by": ["sparse_grid"], "read_by": ["multi_stage_matching", "state_matching", "embedding_matcher", "resonance_detector"]},
+    "sparse_cell_count": {"written_by": ["sparse_grid"], "read_by": []},
+    "sparse_colors": {"written_by": ["sparse_grid"], "read_by": []},
+    "sparse_components": {"written_by": ["sparse_grid"], "read_by": []},
+    "sparse_diff": {"written_by": ["sparse_grid"], "read_by": ["trigger_sequences"]},
+    "likely_physics_game": {"written_by": ["frame_interpretation"], "read_by": []},
+    "expect_large_deltas": {"written_by": ["frame_interpretation"], "read_by": []},
+    "detected_process_type": {"written_by": ["frame_interpretation"], "read_by": []},
+    "likely_direct_control": {"written_by": ["frame_interpretation"], "read_by": []},
+    "frame_delta_count": {"written_by": [], "read_by": ["frame_interpretation", "event_understanding"]},
+    "recent_events": {"written_by": [], "read_by": ["frame_interpretation", "event_understanding"]},
+    "game_id": {"written_by": [], "read_by": ["control_tracker"]},
+    "game_type": {"written_by": [], "read_by": ["control_tracker", "discovery_exploitation", "belief_system", "hypothesis_system", "event_understanding", "embedding_suggestion", "scientific_method", "network_wisdom", "primitive_suggester", "exploration_phase", "abstraction_templates", "few_shot_invariants", "three_try_sequence", "multi_stage_matching", "pariah_avoidance", "terminal_pattern", "sensation_engine", "near_miss_analyzer", "state_matching", "network_object_inventory", "embedding_matcher", "network_sharing", "deliberation_system", "replay_learning", "completion_prediction", "network_exploration_stats", "rule_transfer", "hypothesis_testing", "assumption_formation", "contextual_failure"]},
+    "level": {"written_by": [], "read_by": ["control_tracker", "prior_lessons", "three_try_sequence", "pariah_avoidance", "terminal_pattern", "frustration_detection", "completion_prediction", "network_exploration_stats", "contextual_failure"]},
+    "level_number": {"written_by": [], "read_by": ["control_tracker"]},
+    "player_position": {"written_by": [], "read_by": ["control_tracker", "death_avoidance", "coordinate_oscillation", "map_intel_collision", "exploration_phase", "frontier_topology", "frontier_checkpoint", "subgoal_planning", "grid_exploration", "imagination_budget", "terminal_pattern"]},
+    "target_position": {"written_by": [], "read_by": ["control_tracker"]},
+    "goal_position": {"written_by": [], "read_by": ["control_tracker", "subgoal_planning"]},
+    "controlled_objects": {"written_by": ["control_tracker"], "read_by": ["frontier_topology"]},
+    "primary_control": {"written_by": ["control_tracker"], "read_by": []},
+    "active_beliefs": {"written_by": ["belief_system"], "read_by": ["theory_gate", "theory_contradiction", "network_sharing", "rule_transfer"]},
+    "agent_id": {"written_by": [], "read_by": ["hypothesis_system", "two_streams", "i_thread"]},
+    "action_history": {"written_by": [], "read_by": ["infinite_loop_breaker", "metacognitive_prediction", "smart_action_selection", "theory_contradiction", "pariah_avoidance", "sensation_engine", "near_miss_analyzer", "click_behavior_learning", "trigger_sequences", "replay_learning", "imagination_budget", "network_exploration_stats", "self_trust_boost", "assumption_formation", "contextual_failure", "valence_goals"]},
+    "state_history": {"written_by": [], "read_by": ["infinite_loop_breaker"]},
+    "position_history": {"written_by": [], "read_by": ["coordinate_oscillation"]},
+    "checkpoint_sequence": {"written_by": [], "read_by": ["network_wisdom", "three_try_sequence"]},
+    "active_sequence": {"written_by": [], "read_by": ["three_try_sequence"]},
+    "winning_sequences": {"written_by": [], "read_by": ["frontier_checkpoint"]},
+    "visited_cells": {"written_by": [], "read_by": ["grid_exploration"]},
+    "clicked_objects": {"written_by": [], "read_by": ["action6_object_exploration"]},
+    "score_history": {"written_by": [], "read_by": ["frustration_detection", "near_miss_analyzer", "click_behavior_learning", "replay_learning", "valence_goals", "contextual_failure"]},
+    "score": {"written_by": [], "read_by": ["completion_prediction"]},
+    "action_count": {"written_by": [], "read_by": ["frustration_detection", "breakthrough_budget", "regulatory_signal", "completion_prediction"]},
+    "action_budget": {"written_by": [], "read_by": ["breakthrough_budget"]},
+    "frustration_level": {"written_by": ["frustration_detection"], "read_by": ["regulatory_signal"]},
+    "stream_a_action": {"written_by": ["two_streams"], "read_by": ["i_thread", "self_trust_boost"]},
+    "stream_b_action": {"written_by": ["two_streams"], "read_by": ["i_thread", "self_trust_boost"]},
+    "untested_hypotheses": {"written_by": ["hypothesis_system"], "read_by": ["hypothesis_testing"]},
+    "click_target": {"written_by": ["action6_object_exploration"], "read_by": ["click_behavior_learning"]},
+    "click_rules": {"written_by": ["click_behavior_learning"], "read_by": ["trigger_sequences"]},
+    "death_weights": {"written_by": ["death_avoidance"], "read_by": ["three_layer_filter"]},
+    "pariah_actions": {"written_by": ["pariah_avoidance"], "read_by": ["three_layer_filter"]},
+    "theory_blocked_actions": {"written_by": ["theory_gate"], "read_by": ["three_layer_filter"]},
+    "resonance_patterns": {"written_by": ["resonance_detector"], "read_by": ["rule_transfer"]},
+    "hypothesis_action": {"written_by": ["hypothesis_system"], "read_by": ["theory_gate"]},
+    "last_discovery": {"written_by": [], "read_by": ["discovery_exploitation"]}
+  },
+
+  "dependency_edges": {
+    "survey -> embedding_suggestion": {"type": "DEPENDENCY", "slot": "survey"},
+    "survey -> scientific_method": {"type": "DEPENDENCY", "slot": "survey"},
+    "survey -> primitive_suggester": {"type": "DEPENDENCY", "slot": "survey"},
+    "survey -> exploration_phase": {"type": "DEPENDENCY", "slot": "survey"},
+    "survey -> visual_analyzer": {"type": "DEPENDENCY", "slot": "survey"},
+    "palette_detection -> spatial_relationship": {"type": "DEPENDENCY", "slot": "detected_palette"},
+    "palette_detection -> abstraction_templates": {"type": "DEPENDENCY", "slot": "detected_palette"},
+    "palette_detection -> symbolic_tracker": {"type": "DEPENDENCY", "slot": "extracted_objects"},
+    "sparse_grid -> primitive_suggester": {"type": "DEPENDENCY", "slot": "sparse_grid"},
+    "sparse_grid -> exploration_phase": {"type": "DEPENDENCY", "slot": "sparse_grid"},
+    "sparse_grid -> frontier_topology": {"type": "DEPENDENCY", "slot": "sparse_grid"},
+    "sparse_grid -> frontier_checkpoint": {"type": "DEPENDENCY", "slot": "sparse_grid"},
+    "sparse_grid -> map_intel_collision": {"type": "DEPENDENCY", "slot": "sparse_grid"},
+    "sparse_grid -> multi_stage_matching": {"type": "DEPENDENCY", "slot": "sparse_hash"},
+    "sparse_grid -> state_matching": {"type": "DEPENDENCY", "slot": "sparse_hash"},
+    "sparse_grid -> embedding_matcher": {"type": "DEPENDENCY", "slot": "sparse_hash"},
+    "sparse_grid -> resonance_detector": {"type": "DEPENDENCY", "slot": "sparse_hash"},
+    "control_tracker -> frontier_topology": {"type": "DEPENDENCY", "slot": "controlled_objects"},
+    "belief_system -> theory_gate": {"type": "DEPENDENCY", "slot": "active_beliefs"},
+    "belief_system -> theory_contradiction": {"type": "DEPENDENCY", "slot": "active_beliefs"},
+    "belief_system -> rule_transfer": {"type": "DEPENDENCY", "slot": "active_beliefs"},
+    "two_streams -> i_thread": {"type": "DEPENDENCY", "slot": "stream_a_action"},
+    "hypothesis_system -> hypothesis_testing": {"type": "DEPENDENCY", "slot": "untested_hypotheses"},
+    "hypothesis_system -> theory_gate": {"type": "DEPENDENCY", "slot": "hypothesis_action"},
+    "action6_object_exploration -> click_behavior_learning": {"type": "DEPENDENCY", "slot": "click_target"},
+    "click_behavior_learning -> trigger_sequences": {"type": "DEPENDENCY", "slot": "click_rules"},
+    "death_avoidance -> three_layer_filter": {"type": "DEPENDENCY", "slot": "death_weights"},
+    "pariah_avoidance -> three_layer_filter": {"type": "DEPENDENCY", "slot": "pariah_actions"},
+    "theory_gate -> three_layer_filter": {"type": "DEPENDENCY", "slot": "theory_blocked_actions"},
+    "resonance_detector -> rule_transfer": {"type": "DEPENDENCY", "slot": "resonance_patterns"},
+    "frustration_detection -> regulatory_signal": {"type": "DEPENDENCY", "slot": "frustration_level"}
+  }
+}

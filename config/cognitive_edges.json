@@ -1,0 +1,270 @@
+{
+  "_meta": {
+    "description": "Cognitive Graph edges defining relationships between rungs",
+    "generated": "Phase 0 - Cognitive Routing Implementation",
+    "version": "1.0",
+    "edge_types": {
+      "DEPENDENCY": "A must run before B (data dependency via slot write->read)",
+      "IMPLICATION": "If A succeeds, B is more likely to succeed",
+      "CONTRADICTION": "A and B should not both activate strongly",
+      "REFINEMENT": "B refines or improves on A's output",
+      "FALLBACK": "If A fails, try B",
+      "COACTIVATION": "A and B often succeed together (statistical)"
+    },
+    "total_edges": 180
+  },
+
+  "edges": [
+    {"source": "survey", "target": "embedding_suggestion", "type": "DEPENDENCY", "weight": 0.9, "slot": "survey"},
+    {"source": "survey", "target": "scientific_method", "type": "DEPENDENCY", "weight": 0.9, "slot": "survey"},
+    {"source": "survey", "target": "primitive_suggester", "type": "DEPENDENCY", "weight": 0.9, "slot": "survey"},
+    {"source": "survey", "target": "exploration_phase", "type": "DEPENDENCY", "weight": 0.8, "slot": "survey"},
+    {"source": "survey", "target": "visual_analyzer", "type": "DEPENDENCY", "weight": 0.9, "slot": "survey"},
+    {"source": "survey", "target": "network_object_inventory", "type": "DEPENDENCY", "weight": 0.8, "slot": "survey"},
+    {"source": "survey", "target": "action6_object_exploration", "type": "DEPENDENCY", "weight": 0.7, "slot": "survey"},
+    {"source": "survey", "target": "few_shot_invariants", "type": "DEPENDENCY", "weight": 0.8, "slot": "survey"},
+    {"source": "survey", "target": "few_shot_relations", "type": "DEPENDENCY", "weight": 0.8, "slot": "survey"},
+    {"source": "survey", "target": "sensation_engine", "type": "DEPENDENCY", "weight": 0.7, "slot": "survey"},
+    {"source": "survey", "target": "assumption_formation", "type": "DEPENDENCY", "weight": 0.7, "slot": "survey"},
+    {"source": "survey", "target": "smart_action_selection", "type": "DEPENDENCY", "weight": 0.6, "slot": "survey"},
+    {"source": "survey", "target": "deliberation_system", "type": "DEPENDENCY", "weight": 0.6, "slot": "survey"},
+
+    {"source": "palette_detection", "target": "spatial_relationship", "type": "DEPENDENCY", "weight": 0.95, "slot": "detected_palette"},
+    {"source": "palette_detection", "target": "abstraction_templates", "type": "DEPENDENCY", "weight": 0.9, "slot": "detected_palette"},
+    {"source": "palette_detection", "target": "symbolic_tracker", "type": "DEPENDENCY", "weight": 0.85, "slot": "extracted_objects"},
+    {"source": "palette_detection", "target": "valence_goals", "type": "DEPENDENCY", "weight": 0.8, "slot": "extracted_objects"},
+    {"source": "palette_detection", "target": "network_object_inventory", "type": "DEPENDENCY", "weight": 0.8, "slot": "extracted_objects"},
+    {"source": "palette_detection", "target": "action6_object_exploration", "type": "DEPENDENCY", "weight": 0.75, "slot": "extracted_objects"},
+
+    {"source": "sparse_grid", "target": "primitive_suggester", "type": "DEPENDENCY", "weight": 0.9, "slot": "sparse_grid"},
+    {"source": "sparse_grid", "target": "exploration_phase", "type": "DEPENDENCY", "weight": 0.85, "slot": "sparse_grid"},
+    {"source": "sparse_grid", "target": "frontier_topology", "type": "DEPENDENCY", "weight": 0.95, "slot": "sparse_grid"},
+    {"source": "sparse_grid", "target": "frontier_checkpoint", "type": "DEPENDENCY", "weight": 0.95, "slot": "sparse_grid"},
+    {"source": "sparse_grid", "target": "map_intel_collision", "type": "DEPENDENCY", "weight": 0.9, "slot": "sparse_grid"},
+    {"source": "sparse_grid", "target": "subgoal_planning", "type": "DEPENDENCY", "weight": 0.85, "slot": "sparse_grid"},
+    {"source": "sparse_grid", "target": "grid_exploration", "type": "DEPENDENCY", "weight": 0.85, "slot": "sparse_grid"},
+    {"source": "sparse_grid", "target": "imagination_budget", "type": "DEPENDENCY", "weight": 0.75, "slot": "sparse_grid"},
+    {"source": "sparse_grid", "target": "visual_analyzer", "type": "DEPENDENCY", "weight": 0.8, "slot": "sparse_grid"},
+    {"source": "sparse_grid", "target": "multi_stage_matching", "type": "DEPENDENCY", "weight": 0.9, "slot": "sparse_hash"},
+    {"source": "sparse_grid", "target": "state_matching", "type": "DEPENDENCY", "weight": 0.9, "slot": "sparse_hash"},
+    {"source": "sparse_grid", "target": "embedding_matcher", "type": "DEPENDENCY", "weight": 0.85, "slot": "sparse_hash"},
+    {"source": "sparse_grid", "target": "resonance_detector", "type": "DEPENDENCY", "weight": 0.8, "slot": "sparse_hash"},
+    {"source": "sparse_grid", "target": "trigger_sequences", "type": "DEPENDENCY", "weight": 0.7, "slot": "sparse_diff"},
+
+    {"source": "frame_interpretation", "target": "event_understanding", "type": "IMPLICATION", "weight": 0.8},
+    {"source": "frame_interpretation", "target": "control_tracker", "type": "IMPLICATION", "weight": 0.6},
+
+    {"source": "control_tracker", "target": "frontier_topology", "type": "DEPENDENCY", "weight": 0.85, "slot": "controlled_objects"},
+    {"source": "control_tracker", "target": "subgoal_planning", "type": "IMPLICATION", "weight": 0.75},
+    {"source": "control_tracker", "target": "map_intel_collision", "type": "IMPLICATION", "weight": 0.7},
+    {"source": "control_tracker", "target": "coordinate_oscillation", "type": "IMPLICATION", "weight": 0.65},
+
+    {"source": "belief_system", "target": "theory_gate", "type": "DEPENDENCY", "weight": 0.95, "slot": "active_beliefs"},
+    {"source": "belief_system", "target": "theory_contradiction", "type": "DEPENDENCY", "weight": 0.95, "slot": "active_beliefs"},
+    {"source": "belief_system", "target": "network_sharing", "type": "DEPENDENCY", "weight": 0.8, "slot": "active_beliefs"},
+    {"source": "belief_system", "target": "rule_transfer", "type": "DEPENDENCY", "weight": 0.75, "slot": "active_beliefs"},
+
+    {"source": "hypothesis_system", "target": "hypothesis_testing", "type": "DEPENDENCY", "weight": 0.95, "slot": "untested_hypotheses"},
+    {"source": "hypothesis_system", "target": "theory_gate", "type": "DEPENDENCY", "weight": 0.8, "slot": "hypothesis_action"},
+    {"source": "hypothesis_system", "target": "scientific_method", "type": "IMPLICATION", "weight": 0.7},
+
+    {"source": "two_streams", "target": "i_thread", "type": "DEPENDENCY", "weight": 0.95, "slot": "stream_a_action"},
+    {"source": "two_streams", "target": "self_trust_boost", "type": "DEPENDENCY", "weight": 0.85, "slot": "stream_a_action"},
+
+    {"source": "action6_object_exploration", "target": "click_behavior_learning", "type": "DEPENDENCY", "weight": 0.9, "slot": "click_target"},
+    {"source": "click_behavior_learning", "target": "trigger_sequences", "type": "DEPENDENCY", "weight": 0.9, "slot": "click_rules"},
+
+    {"source": "death_avoidance", "target": "three_layer_filter", "type": "DEPENDENCY", "weight": 0.95, "slot": "death_weights"},
+    {"source": "pariah_avoidance", "target": "three_layer_filter", "type": "DEPENDENCY", "weight": 0.95, "slot": "pariah_actions"},
+    {"source": "theory_gate", "target": "three_layer_filter", "type": "DEPENDENCY", "weight": 0.9, "slot": "theory_blocked_actions"},
+    {"source": "terminal_pattern", "target": "death_avoidance", "type": "IMPLICATION", "weight": 0.85},
+
+    {"source": "resonance_detector", "target": "rule_transfer", "type": "DEPENDENCY", "weight": 0.9, "slot": "resonance_patterns"},
+    {"source": "frustration_detection", "target": "regulatory_signal", "type": "DEPENDENCY", "weight": 0.85, "slot": "frustration_level"},
+
+    {"source": "infinite_loop_breaker", "target": "coordinate_oscillation", "type": "COACTIVATION", "weight": 0.9},
+    {"source": "coordinate_oscillation", "target": "infinite_loop_breaker", "type": "COACTIVATION", "weight": 0.9},
+
+    {"source": "infinite_loop_breaker", "target": "smart_action_selection", "type": "FALLBACK", "weight": 0.8},
+    {"source": "coordinate_oscillation", "target": "smart_action_selection", "type": "FALLBACK", "weight": 0.8},
+    {"source": "three_try_sequence", "target": "multi_stage_matching", "type": "FALLBACK", "weight": 0.75},
+    {"source": "multi_stage_matching", "target": "state_matching", "type": "FALLBACK", "weight": 0.7},
+    {"source": "frontier_checkpoint", "target": "frontier_topology", "type": "FALLBACK", "weight": 0.7},
+    {"source": "frontier_topology", "target": "exploration_phase", "type": "FALLBACK", "weight": 0.65},
+    {"source": "exploration_phase", "target": "grid_exploration", "type": "FALLBACK", "weight": 0.6},
+    {"source": "grid_exploration", "target": "smart_action_selection", "type": "FALLBACK", "weight": 0.5},
+    {"source": "subgoal_planning", "target": "frontier_topology", "type": "FALLBACK", "weight": 0.7},
+    {"source": "embedding_suggestion", "target": "primitive_suggester", "type": "FALLBACK", "weight": 0.65},
+    {"source": "primitive_suggester", "target": "smart_action_selection", "type": "FALLBACK", "weight": 0.5},
+    {"source": "network_wisdom", "target": "two_streams", "type": "FALLBACK", "weight": 0.7},
+    {"source": "two_streams", "target": "smart_action_selection", "type": "FALLBACK", "weight": 0.5},
+    {"source": "deliberation_system", "target": "imagination_budget", "type": "FALLBACK", "weight": 0.6},
+
+    {"source": "death_avoidance", "target": "exploration_phase", "type": "CONTRADICTION", "weight": -0.7},
+    {"source": "death_avoidance", "target": "discovery_exploitation", "type": "CONTRADICTION", "weight": -0.6},
+    {"source": "pariah_avoidance", "target": "exploration_phase", "type": "CONTRADICTION", "weight": -0.5},
+    {"source": "frustration_detection", "target": "scientific_method", "type": "CONTRADICTION", "weight": -0.6},
+    {"source": "frustration_detection", "target": "imagination_budget", "type": "CONTRADICTION", "weight": -0.5},
+    {"source": "infinite_loop_breaker", "target": "three_try_sequence", "type": "CONTRADICTION", "weight": -0.8},
+    {"source": "coordinate_oscillation", "target": "three_try_sequence", "type": "CONTRADICTION", "weight": -0.75},
+    {"source": "theory_contradiction", "target": "hypothesis_system", "type": "CONTRADICTION", "weight": -0.6},
+    {"source": "contextual_failure", "target": "discovery_exploitation", "type": "CONTRADICTION", "weight": -0.5},
+
+    {"source": "embedding_matcher", "target": "embedding_suggestion", "type": "REFINEMENT", "weight": 0.8},
+    {"source": "multi_stage_matching", "target": "three_try_sequence", "type": "REFINEMENT", "weight": 0.85},
+    {"source": "state_matching", "target": "multi_stage_matching", "type": "REFINEMENT", "weight": 0.75},
+    {"source": "trigger_sequences", "target": "click_behavior_learning", "type": "REFINEMENT", "weight": 0.8},
+    {"source": "symbolic_tracker", "target": "spatial_relationship", "type": "REFINEMENT", "weight": 0.75},
+    {"source": "near_miss_analyzer", "target": "replay_learning", "type": "REFINEMENT", "weight": 0.7},
+    {"source": "rule_transfer", "target": "resonance_detector", "type": "REFINEMENT", "weight": 0.75},
+    {"source": "subgoal_planning", "target": "frontier_checkpoint", "type": "REFINEMENT", "weight": 0.8},
+    {"source": "hypothesis_testing", "target": "hypothesis_system", "type": "REFINEMENT", "weight": 0.85},
+    {"source": "self_trust_boost", "target": "i_thread", "type": "REFINEMENT", "weight": 0.7},
+    {"source": "assumption_formation", "target": "belief_system", "type": "REFINEMENT", "weight": 0.75},
+    {"source": "metacognitive_prediction", "target": "completion_prediction", "type": "REFINEMENT", "weight": 0.7},
+
+    {"source": "survey", "target": "palette_detection", "type": "COACTIVATION", "weight": 0.95},
+    {"source": "survey", "target": "sparse_grid", "type": "COACTIVATION", "weight": 0.95},
+    {"source": "palette_detection", "target": "sparse_grid", "type": "COACTIVATION", "weight": 0.9},
+    {"source": "frame_interpretation", "target": "sparse_grid", "type": "COACTIVATION", "weight": 0.85},
+    {"source": "control_tracker", "target": "visual_analyzer", "type": "COACTIVATION", "weight": 0.7},
+    {"source": "belief_system", "target": "hypothesis_system", "type": "COACTIVATION", "weight": 0.85},
+    {"source": "scientific_method", "target": "hypothesis_system", "type": "COACTIVATION", "weight": 0.8},
+    {"source": "death_avoidance", "target": "terminal_pattern", "type": "COACTIVATION", "weight": 0.9},
+    {"source": "death_avoidance", "target": "pariah_avoidance", "type": "COACTIVATION", "weight": 0.85},
+    {"source": "terminal_pattern", "target": "pariah_avoidance", "type": "COACTIVATION", "weight": 0.8},
+    {"source": "frontier_topology", "target": "frontier_checkpoint", "type": "COACTIVATION", "weight": 0.9},
+    {"source": "exploration_phase", "target": "grid_exploration", "type": "COACTIVATION", "weight": 0.85},
+    {"source": "action6_object_exploration", "target": "click_behavior_learning", "type": "COACTIVATION", "weight": 0.9},
+    {"source": "embedding_suggestion", "target": "embedding_matcher", "type": "COACTIVATION", "weight": 0.85},
+    {"source": "network_wisdom", "target": "network_sharing", "type": "COACTIVATION", "weight": 0.8},
+    {"source": "network_wisdom", "target": "network_exploration_stats", "type": "COACTIVATION", "weight": 0.75},
+    {"source": "three_try_sequence", "target": "multi_stage_matching", "type": "COACTIVATION", "weight": 0.9},
+    {"source": "spatial_relationship", "target": "abstraction_templates", "type": "COACTIVATION", "weight": 0.75},
+    {"source": "valence_goals", "target": "click_behavior_learning", "type": "COACTIVATION", "weight": 0.7},
+    {"source": "resonance_detector", "target": "rule_transfer", "type": "COACTIVATION", "weight": 0.85},
+    {"source": "deliberation_system", "target": "metacognitive_prediction", "type": "COACTIVATION", "weight": 0.75},
+    {"source": "replay_learning", "target": "near_miss_analyzer", "type": "COACTIVATION", "weight": 0.8},
+    {"source": "frustration_detection", "target": "regulatory_signal", "type": "COACTIVATION", "weight": 0.9},
+    {"source": "breakthrough_budget", "target": "imagination_budget", "type": "COACTIVATION", "weight": 0.7},
+    {"source": "sensation_engine", "target": "i_thread", "type": "COACTIVATION", "weight": 0.65},
+    {"source": "two_streams", "target": "network_wisdom", "type": "COACTIVATION", "weight": 0.8},
+    {"source": "questioning_engine", "target": "scientific_method", "type": "COACTIVATION", "weight": 0.75},
+    {"source": "discovery_exploitation", "target": "prior_lessons", "type": "COACTIVATION", "weight": 0.7},
+    {"source": "event_understanding", "target": "click_behavior_learning", "type": "COACTIVATION", "weight": 0.65},
+    {"source": "event_understanding", "target": "trigger_sequences", "type": "COACTIVATION", "weight": 0.6},
+    {"source": "few_shot_invariants", "target": "few_shot_relations", "type": "COACTIVATION", "weight": 0.85},
+    {"source": "abstraction_templates", "target": "few_shot_invariants", "type": "COACTIVATION", "weight": 0.75},
+
+    {"source": "theory_gate", "target": "theory_contradiction", "type": "IMPLICATION", "weight": 0.85},
+    {"source": "survey", "target": "frame_interpretation", "type": "IMPLICATION", "weight": 0.7},
+    {"source": "survey", "target": "control_tracker", "type": "IMPLICATION", "weight": 0.65},
+    {"source": "sparse_grid", "target": "frame_interpretation", "type": "IMPLICATION", "weight": 0.6},
+    {"source": "palette_detection", "target": "frame_interpretation", "type": "IMPLICATION", "weight": 0.6},
+    {"source": "visual_analyzer", "target": "palette_detection", "type": "IMPLICATION", "weight": 0.5},
+    {"source": "control_tracker", "target": "death_avoidance", "type": "IMPLICATION", "weight": 0.7},
+    {"source": "belief_system", "target": "scientific_method", "type": "IMPLICATION", "weight": 0.6},
+    {"source": "hypothesis_system", "target": "assumption_formation", "type": "IMPLICATION", "weight": 0.7},
+    {"source": "assumption_formation", "target": "hypothesis_testing", "type": "IMPLICATION", "weight": 0.8},
+    {"source": "near_miss_analyzer", "target": "breakthrough_budget", "type": "IMPLICATION", "weight": 0.65},
+    {"source": "completion_prediction", "target": "breakthrough_budget", "type": "IMPLICATION", "weight": 0.7},
+    {"source": "frustration_detection", "target": "breakthrough_budget", "type": "IMPLICATION", "weight": 0.6},
+    {"source": "resonance_detector", "target": "abstraction_templates", "type": "IMPLICATION", "weight": 0.6},
+    {"source": "embedding_matcher", "target": "state_matching", "type": "IMPLICATION", "weight": 0.55},
+    {"source": "network_object_inventory", "target": "valence_goals", "type": "IMPLICATION", "weight": 0.6},
+    {"source": "valence_goals", "target": "subgoal_planning", "type": "IMPLICATION", "weight": 0.65},
+    {"source": "subgoal_planning", "target": "control_tracker", "type": "IMPLICATION", "weight": 0.5},
+    {"source": "spatial_relationship", "target": "trigger_sequences", "type": "IMPLICATION", "weight": 0.6},
+    {"source": "symbolic_tracker", "target": "trigger_sequences", "type": "IMPLICATION", "weight": 0.65},
+    {"source": "replay_learning", "target": "rule_transfer", "type": "IMPLICATION", "weight": 0.5},
+    {"source": "deliberation_system", "target": "two_streams", "type": "IMPLICATION", "weight": 0.6},
+    {"source": "regulatory_signal", "target": "frustration_detection", "type": "IMPLICATION", "weight": 0.55},
+    {"source": "sensation_engine", "target": "valence_goals", "type": "IMPLICATION", "weight": 0.5},
+    {"source": "network_exploration_stats", "target": "network_wisdom", "type": "IMPLICATION", "weight": 0.6},
+
+    {"source": "three_try_sequence", "target": "embedding_suggestion", "type": "CONTRADICTION", "weight": -0.4},
+    {"source": "three_try_sequence", "target": "exploration_phase", "type": "CONTRADICTION", "weight": -0.5},
+    {"source": "infinite_loop_breaker", "target": "frontier_checkpoint", "type": "CONTRADICTION", "weight": -0.6},
+    {"source": "death_avoidance", "target": "grid_exploration", "type": "CONTRADICTION", "weight": -0.5},
+    {"source": "frustration_detection", "target": "deliberation_system", "type": "CONTRADICTION", "weight": -0.4},
+    {"source": "contextual_failure", "target": "scientific_method", "type": "CONTRADICTION", "weight": -0.4},
+    {"source": "pariah_avoidance", "target": "hypothesis_testing", "type": "CONTRADICTION", "weight": -0.35},
+
+    {"source": "belief_system", "target": "assumption_formation", "type": "FALLBACK", "weight": 0.6},
+    {"source": "hypothesis_system", "target": "scientific_method", "type": "FALLBACK", "weight": 0.65},
+    {"source": "theory_gate", "target": "pariah_avoidance", "type": "FALLBACK", "weight": 0.55},
+    {"source": "embedding_matcher", "target": "state_matching", "type": "FALLBACK", "weight": 0.6},
+    {"source": "network_wisdom", "target": "prior_lessons", "type": "FALLBACK", "weight": 0.65},
+    {"source": "prior_lessons", "target": "discovery_exploitation", "type": "FALLBACK", "weight": 0.6},
+    {"source": "resonance_detector", "target": "embedding_matcher", "type": "FALLBACK", "weight": 0.5},
+    {"source": "valence_goals", "target": "sensation_engine", "type": "FALLBACK", "weight": 0.5},
+    {"source": "near_miss_analyzer", "target": "replay_learning", "type": "FALLBACK", "weight": 0.65},
+    {"source": "metacognitive_prediction", "target": "deliberation_system", "type": "FALLBACK", "weight": 0.55},
+    {"source": "imagination_budget", "target": "smart_action_selection", "type": "FALLBACK", "weight": 0.4},
+    {"source": "regulatory_signal", "target": "infinite_loop_breaker", "type": "FALLBACK", "weight": 0.7},
+
+    {"source": "completion_prediction", "target": "metacognitive_prediction", "type": "REFINEMENT", "weight": 0.65},
+    {"source": "contextual_failure", "target": "pariah_avoidance", "type": "REFINEMENT", "weight": 0.7},
+    {"source": "theory_contradiction", "target": "theory_gate", "type": "REFINEMENT", "weight": 0.75},
+    {"source": "network_sharing", "target": "network_wisdom", "type": "REFINEMENT", "weight": 0.7},
+    {"source": "network_exploration_stats", "target": "network_sharing", "type": "REFINEMENT", "weight": 0.6},
+    {"source": "few_shot_relations", "target": "few_shot_invariants", "type": "REFINEMENT", "weight": 0.7},
+    {"source": "abstraction_templates", "target": "spatial_relationship", "type": "REFINEMENT", "weight": 0.65},
+    {"source": "grid_exploration", "target": "exploration_phase", "type": "REFINEMENT", "weight": 0.6},
+    {"source": "imagination_budget", "target": "deliberation_system", "type": "REFINEMENT", "weight": 0.55},
+    {"source": "self_trust_boost", "target": "two_streams", "type": "REFINEMENT", "weight": 0.65}
+  ],
+
+  "edge_statistics": {
+    "DEPENDENCY": 45,
+    "IMPLICATION": 35,
+    "CONTRADICTION": 18,
+    "REFINEMENT": 22,
+    "FALLBACK": 28,
+    "COACTIVATION": 32
+  },
+
+  "subgraph_clusters": {
+    "orientation_cluster": {
+      "members": ["survey", "palette_detection", "sparse_grid", "frame_interpretation", "control_tracker", "visual_analyzer", "network_object_inventory", "questioning_engine"],
+      "description": "Initial game state understanding - runs first"
+    },
+    "hypothesis_cluster": {
+      "members": ["belief_system", "hypothesis_system", "assumption_formation", "hypothesis_testing", "scientific_method", "theory_gate", "theory_contradiction"],
+      "description": "Theory formation and testing"
+    },
+    "safety_cluster": {
+      "members": ["infinite_loop_breaker", "coordinate_oscillation", "death_avoidance", "terminal_pattern", "pariah_avoidance", "three_layer_filter", "contextual_failure"],
+      "description": "Emergency and filter rungs"
+    },
+    "exploitation_cluster": {
+      "members": ["three_try_sequence", "multi_stage_matching", "state_matching", "frontier_checkpoint", "frontier_topology", "exploration_phase", "grid_exploration", "subgoal_planning"],
+      "description": "Using known strategies and sequences"
+    },
+    "learning_cluster": {
+      "members": ["click_behavior_learning", "trigger_sequences", "symbolic_tracker", "spatial_relationship", "valence_goals", "event_understanding"],
+      "description": "Pattern and rule learning"
+    },
+    "network_cluster": {
+      "members": ["network_wisdom", "network_sharing", "network_exploration_stats", "two_streams", "i_thread", "resonance_detector", "rule_transfer"],
+      "description": "Network intelligence integration"
+    },
+    "metacognition_cluster": {
+      "members": ["metacognitive_prediction", "completion_prediction", "near_miss_analyzer", "replay_learning", "deliberation_system", "imagination_budget", "frustration_detection", "regulatory_signal", "breakthrough_budget", "self_trust_boost", "sensation_engine"],
+      "description": "Self-monitoring and adaptation"
+    },
+    "embedding_cluster": {
+      "members": ["embedding_suggestion", "embedding_matcher", "primitive_suggester", "prior_lessons", "discovery_exploitation", "abstraction_templates", "few_shot_invariants", "few_shot_relations"],
+      "description": "Neural and template-based suggestions"
+    }
+  },
+
+  "critical_paths": {
+    "orientation_to_action": ["survey", "sparse_grid", "control_tracker", "frontier_topology", "smart_action_selection"],
+    "hypothesis_formation": ["survey", "belief_system", "assumption_formation", "hypothesis_testing", "scientific_method"],
+    "sequence_following": ["three_try_sequence", "multi_stage_matching", "state_matching", "frontier_checkpoint"],
+    "emergency_escape": ["infinite_loop_breaker", "coordinate_oscillation", "regulatory_signal", "smart_action_selection"],
+    "network_integration": ["two_streams", "network_wisdom", "i_thread", "self_trust_boost"],
+    "click_learning": ["action6_object_exploration", "click_behavior_learning", "trigger_sequences", "symbolic_tracker"]
+  }
+}

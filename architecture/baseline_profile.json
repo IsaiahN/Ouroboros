@@ -1,0 +1,1322 @@
+{
+  "meta": {
+    "timestamp": "2026-02-04T06:23:53.666558",
+    "python_version": "3.13.9 (tags/v3.13.9:8183fa5, Oct 14 2025, 14:09:13) [MSC v.1944 64 bit (AMD64)]",
+    "profile_type": "baseline_pre_cognitive_routing"
+  },
+  "summary": {
+    "total_decisions": 50,
+    "total_time_ms": 8038.89,
+    "decisions_per_second": 6.22,
+    "peak_memory_mb": 0,
+    "total_rungs_evaluated": 3250,
+    "avg_rungs_per_decision": 65.0
+  },
+  "rung_profiles": {
+    "abstraction_templates": {
+      "name": "abstraction_templates",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.498,
+      "timing_ms": {
+        "avg": 5.167,
+        "max": 58.21,
+        "p95": 6.043
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "frontier_checkpoint": {
+      "name": "frontier_checkpoint",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 2,
+      "win_rate": 0.04,
+      "avg_confidence": 0.468,
+      "timing_ms": {
+        "avg": 5.165,
+        "max": 55.086,
+        "p95": 6.77
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "frontier_topology": {
+      "name": "frontier_topology",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.403,
+      "timing_ms": {
+        "avg": 4.955,
+        "max": 56.079,
+        "p95": 6.852
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "state_matching": {
+      "name": "state_matching",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.535,
+      "timing_ms": {
+        "avg": 4.592,
+        "max": 39.542,
+        "p95": 5.98
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "few_shot_invariants": {
+      "name": "few_shot_invariants",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 4,
+      "win_rate": 0.08,
+      "avg_confidence": 0.463,
+      "timing_ms": {
+        "avg": 4.431,
+        "max": 30.228,
+        "p95": 7.115
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "multi_stage_matching": {
+      "name": "multi_stage_matching",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 2,
+      "win_rate": 0.04,
+      "avg_confidence": 0.547,
+      "timing_ms": {
+        "avg": 4.364,
+        "max": 27.844,
+        "p95": 5.736
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "exploration_phase": {
+      "name": "exploration_phase",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.469,
+      "timing_ms": {
+        "avg": 4.126,
+        "max": 20.751,
+        "p95": 5.53
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "subgoal_planning": {
+      "name": "subgoal_planning",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 3,
+      "win_rate": 0.06,
+      "avg_confidence": 0.571,
+      "timing_ms": {
+        "avg": 4.087,
+        "max": 8.4,
+        "p95": 6.161
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "three_try_sequence": {
+      "name": "three_try_sequence",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.493,
+      "timing_ms": {
+        "avg": 3.847,
+        "max": 19.194,
+        "p95": 5.869
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "few_shot_relations": {
+      "name": "few_shot_relations",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.546,
+      "timing_ms": {
+        "avg": 3.843,
+        "max": 25.661,
+        "p95": 5.618
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "network_wisdom": {
+      "name": "network_wisdom",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 3,
+      "win_rate": 0.06,
+      "avg_confidence": 0.458,
+      "timing_ms": {
+        "avg": 3.789,
+        "max": 7.413,
+        "p95": 5.679
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "embedding_suggestion": {
+      "name": "embedding_suggestion",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.475,
+      "timing_ms": {
+        "avg": 3.784,
+        "max": 11.024,
+        "p95": 5.436
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "discovery_exploitation": {
+      "name": "discovery_exploitation",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 2,
+      "win_rate": 0.04,
+      "avg_confidence": 0.493,
+      "timing_ms": {
+        "avg": 3.74,
+        "max": 5.969,
+        "p95": 5.826
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "embedding_matcher": {
+      "name": "embedding_matcher",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 3,
+      "win_rate": 0.06,
+      "avg_confidence": 0.523,
+      "timing_ms": {
+        "avg": 3.668,
+        "max": 6.118,
+        "p95": 5.23
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "network_sharing": {
+      "name": "network_sharing",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.484,
+      "timing_ms": {
+        "avg": 3.667,
+        "max": 5.978,
+        "p95": 5.359
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "prior_lessons": {
+      "name": "prior_lessons",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.396,
+      "timing_ms": {
+        "avg": 3.586,
+        "max": 7.967,
+        "p95": 5.683
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "action6_object_exploration": {
+      "name": "action6_object_exploration",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.508,
+      "timing_ms": {
+        "avg": 3.584,
+        "max": 6.484,
+        "p95": 5.198
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "rule_transfer": {
+      "name": "rule_transfer",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.501,
+      "timing_ms": {
+        "avg": 3.494,
+        "max": 6.006,
+        "p95": 5.302
+      },
+      "memory_kb": {
+        "avg": 3.29
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "primitive_suggester": {
+      "name": "primitive_suggester",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.489,
+      "timing_ms": {
+        "avg": 3.436,
+        "max": 8.247,
+        "p95": 5.051
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "grid_exploration": {
+      "name": "grid_exploration",
+      "category": "exploitation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.489,
+      "timing_ms": {
+        "avg": 3.431,
+        "max": 8.026,
+        "p95": 6.105
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "contextual_failure": {
+      "name": "contextual_failure",
+      "category": "filter",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.519,
+      "timing_ms": {
+        "avg": 3.001,
+        "max": 44.721,
+        "p95": 23.424
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "coordinate_oscillation": {
+      "name": "coordinate_oscillation",
+      "category": "emergency",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.479,
+      "timing_ms": {
+        "avg": 2.553,
+        "max": 36.697,
+        "p95": 8.986
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "hypothesis_system": {
+      "name": "hypothesis_system",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.48,
+      "timing_ms": {
+        "avg": 2.531,
+        "max": 32.703,
+        "p95": 3.871
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "event_understanding": {
+      "name": "event_understanding",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 2,
+      "win_rate": 0.04,
+      "avg_confidence": 0.481,
+      "timing_ms": {
+        "avg": 2.337,
+        "max": 25.305,
+        "p95": 3.043
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "hypothesis_testing": {
+      "name": "hypothesis_testing",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.494,
+      "timing_ms": {
+        "avg": 2.269,
+        "max": 18.321,
+        "p95": 2.957
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "assumption_formation": {
+      "name": "assumption_formation",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.518,
+      "timing_ms": {
+        "avg": 2.256,
+        "max": 16.363,
+        "p95": 4.438
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "click_behavior_learning": {
+      "name": "click_behavior_learning",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.441,
+      "timing_ms": {
+        "avg": 2.163,
+        "max": 14.59,
+        "p95": 3.402
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "two_streams": {
+      "name": "two_streams",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.526,
+      "timing_ms": {
+        "avg": 2.077,
+        "max": 6.658,
+        "p95": 3.086
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "spatial_relationship": {
+      "name": "spatial_relationship",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.493,
+      "timing_ms": {
+        "avg": 2.053,
+        "max": 12.434,
+        "p95": 2.975
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "frustration_detection": {
+      "name": "frustration_detection",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.536,
+      "timing_ms": {
+        "avg": 2.01,
+        "max": 40.433,
+        "p95": 3.047
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "trigger_sequences": {
+      "name": "trigger_sequences",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.585,
+      "timing_ms": {
+        "avg": 1.979,
+        "max": 3.73,
+        "p95": 3.055
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "near_miss_analyzer": {
+      "name": "near_miss_analyzer",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.434,
+      "timing_ms": {
+        "avg": 1.97,
+        "max": 39.966,
+        "p95": 2.664
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "belief_system": {
+      "name": "belief_system",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.528,
+      "timing_ms": {
+        "avg": 1.953,
+        "max": 9.698,
+        "p95": 3.667
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "three_layer_filter": {
+      "name": "three_layer_filter",
+      "category": "filter",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.478,
+      "timing_ms": {
+        "avg": 1.93,
+        "max": 39.76,
+        "p95": 2.28
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "symbolic_tracker": {
+      "name": "symbolic_tracker",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 3,
+      "win_rate": 0.06,
+      "avg_confidence": 0.528,
+      "timing_ms": {
+        "avg": 1.926,
+        "max": 8.192,
+        "p95": 2.981
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "i_thread": {
+      "name": "i_thread",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.471,
+      "timing_ms": {
+        "avg": 1.881,
+        "max": 35.218,
+        "p95": 3.077
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "scientific_method": {
+      "name": "scientific_method",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.54,
+      "timing_ms": {
+        "avg": 1.878,
+        "max": 3.079,
+        "p95": 2.913
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "theory_contradiction": {
+      "name": "theory_contradiction",
+      "category": "filter",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.606,
+      "timing_ms": {
+        "avg": 1.877,
+        "max": 34.132,
+        "p95": 3.038
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "valence_goals": {
+      "name": "valence_goals",
+      "category": "hypothesis",
+      "invocation_count": 50,
+      "win_count": 2,
+      "win_rate": 0.04,
+      "avg_confidence": 0.507,
+      "timing_ms": {
+        "avg": 1.87,
+        "max": 3.177,
+        "p95": 3.01
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "survey": {
+      "name": "survey",
+      "category": "orientation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.44,
+      "timing_ms": {
+        "avg": 1.87,
+        "max": 27.063,
+        "p95": 2.861
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "smart_action_selection": {
+      "name": "smart_action_selection",
+      "category": "fallback",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.446,
+      "timing_ms": {
+        "avg": 1.73,
+        "max": 23.842,
+        "p95": 2.885
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "map_intel_collision": {
+      "name": "map_intel_collision",
+      "category": "filter",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.53,
+      "timing_ms": {
+        "avg": 1.718,
+        "max": 23.776,
+        "p95": 3.766
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "sensation_engine": {
+      "name": "sensation_engine",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.506,
+      "timing_ms": {
+        "avg": 1.694,
+        "max": 26.537,
+        "p95": 3.095
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "control_tracker": {
+      "name": "control_tracker",
+      "category": "orientation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.538,
+      "timing_ms": {
+        "avg": 1.692,
+        "max": 25.994,
+        "p95": 1.869
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "sparse_grid": {
+      "name": "sparse_grid",
+      "category": "orientation",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.504,
+      "timing_ms": {
+        "avg": 1.68,
+        "max": 22.948,
+        "p95": 2.063
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "self_trust_boost": {
+      "name": "self_trust_boost",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.489,
+      "timing_ms": {
+        "avg": 1.621,
+        "max": 25.852,
+        "p95": 1.974
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "terminal_pattern": {
+      "name": "terminal_pattern",
+      "category": "filter",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.532,
+      "timing_ms": {
+        "avg": 1.481,
+        "max": 17.946,
+        "p95": 2.028
+      },
+      "memory_kb": {
+        "avg": 3.29
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "frame_interpretation": {
+      "name": "frame_interpretation",
+      "category": "orientation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.531,
+      "timing_ms": {
+        "avg": 1.479,
+        "max": 13.401,
+        "p95": 3.428
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "theory_gate": {
+      "name": "theory_gate",
+      "category": "filter",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.556,
+      "timing_ms": {
+        "avg": 1.478,
+        "max": 14.33,
+        "p95": 3.916
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "infinite_loop_breaker": {
+      "name": "infinite_loop_breaker",
+      "category": "emergency",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.562,
+      "timing_ms": {
+        "avg": 1.448,
+        "max": 15.865,
+        "p95": 2.793
+      },
+      "memory_kb": {
+        "avg": 2.93
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "palette_detection": {
+      "name": "palette_detection",
+      "category": "orientation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.442,
+      "timing_ms": {
+        "avg": 1.413,
+        "max": 14.824,
+        "p95": 3.0
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "network_object_inventory": {
+      "name": "network_object_inventory",
+      "category": "orientation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.579,
+      "timing_ms": {
+        "avg": 1.345,
+        "max": 7.307,
+        "p95": 5.324
+      },
+      "memory_kb": {
+        "avg": 3.29
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "visual_analyzer": {
+      "name": "visual_analyzer",
+      "category": "orientation",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.457,
+      "timing_ms": {
+        "avg": 1.213,
+        "max": 5.761,
+        "p95": 2.134
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "deliberation_system": {
+      "name": "deliberation_system",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.498,
+      "timing_ms": {
+        "avg": 1.211,
+        "max": 5.31,
+        "p95": 2.003
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "metacognitive_prediction": {
+      "name": "metacognitive_prediction",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.442,
+      "timing_ms": {
+        "avg": 1.203,
+        "max": 4.277,
+        "p95": 2.163
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "regulatory_signal": {
+      "name": "regulatory_signal",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.468,
+      "timing_ms": {
+        "avg": 1.199,
+        "max": 3.337,
+        "p95": 2.547
+      },
+      "memory_kb": {
+        "avg": 3.29
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "completion_prediction": {
+      "name": "completion_prediction",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.533,
+      "timing_ms": {
+        "avg": 1.194,
+        "max": 2.515,
+        "p95": 2.128
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "death_avoidance": {
+      "name": "death_avoidance",
+      "category": "filter",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.477,
+      "timing_ms": {
+        "avg": 1.192,
+        "max": 2.866,
+        "p95": 2.065
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "replay_learning": {
+      "name": "replay_learning",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.544,
+      "timing_ms": {
+        "avg": 1.183,
+        "max": 3.152,
+        "p95": 2.001
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "breakthrough_budget": {
+      "name": "breakthrough_budget",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.518,
+      "timing_ms": {
+        "avg": 1.175,
+        "max": 2.978,
+        "p95": 1.969
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "network_exploration_stats": {
+      "name": "network_exploration_stats",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.412,
+      "timing_ms": {
+        "avg": 1.165,
+        "max": 3.879,
+        "p95": 2.009
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "pariah_avoidance": {
+      "name": "pariah_avoidance",
+      "category": "filter",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.549,
+      "timing_ms": {
+        "avg": 1.155,
+        "max": 4.382,
+        "p95": 2.245
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "imagination_budget": {
+      "name": "imagination_budget",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 0,
+      "win_rate": 0.0,
+      "avg_confidence": 0.555,
+      "timing_ms": {
+        "avg": 1.117,
+        "max": 3.055,
+        "p95": 2.115
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "questioning_engine": {
+      "name": "questioning_engine",
+      "category": "orientation",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.531,
+      "timing_ms": {
+        "avg": 1.089,
+        "max": 4.789,
+        "p95": 1.663
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    },
+    "resonance_detector": {
+      "name": "resonance_detector",
+      "category": "metacognition",
+      "invocation_count": 50,
+      "win_count": 1,
+      "win_rate": 0.02,
+      "avg_confidence": 0.502,
+      "timing_ms": {
+        "avg": 1.053,
+        "max": 2.492,
+        "p95": 1.927
+      },
+      "memory_kb": {
+        "avg": 2.57
+      },
+      "context_access": {
+        "avg_reads": 3.0,
+        "avg_writes": 0.0
+      }
+    }
+  },
+  "context_slot_hotspots": {
+    "survey_complete": 3250,
+    "level": 3250,
+    "game_type": 3250
+  }
+}

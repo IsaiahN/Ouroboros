@@ -1,0 +1,1193 @@
+{
+  "questions": [
+    {
+      "question_id": "Q_SURVEY",
+      "natural_language": "What objects and colors exist in this frame?",
+      "target_slots": [
+        "survey"
+      ],
+      "answerable_by": [
+        "embedding_suggestion",
+        "scientific_method",
+        "primitive_suggester",
+        "metacognitive_prediction",
+        "exploration_phase",
+        "smart_action_selection",
+        "few_shot_invariants",
+        "few_shot_relations",
+        "sensation_engine",
+        "visual_analyzer",
+        "network_object_inventory",
+        "action6_object_exploration",
+        "deliberation_system",
+        "assumption_formation"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KK"
+    },
+    {
+      "question_id": "Q_SPARSE",
+      "natural_language": "What is the sparse structure of the frame?",
+      "target_slots": [
+        "sparse_grid"
+      ],
+      "answerable_by": [
+        "primitive_suggester",
+        "exploration_phase",
+        "frontier_topology",
+        "frontier_checkpoint",
+        "map_intel_collision",
+        "abstraction_templates",
+        "state_matching",
+        "subgoal_planning",
+        "visual_analyzer",
+        "grid_exploration",
+        "imagination_budget"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KK"
+    },
+    {
+      "question_id": "Q_FRAME_ID",
+      "natural_language": "What is the structural signature of this frame?",
+      "target_slots": [
+        "sparse_hash"
+      ],
+      "answerable_by": [
+        "multi_stage_matching",
+        "state_matching",
+        "resonance_detector",
+        "embedding_matcher"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KU"
+    },
+    {
+      "question_id": "Q_PALETTE",
+      "natural_language": "Is there a legend/palette encoding transformation rules?",
+      "target_slots": [
+        "detected_palette"
+      ],
+      "answerable_by": [
+        "spatial_relationship",
+        "abstraction_templates"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KU"
+    },
+    {
+      "question_id": "Q_OBJECTS",
+      "natural_language": "What distinct objects were extracted from the frame?",
+      "target_slots": [
+        "extracted_objects"
+      ],
+      "answerable_by": [
+        "spatial_relationship",
+        "few_shot_relations",
+        "network_object_inventory",
+        "action6_object_exploration",
+        "symbolic_tracker",
+        "valence_goals"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KK"
+    },
+    {
+      "question_id": "Q_CONTROL",
+      "natural_language": "What object(s) does the agent control?",
+      "target_slots": [
+        "controlled_objects"
+      ],
+      "answerable_by": [
+        "frontier_topology"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_PHYSICS",
+      "natural_language": "Is this a physics simulation or direct control game?",
+      "target_slots": [
+        "likely_physics_game"
+      ],
+      "answerable_by": [],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_VISUAL",
+      "natural_language": "What visual features (symmetry, patterns) are present?",
+      "target_slots": [
+        "visual_features"
+      ],
+      "answerable_by": [],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_GAME_TYPE",
+      "natural_language": "What type of game is this?",
+      "target_slots": [
+        "game_type"
+      ],
+      "answerable_by": [
+        "control_tracker",
+        "prior_lessons",
+        "discovery_exploitation",
+        "belief_system",
+        "hypothesis_system",
+        "event_understanding",
+        "embedding_suggestion",
+        "scientific_method",
+        "two_streams",
+        "network_wisdom",
+        "primitive_suggester",
+        "metacognitive_prediction",
+        "smart_action_selection",
+        "abstraction_templates",
+        "few_shot_invariants",
+        "three_try_sequence",
+        "multi_stage_matching",
+        "pariah_avoidance",
+        "terminal_pattern",
+        "sensation_engine",
+        "near_miss_analyzer",
+        "state_matching",
+        "breakthrough_budget",
+        "resonance_detector",
+        "network_object_inventory",
+        "embedding_matcher",
+        "network_sharing",
+        "deliberation_system",
+        "replay_learning",
+        "completion_prediction",
+        "network_exploration_stats",
+        "rule_transfer",
+        "hypothesis_testing",
+        "assumption_formation",
+        "contextual_failure"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KK"
+    },
+    {
+      "question_id": "Q_PLAYER_POS",
+      "natural_language": "Where is the player/controlled object?",
+      "target_slots": [
+        "player_position"
+      ],
+      "answerable_by": [
+        "control_tracker",
+        "death_avoidance",
+        "exploration_phase",
+        "frontier_topology",
+        "frontier_checkpoint",
+        "coordinate_oscillation",
+        "map_intel_collision",
+        "terminal_pattern",
+        "subgoal_planning",
+        "grid_exploration",
+        "imagination_budget"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KK"
+    },
+    {
+      "question_id": "Q_GOAL_POS",
+      "natural_language": "Where is the goal/target?",
+      "target_slots": [
+        "goal_position"
+      ],
+      "answerable_by": [
+        "control_tracker",
+        "subgoal_planning"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KU"
+    },
+    {
+      "question_id": "Q_TARGET",
+      "natural_language": "What position should the agent move toward?",
+      "target_slots": [
+        "target_position"
+      ],
+      "answerable_by": [
+        "control_tracker"
+      ],
+      "category": "orientation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_BELIEFS",
+      "natural_language": "What beliefs does the agent currently hold?",
+      "target_slots": [
+        "active_beliefs"
+      ],
+      "answerable_by": [
+        "theory_gate",
+        "theory_contradiction",
+        "network_sharing",
+        "rule_transfer"
+      ],
+      "category": "hypothesis",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KU"
+    },
+    {
+      "question_id": "Q_UNTESTED",
+      "natural_language": "What hypotheses haven't been tested yet?",
+      "target_slots": [
+        "untested_hypotheses"
+      ],
+      "answerable_by": [
+        "hypothesis_testing"
+      ],
+      "category": "hypothesis",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_CAUSALITY",
+      "natural_language": "What causes what in this game?",
+      "target_slots": [
+        "causal_model"
+      ],
+      "answerable_by": [],
+      "category": "hypothesis",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_CLICK_RULES",
+      "natural_language": "What are the rules for clicking objects?",
+      "target_slots": [
+        "click_rules"
+      ],
+      "answerable_by": [
+        "trigger_sequences"
+      ],
+      "category": "hypothesis",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_TRIGGERS",
+      "natural_language": "What trigger sequences have been learned?",
+      "target_slots": [
+        "trigger_chains"
+      ],
+      "answerable_by": [],
+      "category": "hypothesis",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_SYMBOLIC",
+      "natural_language": "What key/lock symbolic relationships exist?",
+      "target_slots": [
+        "key_lock_pairs"
+      ],
+      "answerable_by": [],
+      "category": "hypothesis",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_VALENCE",
+      "natural_language": "Which objects are good vs bad?",
+      "target_slots": [
+        "good_objects"
+      ],
+      "answerable_by": [],
+      "category": "hypothesis",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_CHECKPOINT",
+      "natural_language": "What is the current checkpoint/winning sequence?",
+      "target_slots": [
+        "checkpoint_sequence"
+      ],
+      "answerable_by": [
+        "network_wisdom",
+        "three_try_sequence"
+      ],
+      "category": "exploitation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KU"
+    },
+    {
+      "question_id": "Q_ACTIVE_SEQ",
+      "natural_language": "What sequence is currently being followed?",
+      "target_slots": [
+        "active_sequence"
+      ],
+      "answerable_by": [
+        "three_try_sequence"
+      ],
+      "category": "exploitation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_WIN_SEQS",
+      "natural_language": "What winning sequences are known for this game?",
+      "target_slots": [
+        "winning_sequences"
+      ],
+      "answerable_by": [
+        "frontier_checkpoint"
+      ],
+      "category": "exploitation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_STAGE",
+      "natural_language": "What stage/state does the current frame match?",
+      "target_slots": [
+        "matched_stage"
+      ],
+      "answerable_by": [],
+      "category": "exploitation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_SUBGOALS",
+      "natural_language": "What is the planned path to the goal?",
+      "target_slots": [
+        "subgoal_path"
+      ],
+      "answerable_by": [],
+      "category": "exploitation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_FRONTIER",
+      "natural_language": "What unexplored frontier is being targeted?",
+      "target_slots": [
+        "frontier_target"
+      ],
+      "answerable_by": [],
+      "category": "exploitation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_REACHABLE",
+      "natural_language": "What cells can the agent reach from here?",
+      "target_slots": [
+        "reachable_cells"
+      ],
+      "answerable_by": [],
+      "category": "exploitation",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_DEATH",
+      "natural_language": "What positions/actions lead to death?",
+      "target_slots": [
+        "death_weights"
+      ],
+      "answerable_by": [
+        "three_layer_filter"
+      ],
+      "category": "filter",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_PARIAH",
+      "natural_language": "What actions are known to fail?",
+      "target_slots": [
+        "pariah_actions"
+      ],
+      "answerable_by": [
+        "three_layer_filter"
+      ],
+      "category": "filter",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_BLOCKED",
+      "natural_language": "What actions contradict current theory?",
+      "target_slots": [
+        "theory_blocked_actions"
+      ],
+      "answerable_by": [
+        "three_layer_filter"
+      ],
+      "category": "filter",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_COLLISION",
+      "natural_language": "Where are the obstacles/walls?",
+      "target_slots": [
+        "collision_map"
+      ],
+      "answerable_by": [],
+      "category": "filter",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_TERMINAL",
+      "natural_language": "What patterns indicate terminal/death states?",
+      "target_slots": [
+        "terminal_patterns"
+      ],
+      "answerable_by": [],
+      "category": "filter",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_AVOID",
+      "natural_language": "What contexts should be avoided?",
+      "target_slots": [
+        "avoided_contexts"
+      ],
+      "answerable_by": [],
+      "category": "filter",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_FRUSTRATION",
+      "natural_language": "How frustrated/stuck is the agent?",
+      "target_slots": [
+        "frustration_level"
+      ],
+      "answerable_by": [
+        "regulatory_signal"
+      ],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_CONFIDENCE",
+      "natural_language": "How confident is the agent in its strategy?",
+      "target_slots": [
+        "confidence_level"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_PREDICT",
+      "natural_language": "What outcome does the agent predict?",
+      "target_slots": [
+        "predicted_outcome"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_NEAR_MISS",
+      "natural_language": "What near-misses could be improved?",
+      "target_slots": [
+        "near_miss_patterns"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_RESONANCE",
+      "natural_language": "What patterns resonate across games?",
+      "target_slots": [
+        "resonance_patterns"
+      ],
+      "answerable_by": [
+        "rule_transfer"
+      ],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_EXPLORATION",
+      "natural_language": "How much has been explored?",
+      "target_slots": [
+        "exploration_stats"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_TRUST_A",
+      "natural_language": "How much should Stream A (private) be trusted?",
+      "target_slots": [
+        "trust_weight_a"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_TRUST_B",
+      "natural_language": "How much should Stream B (collective) be trusted?",
+      "target_slots": [
+        "trust_weight_b"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_COMPLETION",
+      "natural_language": "What's the probability of completing from here?",
+      "target_slots": [
+        "completion_probability"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UU"
+    },
+    {
+      "question_id": "Q_HISTORY",
+      "natural_language": "What actions have been taken?",
+      "target_slots": [
+        "action_history"
+      ],
+      "answerable_by": [
+        "metacognitive_prediction",
+        "smart_action_selection",
+        "infinite_loop_breaker",
+        "theory_contradiction",
+        "pariah_avoidance",
+        "sensation_engine",
+        "near_miss_analyzer",
+        "click_behavior_learning",
+        "trigger_sequences",
+        "valence_goals",
+        "deliberation_system",
+        "replay_learning",
+        "imagination_budget",
+        "network_exploration_stats",
+        "self_trust_boost",
+        "assumption_formation",
+        "contextual_failure"
+      ],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KK"
+    },
+    {
+      "question_id": "Q_SCORES",
+      "natural_language": "What scores have been achieved?",
+      "target_slots": [
+        "score_history"
+      ],
+      "answerable_by": [
+        "frustration_detection",
+        "near_miss_analyzer",
+        "click_behavior_learning",
+        "valence_goals",
+        "replay_learning",
+        "contextual_failure"
+      ],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KK"
+    },
+    {
+      "question_id": "Q_ACTION_CT",
+      "natural_language": "How many actions have been used?",
+      "target_slots": [
+        "action_count"
+      ],
+      "answerable_by": [
+        "frustration_detection",
+        "breakthrough_budget",
+        "regulatory_signal",
+        "completion_prediction"
+      ],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "KU"
+    },
+    {
+      "question_id": "Q_BUDGET",
+      "natural_language": "How many actions remain?",
+      "target_slots": [
+        "action_budget"
+      ],
+      "answerable_by": [
+        "breakthrough_budget"
+      ],
+      "category": "metacognition",
+      "complexity": "simple",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_PATH_TO_GOAL",
+      "natural_language": "What is the best path from player position to goal?",
+      "target_slots": [
+        "player_position",
+        "goal_position",
+        "sparse_grid",
+        "collision_map"
+      ],
+      "answerable_by": [],
+      "category": "exploitation",
+      "complexity": "compound",
+      "rumsfeld_relevance": "KK"
+    },
+    {
+      "question_id": "Q_SAFE_EXPLORATION",
+      "natural_language": "What unexplored areas are safe to explore?",
+      "target_slots": [
+        "reachable_cells",
+        "death_weights",
+        "visited_cells"
+      ],
+      "answerable_by": [],
+      "category": "exploitation",
+      "complexity": "compound",
+      "rumsfeld_relevance": "KU"
+    },
+    {
+      "question_id": "Q_STRATEGY_CHOICE",
+      "natural_language": "Should the agent explore or exploit?",
+      "target_slots": [
+        "winning_sequences",
+        "exploration_stats",
+        "frustration_level"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "compound",
+      "rumsfeld_relevance": "KU"
+    },
+    {
+      "question_id": "Q_STREAM_INTEGRATION",
+      "natural_language": "How should private and collective knowledge be weighted?",
+      "target_slots": [
+        "trust_weight_a",
+        "trust_weight_b",
+        "stream_a_action",
+        "stream_b_action"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "meta",
+      "rumsfeld_relevance": "KU"
+    },
+    {
+      "question_id": "Q_CLICK_EFFECT",
+      "natural_language": "What will happen if I click this object?",
+      "target_slots": [
+        "click_rules",
+        "extracted_objects",
+        "causal_model"
+      ],
+      "answerable_by": [],
+      "category": "hypothesis",
+      "complexity": "compound",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_GAME_SOLVED",
+      "natural_language": "Is there a known winning strategy for this game?",
+      "target_slots": [
+        "winning_sequences",
+        "game_type",
+        "level"
+      ],
+      "answerable_by": [],
+      "category": "exploitation",
+      "complexity": "compound",
+      "rumsfeld_relevance": "KK"
+    },
+    {
+      "question_id": "Q_WHY_STUCK",
+      "natural_language": "Why is the agent stuck?",
+      "target_slots": [
+        "frustration_level",
+        "action_history",
+        "pariah_actions",
+        "death_weights"
+      ],
+      "answerable_by": [],
+      "category": "metacognition",
+      "complexity": "meta",
+      "rumsfeld_relevance": "UK"
+    },
+    {
+      "question_id": "Q_TRANSFORMATION_RULE",
+      "natural_language": "What transformation rule does the palette encode?",
+      "target_slots": [
+        "detected_palette",
+        "detected_transformations",
+        "extracted_objects"
+      ],
+      "answerable_by": [],
+      "category": "hypothesis",
+      "complexity": "compound",
+      "rumsfeld_relevance": "UK"
+    }
+  ],
+  "slot_to_questions": {
+    "survey": [
+      "Q_SURVEY"
+    ],
+    "sparse_grid": [
+      "Q_SPARSE",
+      "Q_PATH_TO_GOAL"
+    ],
+    "sparse_hash": [
+      "Q_FRAME_ID"
+    ],
+    "detected_palette": [
+      "Q_PALETTE",
+      "Q_TRANSFORMATION_RULE"
+    ],
+    "extracted_objects": [
+      "Q_OBJECTS",
+      "Q_CLICK_EFFECT",
+      "Q_TRANSFORMATION_RULE"
+    ],
+    "controlled_objects": [
+      "Q_CONTROL"
+    ],
+    "likely_physics_game": [
+      "Q_PHYSICS"
+    ],
+    "visual_features": [
+      "Q_VISUAL"
+    ],
+    "game_type": [
+      "Q_GAME_TYPE",
+      "Q_GAME_SOLVED"
+    ],
+    "player_position": [
+      "Q_PLAYER_POS",
+      "Q_PATH_TO_GOAL"
+    ],
+    "goal_position": [
+      "Q_GOAL_POS",
+      "Q_PATH_TO_GOAL"
+    ],
+    "target_position": [
+      "Q_TARGET"
+    ],
+    "active_beliefs": [
+      "Q_BELIEFS"
+    ],
+    "untested_hypotheses": [
+      "Q_UNTESTED"
+    ],
+    "causal_model": [
+      "Q_CAUSALITY",
+      "Q_CLICK_EFFECT"
+    ],
+    "click_rules": [
+      "Q_CLICK_RULES",
+      "Q_CLICK_EFFECT"
+    ],
+    "trigger_chains": [
+      "Q_TRIGGERS"
+    ],
+    "key_lock_pairs": [
+      "Q_SYMBOLIC"
+    ],
+    "good_objects": [
+      "Q_VALENCE"
+    ],
+    "checkpoint_sequence": [
+      "Q_CHECKPOINT"
+    ],
+    "active_sequence": [
+      "Q_ACTIVE_SEQ"
+    ],
+    "winning_sequences": [
+      "Q_WIN_SEQS",
+      "Q_STRATEGY_CHOICE",
+      "Q_GAME_SOLVED"
+    ],
+    "matched_stage": [
+      "Q_STAGE"
+    ],
+    "subgoal_path": [
+      "Q_SUBGOALS"
+    ],
+    "frontier_target": [
+      "Q_FRONTIER"
+    ],
+    "reachable_cells": [
+      "Q_REACHABLE",
+      "Q_SAFE_EXPLORATION"
+    ],
+    "death_weights": [
+      "Q_DEATH",
+      "Q_SAFE_EXPLORATION",
+      "Q_WHY_STUCK"
+    ],
+    "pariah_actions": [
+      "Q_PARIAH",
+      "Q_WHY_STUCK"
+    ],
+    "theory_blocked_actions": [
+      "Q_BLOCKED"
+    ],
+    "collision_map": [
+      "Q_COLLISION",
+      "Q_PATH_TO_GOAL"
+    ],
+    "terminal_patterns": [
+      "Q_TERMINAL"
+    ],
+    "avoided_contexts": [
+      "Q_AVOID"
+    ],
+    "frustration_level": [
+      "Q_FRUSTRATION",
+      "Q_STRATEGY_CHOICE",
+      "Q_WHY_STUCK"
+    ],
+    "confidence_level": [
+      "Q_CONFIDENCE"
+    ],
+    "predicted_outcome": [
+      "Q_PREDICT"
+    ],
+    "near_miss_patterns": [
+      "Q_NEAR_MISS"
+    ],
+    "resonance_patterns": [
+      "Q_RESONANCE"
+    ],
+    "exploration_stats": [
+      "Q_EXPLORATION",
+      "Q_STRATEGY_CHOICE"
+    ],
+    "trust_weight_a": [
+      "Q_TRUST_A",
+      "Q_STREAM_INTEGRATION"
+    ],
+    "trust_weight_b": [
+      "Q_TRUST_B",
+      "Q_STREAM_INTEGRATION"
+    ],
+    "completion_probability": [
+      "Q_COMPLETION"
+    ],
+    "action_history": [
+      "Q_HISTORY",
+      "Q_WHY_STUCK"
+    ],
+    "score_history": [
+      "Q_SCORES"
+    ],
+    "action_count": [
+      "Q_ACTION_CT"
+    ],
+    "action_budget": [
+      "Q_BUDGET"
+    ],
+    "visited_cells": [
+      "Q_SAFE_EXPLORATION"
+    ],
+    "stream_a_action": [
+      "Q_STREAM_INTEGRATION"
+    ],
+    "stream_b_action": [
+      "Q_STREAM_INTEGRATION"
+    ],
+    "level": [
+      "Q_GAME_SOLVED"
+    ],
+    "detected_transformations": [
+      "Q_TRANSFORMATION_RULE"
+    ]
+  },
+  "rung_to_questions": {
+    "embedding_suggestion": [
+      "Q_SURVEY",
+      "Q_GAME_TYPE"
+    ],
+    "scientific_method": [
+      "Q_SURVEY",
+      "Q_GAME_TYPE"
+    ],
+    "primitive_suggester": [
+      "Q_SURVEY",
+      "Q_SPARSE",
+      "Q_GAME_TYPE"
+    ],
+    "metacognitive_prediction": [
+      "Q_SURVEY",
+      "Q_GAME_TYPE",
+      "Q_HISTORY"
+    ],
+    "exploration_phase": [
+      "Q_SURVEY",
+      "Q_SPARSE",
+      "Q_PLAYER_POS"
+    ],
+    "smart_action_selection": [
+      "Q_SURVEY",
+      "Q_GAME_TYPE",
+      "Q_HISTORY"
+    ],
+    "few_shot_invariants": [
+      "Q_SURVEY",
+      "Q_GAME_TYPE"
+    ],
+    "few_shot_relations": [
+      "Q_SURVEY",
+      "Q_OBJECTS"
+    ],
+    "sensation_engine": [
+      "Q_SURVEY",
+      "Q_GAME_TYPE",
+      "Q_HISTORY"
+    ],
+    "visual_analyzer": [
+      "Q_SURVEY",
+      "Q_SPARSE"
+    ],
+    "network_object_inventory": [
+      "Q_SURVEY",
+      "Q_OBJECTS",
+      "Q_GAME_TYPE"
+    ],
+    "action6_object_exploration": [
+      "Q_SURVEY",
+      "Q_OBJECTS"
+    ],
+    "deliberation_system": [
+      "Q_SURVEY",
+      "Q_GAME_TYPE",
+      "Q_HISTORY"
+    ],
+    "assumption_formation": [
+      "Q_SURVEY",
+      "Q_GAME_TYPE",
+      "Q_HISTORY"
+    ],
+    "frontier_topology": [
+      "Q_SPARSE",
+      "Q_CONTROL",
+      "Q_PLAYER_POS"
+    ],
+    "frontier_checkpoint": [
+      "Q_SPARSE",
+      "Q_PLAYER_POS",
+      "Q_WIN_SEQS"
+    ],
+    "map_intel_collision": [
+      "Q_SPARSE",
+      "Q_PLAYER_POS"
+    ],
+    "abstraction_templates": [
+      "Q_SPARSE",
+      "Q_PALETTE",
+      "Q_GAME_TYPE"
+    ],
+    "state_matching": [
+      "Q_SPARSE",
+      "Q_FRAME_ID",
+      "Q_GAME_TYPE"
+    ],
+    "subgoal_planning": [
+      "Q_SPARSE",
+      "Q_PLAYER_POS",
+      "Q_GOAL_POS"
+    ],
+    "grid_exploration": [
+      "Q_SPARSE",
+      "Q_PLAYER_POS"
+    ],
+    "imagination_budget": [
+      "Q_SPARSE",
+      "Q_PLAYER_POS",
+      "Q_HISTORY"
+    ],
+    "multi_stage_matching": [
+      "Q_FRAME_ID",
+      "Q_GAME_TYPE"
+    ],
+    "resonance_detector": [
+      "Q_FRAME_ID",
+      "Q_GAME_TYPE"
+    ],
+    "embedding_matcher": [
+      "Q_FRAME_ID",
+      "Q_GAME_TYPE"
+    ],
+    "spatial_relationship": [
+      "Q_PALETTE",
+      "Q_OBJECTS"
+    ],
+    "symbolic_tracker": [
+      "Q_OBJECTS"
+    ],
+    "valence_goals": [
+      "Q_OBJECTS",
+      "Q_HISTORY",
+      "Q_SCORES"
+    ],
+    "control_tracker": [
+      "Q_GAME_TYPE",
+      "Q_PLAYER_POS",
+      "Q_GOAL_POS",
+      "Q_TARGET"
+    ],
+    "prior_lessons": [
+      "Q_GAME_TYPE"
+    ],
+    "discovery_exploitation": [
+      "Q_GAME_TYPE"
+    ],
+    "belief_system": [
+      "Q_GAME_TYPE"
+    ],
+    "hypothesis_system": [
+      "Q_GAME_TYPE"
+    ],
+    "event_understanding": [
+      "Q_GAME_TYPE"
+    ],
+    "two_streams": [
+      "Q_GAME_TYPE"
+    ],
+    "network_wisdom": [
+      "Q_GAME_TYPE",
+      "Q_CHECKPOINT"
+    ],
+    "three_try_sequence": [
+      "Q_GAME_TYPE",
+      "Q_CHECKPOINT",
+      "Q_ACTIVE_SEQ"
+    ],
+    "pariah_avoidance": [
+      "Q_GAME_TYPE",
+      "Q_HISTORY"
+    ],
+    "terminal_pattern": [
+      "Q_GAME_TYPE",
+      "Q_PLAYER_POS"
+    ],
+    "near_miss_analyzer": [
+      "Q_GAME_TYPE",
+      "Q_HISTORY",
+      "Q_SCORES"
+    ],
+    "breakthrough_budget": [
+      "Q_GAME_TYPE",
+      "Q_ACTION_CT",
+      "Q_BUDGET"
+    ],
+    "network_sharing": [
+      "Q_GAME_TYPE",
+      "Q_BELIEFS"
+    ],
+    "replay_learning": [
+      "Q_GAME_TYPE",
+      "Q_HISTORY",
+      "Q_SCORES"
+    ],
+    "completion_prediction": [
+      "Q_GAME_TYPE",
+      "Q_ACTION_CT"
+    ],
+    "network_exploration_stats": [
+      "Q_GAME_TYPE",
+      "Q_HISTORY"
+    ],
+    "rule_transfer": [
+      "Q_GAME_TYPE",
+      "Q_BELIEFS",
+      "Q_RESONANCE"
+    ],
+    "hypothesis_testing": [
+      "Q_GAME_TYPE",
+      "Q_UNTESTED"
+    ],
+    "contextual_failure": [
+      "Q_GAME_TYPE",
+      "Q_HISTORY",
+      "Q_SCORES"
+    ],
+    "death_avoidance": [
+      "Q_PLAYER_POS"
+    ],
+    "coordinate_oscillation": [
+      "Q_PLAYER_POS"
+    ],
+    "theory_gate": [
+      "Q_BELIEFS"
+    ],
+    "theory_contradiction": [
+      "Q_BELIEFS",
+      "Q_HISTORY"
+    ],
+    "trigger_sequences": [
+      "Q_CLICK_RULES",
+      "Q_HISTORY"
+    ],
+    "three_layer_filter": [
+      "Q_DEATH",
+      "Q_PARIAH",
+      "Q_BLOCKED"
+    ],
+    "regulatory_signal": [
+      "Q_FRUSTRATION",
+      "Q_ACTION_CT"
+    ],
+    "infinite_loop_breaker": [
+      "Q_HISTORY"
+    ],
+    "click_behavior_learning": [
+      "Q_HISTORY",
+      "Q_SCORES"
+    ],
+    "self_trust_boost": [
+      "Q_HISTORY"
+    ],
+    "frustration_detection": [
+      "Q_SCORES",
+      "Q_ACTION_CT"
+    ]
+  },
+  "category_counts": {
+    "orientation": 12,
+    "hypothesis": 9,
+    "exploitation": 10,
+    "filter": 6,
+    "metacognition": 16
+  },
+  "total_questions": 53
+}

@@ -74,6 +74,36 @@ except ImportError:
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
 
+# =============================================================================
+# COGNITIVE ROUTER INTEGRATION - Lazy loading to avoid circular imports
+# =============================================================================
+_cognitive_router_loaded: bool = False
+_CognitiveRouter: Any = None
+_RungResult_Cognitive: Any = None
+
+def _load_cognitive_router() -> Any:
+    """Lazy-load cognitive router to avoid circular imports."""
+    global _cognitive_router_loaded, _CognitiveRouter, _RungResult_Cognitive
+    if _cognitive_router_loaded:
+        return _CognitiveRouter
+
+    try:
+        from engines.cognition.cognitive_router import CognitiveRouter
+        from engines.cognition.epistemic_tracker import (
+            RungResult as RungResultCognitive,
+        )
+        _CognitiveRouter = CognitiveRouter
+        _RungResult_Cognitive = RungResultCognitive
+        _cognitive_router_loaded = True
+        logger.debug("[RUNG-COGNITIVE] Loaded CognitiveRouter")
+    except ImportError as e:
+        logger.debug(f"[RUNG-COGNITIVE] CognitiveRouter not available: {e}")
+        _cognitive_router_loaded = True
+        _CognitiveRouter = None
+        _RungResult_Cognitive = None
+
+    return _CognitiveRouter
+
 # Type hints for engine registry (avoid circular imports)
 if TYPE_CHECKING:
     from engines.registry import EngineRegistry
@@ -100,6 +130,39 @@ def _load_primitives() -> Any:
         logger.debug(f"[RUNG-PRIMITIVES] seed_primitives not available: {e}")
         _primitives_loaded = True
         _seed_primitives = None
+
+
+# =============================================================================
+# DEPRECATION TRACKING - Phase 6 (Cognitive Routing Migration)
+# =============================================================================
+import warnings
+
+# Track deprecation warnings to avoid spamming
+_deprecation_warned: Dict[str, bool] = {}
+
+def _warn_ordering_deprecated(ordering_name: str) -> None:
+    """Warn that static ORDERING_PRESETS are deprecated.
+
+    Phase 6.1: Mark static orderings as deprecated in favor of cognitive routing.
+    - Phase 6.1a: Emit deprecation warnings (current)
+    - Phase 6.1b: Log to database for tracking
+    - Phase 6.1c: Remove in v3.0
+    """
+    global _deprecation_warned
+
+    # Only warn once per ordering per session
+    if ordering_name in _deprecation_warned:
+        return
+    _deprecation_warned[ordering_name] = True
+
+    message = (
+        f"ORDERING_PRESETS['{ordering_name}'] is deprecated as of Phase 6. "
+        f"Use DecisionStrategy.COGNITIVE with CognitiveRouter for dynamic, "
+        f"graph-based rung selection. Static orderings will be removed in v3.0. "
+        f"See architecture/cognitive_routing_implementation_plan.md for migration guide."
+    )
+    warnings.warn(message, DeprecationWarning, stacklevel=3)
+    logger.warning(f"[DEPRECATION] {message}")
 
     return _seed_primitives
 
@@ -412,6 +475,7 @@ class DecisionStrategy(Enum):
     PHASED = "phased"           # Different ordering by phase
     PARALLEL = "parallel"       # Run all, pick highest confidence
     CONTEXT_ADAPTIVE = "context_adaptive"  # Select strategy based on context (frontier/replay/optimization)
+    COGNITIVE = "cognitive"     # Transition-driven cognitive routing (Phase 4)
 
 
 @dataclass
@@ -5612,8 +5676,20 @@ class ContextualFailureRung(DecisionRung):
 
 
 # =============================================================================
-# ORDERING PRESETS
+# ORDERING PRESETS (DEPRECATED - Phase 6)
 # =============================================================================
+#
+# DEPRECATION NOTICE: Static ordering presets are deprecated as of Phase 6.
+# Use DecisionStrategy.COGNITIVE with CognitiveRouter for dynamic selection.
+# These presets will be removed in v3.0.
+#
+# Migration path:
+#   1. Switch strategy to COGNITIVE: DecisionRungSystem(strategy='cognitive')
+#   2. CognitiveRouter handles graph-based rung selection automatically
+#   3. Edge weights evolve based on observed outcomes
+#
+# For details see: architecture/cognitive_routing_implementation_plan.md
+#
 
 ORDERING_PRESETS = {
     # Current behavior - efficiency-optimized (15 rungs - core only)
@@ -6160,6 +6236,13 @@ class DecisionRungSystem:
         self._deliberation_auditor = None  # Lazy-loaded
         self._current_deliberation: Optional[Any] = None  # Active deliberation record
 
+        # =====================================================================
+        # COGNITIVE ROUTER INTEGRATION (Phase 4)
+        # Transition-driven algorithm switching for intelligent routing
+        # =====================================================================
+        self._cognitive_router: Optional[Any] = None  # Lazy-loaded CognitiveRouter
+        self._cognitive_router_initialized: bool = False
+
         # Load default ordering
         self.load_ordering('comprehensive')
 
@@ -6220,6 +6303,20 @@ class DecisionRungSystem:
                 logger.debug("[RUNG-SYSTEM] DeliberationAuditor not available")
                 self._deliberation_auditor = None
         return self._deliberation_auditor
+
+    @property
+    def cognitive_router(self):
+        """Lazy-load cognitive router for transition-driven algorithm switching."""
+        if self._cognitive_router is None and not self._cognitive_router_initialized:
+            CognitiveRouterClass = _load_cognitive_router()
+            if CognitiveRouterClass is not None:
+                try:
+                    self._cognitive_router = CognitiveRouterClass()
+                    logger.info("[RUNG-SYSTEM] CognitiveRouter initialized")
+                except Exception as e:
+                    logger.warning(f"[RUNG-SYSTEM] Failed to initialize CognitiveRouter: {e}")
+            self._cognitive_router_initialized = True
+        return self._cognitive_router
 
     def set_temporal_context(
         self,
@@ -6338,11 +6435,18 @@ class DecisionRungSystem:
         return base_priority / multiplier
 
     def load_ordering(self, preset_name: str) -> None:
-        """Load a preset ordering or custom config"""
+        """Load a preset ordering or custom config.
+
+        .. deprecated:: Phase 6
+            Static ORDERING_PRESETS are deprecated. Use DecisionStrategy.COGNITIVE
+            with CognitiveRouter for dynamic, graph-based rung selection.
+        """
         self.ordering_name = preset_name
         self.rungs = []
 
         if preset_name in ORDERING_PRESETS:
+            # Phase 6.1: Emit deprecation warning for static orderings
+            _warn_ordering_deprecated(preset_name)
             ordering = ORDERING_PRESETS[preset_name]
         else:
             # Try loading from config file
@@ -6435,6 +6539,8 @@ class DecisionRungSystem:
                 return self._decide_parallel(game_state, context)
             elif self.strategy == DecisionStrategy.CONTEXT_ADAPTIVE:
                 return self._decide_context_adaptive(game_state, context)
+            elif self.strategy == DecisionStrategy.COGNITIVE:
+                return self._decide_cognitive(game_state, context)
             else:
                 return self._decide_ladder(game_state, context)
         finally:
@@ -7112,6 +7218,128 @@ class DecisionRungSystem:
             reason += f" [coords: ({coords['x']},{coords['y']})]"
 
         return action, reason
+
+    def _decide_cognitive(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
+        """
+        Cognitive router strategy with transition-driven algorithm switching.
+
+        This is the Phase 4 integration of the cognitive routing system.
+        It uses the CognitiveRouter for intelligent, transition-based
+        algorithm selection instead of static orderings.
+
+        Key features:
+        - Tracks epistemic state (KK/KU/UK/UU quadrants)
+        - Switches algorithms on quadrant transitions
+        - Uses hysteresis to prevent thrashing
+        - Falls back to static ordering on catastrophic failure
+
+        Falls back to context_adaptive strategy if CognitiveRouter is unavailable.
+        """
+        # Check if cognitive router is available
+        router = self.cognitive_router
+        if router is None:
+            logger.warning("[RUNG-SYSTEM] CognitiveRouter unavailable, falling back to context_adaptive")
+            return self._decide_context_adaptive(game_state, context)
+
+        # Initialize router if needed (once per game)
+        game_id = context.get('game_id', context.get('scorecard_id', 'unknown'))
+        if not hasattr(self, '_cognitive_game_id') or self._cognitive_game_id != game_id:
+            # Build node structure from rungs
+            nodes = {
+                rung.name: {
+                    'name': rung.name,
+                    'category': rung.category,
+                    'priority': rung.get_priority(),
+                }
+                for rung in self.rungs
+            }
+            edges: Dict[str, List[str]] = {}  # Can be populated from rung dependencies
+            router.initialize(nodes, edges, game_id)
+            self._cognitive_game_id = game_id
+
+        # Create rung executor that wraps our rungs
+        def rung_executor(rung_name: str, _game_state_dict: Dict) -> Any:
+            """Execute a rung and convert to RungResult format."""
+            rung = next((r for r in self.rungs if r.name == rung_name), None)
+            if rung is None or not rung.enabled:
+                # Return minimal result for unknown/disabled rungs
+                if _RungResult_Cognitive:
+                    return _RungResult_Cognitive(rung_name=rung_name, confidence=0.0)
+                return None
+
+            # Execute the rung
+            result = rung.evaluate(game_state, context)
+
+            # Convert to cognitive RungResult if available
+            if _RungResult_Cognitive:
+                return _RungResult_Cognitive(
+                    rung_name=rung_name,
+                    slot_name=None,  # Would need extraction from result.metadata
+                    value=result.action,
+                    confidence=result.confidence,
+                    raises_questions=[],
+                    answers_questions=[],
+                    surprise_level=0.0,
+                    contradiction_detected=False,
+                )
+            return result
+
+        # Run the cognitive router
+        try:
+            decision_result = router.decide(
+                game_state={'frame': getattr(game_state, 'frame', None), **context},
+                rung_executor=rung_executor
+            )
+
+            # Extract action from decision result
+            action = decision_result.action
+            confidence = decision_result.confidence
+            reasoning = decision_result.reasoning
+
+            # If action is a rung name, we need to get the actual action from that rung
+            if action in self.RUNG_REGISTRY:
+                # The cognitive router returned a rung name - execute it to get the action
+                rung = next((r for r in self.rungs if r.name == action), None)
+                if rung and rung.enabled:
+                    result = rung.evaluate(game_state, context)
+                    if result.action:
+                        action = result.action
+                        reasoning = f"[COGNITIVE:{rung.name}] {result.reason}"
+                        confidence = result.confidence
+                        self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
+                        rung.record_outcome(was_accepted=True)
+
+            # Validate action is available
+            if action and not is_action_available(action, context):
+                # Fall back to weighted choice
+                accumulated_weights = get_available_action_weights(context, 1.0)
+                action = self._weighted_random_choice(accumulated_weights, context)
+                reasoning = f"[COGNITIVE] Fallback: suggested action unavailable"
+
+            # Default to random action if nothing found
+            if not action or action not in [f'ACTION{i}' for i in range(1, 8)]:
+                action = get_random_available_action(context)
+                reasoning = f"[COGNITIVE] Random fallback after router"
+
+            # CRITICAL: If ACTION6, ensure coordinates
+            if action == 'ACTION6':
+                coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
+                self.last_decision_metadata = coords
+                reasoning += f" [coords: ({coords['x']},{coords['y']})]"
+
+            # Log statistics periodically
+            if self.total_decisions % 100 == 0:
+                stats = router.get_statistics()
+                logger.info(
+                    f"[COGNITIVE] Stats: {stats['total_decisions']} decisions, "
+                    f"{stats['total_fallbacks']} fallbacks ({stats['fallback_rate']:.1%})"
+                )
+
+            return action, reasoning
+
+        except Exception as e:
+            logger.error(f"[COGNITIVE] Router error: {e}, falling back to context_adaptive")
+            return self._decide_context_adaptive(game_state, context)
 
     def get_stats(self) -> Dict[str, Any]:
         """Get decision statistics"""

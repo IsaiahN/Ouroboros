@@ -1,0 +1,188 @@
+{
+  "_comment": "Transition Response Map for Epistemic State Machine (Phase 1.5.4)",
+  "_version": "1.0",
+  "_description": "Maps (from_quadrant, to_quadrant) pairs to algorithm selections and actions",
+
+  "transitions": {
+    "UU->KU": {
+      "algorithm": "TargetedQuestionSearch",
+      "action": "focus",
+      "description": "Found a specific question - switch to targeted search",
+      "params": {
+        "use_answerer_heuristic": true,
+        "prioritize_high_info_gain": true
+      }
+    },
+
+    "KU->KK": {
+      "algorithm": "GreedyExploitation",
+      "action": "exploit",
+      "description": "Question answered with confidence - exploit knowledge",
+      "params": {
+        "commit_threshold": 0.8,
+        "skip_hypothesis_testing": true
+      }
+    },
+
+    "UK->KK": {
+      "algorithm": "GreedyExploitation",
+      "action": "exploit",
+      "description": "Retrieved cached knowledge - exploit it",
+      "params": {
+        "commit_threshold": 0.8,
+        "trust_cached": true
+      }
+    },
+
+    "KK->KU": {
+      "algorithm": "BacktrackingTargetedSearch",
+      "action": "backtrack_and_target",
+      "description": "Mild contradiction - backtrack and re-target",
+      "params": {
+        "backtrack_depth": 1,
+        "exclude_last": true,
+        "preserve_high_confidence": true
+      }
+    },
+
+    "KK->UU": {
+      "algorithm": "ExplorationWithExclusions",
+      "action": "reset_and_explore",
+      "description": "Severe contradiction - reset and explore with exclusions",
+      "params": {
+        "exclude_failed_path": true,
+        "boost_novel_rungs": true,
+        "apply_negative_reputation": true
+      }
+    },
+
+    "UU->UU": {
+      "algorithm": "InformationMaximizingSearch",
+      "action": "widen",
+      "description": "Stuck in exploration - widen search with UCB",
+      "params": {
+        "exploration_bonus": 1.5,
+        "curiosity_weight": 0.3,
+        "try_different_entry_points": true
+      }
+    },
+
+    "KU->KU": {
+      "algorithm": "AlternateQuestionSearch",
+      "action": "pivot",
+      "description": "Question unanswerable - try different question",
+      "params": {
+        "deprioritize_current": true,
+        "promote_related_questions": true
+      }
+    },
+
+    "UU->UK": {
+      "algorithm": "RetrievalSearch",
+      "action": "retrieve",
+      "description": "Realized we have cached knowledge - retrieve it",
+      "params": {
+        "query_network_first": true,
+        "check_winning_sequences": true
+      }
+    },
+
+    "KU->UK": {
+      "algorithm": "RetrievalSearch",
+      "action": "retrieve",
+      "description": "Found relevant cached knowledge for question",
+      "params": {
+        "filter_by_question": true,
+        "prioritize_answering_rungs": true
+      }
+    },
+
+    "UK->UK": {
+      "algorithm": "RetrievalSearch",
+      "action": "continue_retrieval",
+      "description": "More cached knowledge to retrieve",
+      "params": {
+        "expand_search": true,
+        "try_secondary_caches": true
+      }
+    },
+
+    "KK->UK": {
+      "algorithm": "RetrievalSearch",
+      "action": "augment",
+      "description": "High confidence but found more cached knowledge",
+      "params": {
+        "supplement_existing": true,
+        "verify_consistency": true
+      }
+    },
+
+    "UK->KU": {
+      "algorithm": "TargetedQuestionSearch",
+      "action": "investigate",
+      "description": "Retrieved knowledge raised questions",
+      "params": {
+        "use_retrieved_context": true,
+        "narrow_scope": true
+      }
+    },
+
+    "KU->UU": {
+      "algorithm": "InformationMaximizingSearch",
+      "action": "broaden",
+      "description": "Questions led to more unknowns - broaden exploration",
+      "params": {
+        "use_question_context": true,
+        "avoid_dead_ends": true
+      }
+    },
+
+    "UK->UU": {
+      "algorithm": "InformationMaximizingSearch",
+      "action": "explore_gaps",
+      "description": "Retrieved knowledge revealed gaps",
+      "params": {
+        "focus_on_gaps": true,
+        "use_retrieved_hints": true
+      }
+    },
+
+    "KK->KK": {
+      "algorithm": "GreedyExploitation",
+      "action": "continue_exploit",
+      "description": "Still high confidence - continue exploiting",
+      "params": {
+        "maintain_momentum": true,
+        "check_for_refinements": true
+      }
+    }
+  },
+
+  "defaults": {
+    "unknown_transition": {
+      "algorithm": "LandmarkAStar",
+      "action": "continue",
+      "description": "Unknown transition - use general search",
+      "params": {}
+    }
+  },
+
+  "quadrant_defaults": {
+    "KK": {
+      "algorithm": "GreedyExploitation",
+      "description": "High confidence - exploit aggressively"
+    },
+    "KU": {
+      "algorithm": "TargetedQuestionSearch",
+      "description": "Specific questions - targeted search"
+    },
+    "UK": {
+      "algorithm": "RetrievalSearch",
+      "description": "Untapped knowledge - retrieval search"
+    },
+    "UU": {
+      "algorithm": "InformationMaximizingSearch",
+      "description": "Novel territory - information maximizing"
+    }
+  }
+}
