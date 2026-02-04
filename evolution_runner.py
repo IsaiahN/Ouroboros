@@ -965,6 +965,10 @@ class EvolutionRunner:
                 'recent_stuck_count': stuck_count,
                 # Click exploration tracking
                 'tried_colors': tried_colors,
+                # ACTION6 innate understanding - helps rungs know this is a click-only game
+                # ACTION6 is fundamentally different: it requires (x,y) coordinates
+                'is_action6_only_game': current_available == [6],
+                'action6_available': 6 in current_available,
             }
 
             # Get action from decision system

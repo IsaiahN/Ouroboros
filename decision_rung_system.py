@@ -131,6 +131,218 @@ def filter_available_actions(actions: List[str], context: Dict[str, Any]) -> Lis
     return filtered
 
 
+# =============================================================================
+# ACTION6 COORDINATE SYSTEM - Innate Understanding
+# =============================================================================
+# ACTION6 is fundamentally different from ACTION1-5. It's a PARAMETERIZED action
+# that requires explicit (x, y) coordinates. Think of it as:
+#   - ACTION1-5: "Move/interact in this direction" (no params needed)
+#   - ACTION6: "Touch/click THIS SPECIFIC PIXEL at (x, y)" (requires coordinates)
+#
+# This is analogous to the difference between "walk forward" and "teleport to (x,y)".
+# Every part of the system that can produce ACTION6 MUST provide coordinates.
+# =============================================================================
+
+class Action6CoordinateProvider:
+    """
+    Centralized provider for ACTION6 coordinates.
+
+    This class encapsulates the "innate understanding" that ACTION6 requires
+    coordinates. It provides multiple strategies for obtaining coordinates
+    based on available information.
+
+    Coordinate System (64x64 grid):
+        (0,0) ─────────────────── (63,0)
+          │                          │
+          │      Y increases ↓       │
+          │      X increases →       │
+          │                          │
+        (0,63) ─────────────────── (63,63)
+    """
+
+    @staticmethod
+    def get_coordinates(
+        context: Dict[str, Any],
+        engines: Optional[Any] = None,
+        frame: Optional[List[List[int]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get coordinates for ACTION6 using the best available strategy.
+
+        Priority order:
+        1. Detected interactive objects (pseudobuttons, selectable shapes)
+        2. Grid exploration targets (systematic search)
+        3. Visually interesting regions (color analysis)
+        4. Random valid position (fallback)
+
+        Args:
+            context: Decision context with game state
+            engines: EngineRegistry for accessing visual_analyzer, action6_behavior
+            frame: Current game frame (64x64 grid)
+
+        Returns:
+            Dict with 'x', 'y', and 'source' keys
+        """
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+
+        # Strategy 1: Try to get detected objects/pseudobuttons
+        if engines:
+            try:
+                a6e = engines.action6_behavior
+                if a6e and hasattr(a6e, 'get_untried_objects_for_frontier'):
+                    tried_colors = context.get('tried_colors', [])
+                    objects = a6e.get_untried_objects_for_frontier(
+                        game_type=game_type, level=level,
+                        frame=frame, tried_colors=tried_colors
+                    )
+                    if objects:
+                        obj = objects[0]
+                        return {
+                            'x': obj.get('center_x', obj.get('x', 32)),
+                            'y': obj.get('center_y', obj.get('y', 32)),
+                            'source': 'detected_object',
+                            'target_object': obj
+                        }
+            except Exception:
+                pass
+
+            # Strategy 2: Grid exploration targets
+            try:
+                va = engines.visual_analyzer
+                if va and hasattr(va, 'get_grid_exploration_targets'):
+                    targets = va.get_grid_exploration_targets()
+                    if targets:
+                        target = targets[0]
+                        return {
+                            'x': target.get('x', 32),
+                            'y': target.get('y', 32),
+                            'source': 'grid_exploration',
+                            'grid_target': target
+                        }
+            except Exception:
+                pass
+
+        # Strategy 3: Frame analysis for interesting regions
+        if frame:
+            try:
+                coords = Action6CoordinateProvider._find_interesting_region(frame)
+                if coords:
+                    return {**coords, 'source': 'frame_analysis'}
+            except Exception:
+                pass
+
+        # Strategy 4: Random valid position
+        return {
+            'x': random.randint(4, 60),
+            'y': random.randint(4, 60),
+            'source': 'random_fallback'
+        }
+
+    @staticmethod
+    def _find_interesting_region(frame: List[List[int]]) -> Optional[Dict[str, int]]:
+        """
+        Find visually interesting regions in the frame.
+
+        Looks for:
+        - Non-background colors (not 0)
+        - Color clusters (multiple adjacent pixels of same color)
+        - Centers of colored regions
+
+        Returns:
+            Dict with 'x', 'y' or None if no interesting regions found
+        """
+        if not frame or len(frame) < 64:
+            return None
+
+        # Find all non-background pixels
+        interesting_points: List[Tuple[int, int, int]] = []  # (x, y, color)
+        for y, row in enumerate(frame):
+            for x, pixel in enumerate(row):
+                if pixel != 0:  # Non-background
+                    interesting_points.append((x, y, pixel))
+
+        if not interesting_points:
+            return None
+
+        # Group by color and find cluster centers
+        color_groups: Dict[int, List[Tuple[int, int]]] = {}
+        for x, y, color in interesting_points:
+            if color not in color_groups:
+                color_groups[color] = []
+            color_groups[color].append((x, y))
+
+        # Find the largest non-background group
+        largest_group = max(color_groups.values(), key=len)
+
+        # Return centroid of largest group
+        avg_x = sum(p[0] for p in largest_group) // len(largest_group)
+        avg_y = sum(p[1] for p in largest_group) // len(largest_group)
+
+        return {'x': avg_x, 'y': avg_y}
+
+    @staticmethod
+    def enrich_result_with_coordinates(
+        result: "RungResult",
+        context: Dict[str, Any],
+        engines: Optional[Any] = None,
+        frame: Optional[List[List[int]]] = None
+    ) -> "RungResult":
+        """
+        Ensure a RungResult for ACTION6 has coordinates.
+
+        This is the "safety net" - if any rung returns ACTION6 without
+        coordinates, this method adds them.
+
+        Args:
+            result: The RungResult to potentially enrich
+            context: Decision context
+            engines: EngineRegistry
+            frame: Current game frame
+
+        Returns:
+            The result, potentially with coordinates added to metadata
+        """
+        if result.action != 'ACTION6':
+            return result
+
+        # Check if coordinates already exist
+        metadata = result.metadata or {}
+        has_coords = (
+            ('x' in metadata and 'y' in metadata) or
+            'pixel_position' in metadata or
+            'target' in metadata or
+            'grid_target' in metadata
+        )
+
+        if has_coords:
+            return result
+
+        # Need to add coordinates
+        coords = Action6CoordinateProvider.get_coordinates(context, engines, frame)
+        new_metadata = {**metadata, **coords}
+        return RungResult(
+            action=result.action,
+            confidence=result.confidence,
+            reason=result.reason + f" [coords added: ({coords['x']},{coords['y']})]",
+            weights=result.weights,
+            metadata=new_metadata,
+            provenance=result.provenance
+        )
+
+    @staticmethod
+    def is_action6_game(context: Dict[str, Any]) -> bool:
+        """Check if ACTION6 is the only available action (click-only game)."""
+        available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+        return available == [6]
+
+    @staticmethod
+    def action6_available(context: Dict[str, Any]) -> bool:
+        """Check if ACTION6 is available."""
+        available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+        return 6 in available
+
+
 def get_random_available_action(context: Dict[str, Any]) -> str:
     """Get a random action from available actions in context."""
     available = context.get('available_actions', [1, 2, 3, 4])
@@ -6138,6 +6350,12 @@ class DecisionRungSystem:
                     # Skip this rung's suggestion - it returned an unavailable action
                     continue
 
+                # CRITICAL: Ensure ACTION6 has coordinates (safety net)
+                if result.action == 'ACTION6':
+                    result = Action6CoordinateProvider.enrich_result_with_coordinates(
+                        result, context, self._engine_registry, game_state
+                    )
+
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
                 self._last_winning_rung = rung  # Track for feedback
                 rung.record_outcome(was_accepted=True)
@@ -6146,7 +6364,15 @@ class DecisionRungSystem:
                 return result.action or get_random_available_action(context), f"[{rung.name}] {result.reason}"
 
         # No confident answer - use accumulated weights for fallback
-        return self._weighted_random_choice(accumulated_weights, context), "Weighted fallback after ladder"
+        action, reason = self._weighted_random_choice(accumulated_weights, context), "Weighted fallback after ladder"
+
+        # CRITICAL: If fallback chose ACTION6, ensure coordinates
+        if action == 'ACTION6':
+            coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
+            self.last_decision_metadata = coords
+            reason += f" [coords: ({coords['x']},{coords['y']})]"
+
+        return action, reason
 
     def _decide_weighted(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
         """All rungs vote, weighted sum decides, with temporal modulation."""
@@ -6280,7 +6506,15 @@ class DecisionRungSystem:
             self._last_winning_rung = rung_contributions[best_action][0]
             self._last_winning_rung.record_outcome(was_accepted=True)
 
-        return best_action, f"Weighted vote: {best_action} ({action_votes[best_action]:.2f}) from [{', '.join(reasons[:3])}]"
+        reason = f"Weighted vote: {best_action} ({action_votes[best_action]:.2f}) from [{', '.join(reasons[:3])}]"
+
+        # CRITICAL: If ACTION6, ensure coordinates in metadata
+        if best_action == 'ACTION6':
+            coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
+            self.last_decision_metadata = {**self.last_decision_metadata, **coords}
+            reason += f" [coords: ({coords['x']},{coords['y']})]"
+
+        return best_action, reason
 
     def _decide_phased(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
         """Use different orderings based on budget phase"""
@@ -6505,6 +6739,14 @@ class DecisionRungSystem:
                 # CRITICAL: Validate action is available (defense-in-depth)
                 if result.action and not is_action_available(result.action, context):
                     continue  # Skip - emergency rung returned unavailable action
+
+                # CRITICAL: Ensure ACTION6 has coordinates
+                if result.action == 'ACTION6':
+                    result = Action6CoordinateProvider.enrich_result_with_coordinates(
+                        result, context, self._engine_registry, game_state
+                    )
+                    self.last_decision_metadata = result.metadata or {}
+
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
                 rung.record_outcome(was_accepted=True)
                 return result.action or get_random_available_action(context), f"[EMERGENCY:{rung.name}] {result.reason}"
@@ -6608,10 +6850,24 @@ class DecisionRungSystem:
 
         # If best score is very low, fall back to weighted random
         if best_score < 0.15:
-            return self._weighted_random_choice(accumulated_weights, context), "Weighted random (low confidence)"
+            action, reason = self._weighted_random_choice(accumulated_weights, context), "Weighted random (low confidence)"
+            # CRITICAL: If ACTION6, ensure coordinates
+            if action == 'ACTION6':
+                coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
+                self.last_decision_metadata = coords
+                reason += f" [coords: ({coords['x']},{coords['y']})]"
+            return action, reason
 
         top_contributors = ', '.join(reasons[:3]) if reasons else 'filters only'
-        return best_action, f"[WEIGHTED] {best_action} ({best_score:.2f}) from [{top_contributors}]"
+        reason = f"[WEIGHTED] {best_action} ({best_score:.2f}) from [{top_contributors}]"
+
+        # CRITICAL: If ACTION6, ensure coordinates
+        if best_action == 'ACTION6':
+            coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
+            self.last_decision_metadata = {**self.last_decision_metadata, **coords}
+            reason += f" [coords: ({coords['x']},{coords['y']})]"
+
+        return best_action, reason
 
     def _decide_ladder_non_emergency(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
         """
@@ -6641,6 +6897,13 @@ class DecisionRungSystem:
                 # CRITICAL: Validate action is available (defense-in-depth)
                 if result.action and not is_action_available(result.action, context):
                     continue  # Skip - returned unavailable action
+
+                # CRITICAL: Ensure ACTION6 has coordinates (safety net)
+                if result.action == 'ACTION6':
+                    result = Action6CoordinateProvider.enrich_result_with_coordinates(
+                        result, context, self._engine_registry, game_state
+                    )
+
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
                 rung.record_outcome(was_accepted=True)
                 # Capture metadata for checkpoint handoff
@@ -6648,7 +6911,15 @@ class DecisionRungSystem:
                 return result.action or get_random_available_action(context), f"[{rung.name}] {result.reason}"
 
         # No confident answer - use accumulated weights for fallback
-        return self._weighted_random_choice(accumulated_weights, context), "Weighted fallback after ladder"
+        action, reason = self._weighted_random_choice(accumulated_weights, context), "Weighted fallback after ladder"
+
+        # CRITICAL: If fallback chose ACTION6, ensure coordinates
+        if action == 'ACTION6':
+            coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
+            self.last_decision_metadata = coords
+            reason += f" [coords: ({coords['x']},{coords['y']})]"
+
+        return action, reason
 
     def get_stats(self) -> Dict[str, Any]:
         """Get decision statistics"""
