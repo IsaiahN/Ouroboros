@@ -1,8 +1,8 @@
 # Cognitive Routing Architecture
 
-**Version**: 1.0
+**Version**: 1.1
 **Date**: 2026-02-05
-**Status**: IMPLEMENTED (Phases 0-11 Complete)
+**Status**: IMPLEMENTED (Phases 0-11 Complete, CognitiveParameters Wiring)
 **Supersedes**: `decision_cognitive_architecture.md` (legacy document)
 
 ---
@@ -24,7 +24,8 @@
 13. [Phase 10: Valence-Tagged Knowledge](#phase-10-valence-tagged-knowledge)
 14. [Phase 11: Phenomenology ↔ Graph Integration](#phase-11-phenomenology--graph-integration)
 15. [Complete Decision Pipeline](#complete-decision-pipeline)
-16. [File Reference](#file-reference)
+16. [Centralized Configuration: CognitiveParameters](#centralized-configuration-cognitiveparameters)
+17. [File Reference](#file-reference)
 
 ---
 
@@ -38,7 +39,7 @@ The Cognitive Routing System replaces static `ORDERING_PRESETS` with a dynamic *
 
 **Key Complexity Win**: O(26) typical case vs O(1575) static A* via early termination + focused search + exclusions.
 
-**Implementation Status**: All 11 phases complete with 194+ tests passing.
+**Implementation Status**: All 11 phases complete with 660+ tests. All hardcoded values wired to `CognitiveParameters`.
 
 ---
 
@@ -160,6 +161,7 @@ Each layer captures a different aspect of intelligent decision-making:
 
 | Phase | Files | LOC | Purpose |
 |-------|-------|-----|---------|
+| Config | `config/cognitive_parameters.py` | ~635 | **Centralized parameters for all phases** |
 | 1 | `blackboard.py` | ~1360 | Shared working memory with typed slots |
 | 1.5 | `epistemic_tracker.py`, `epistemic_state.py` | ~400 | Rumsfeld state machine |
 | 1.6 | `hysteresis.py`, `question_manager.py`, `epistemic_logging.py` | ~600 | Stability & observability |
@@ -170,10 +172,10 @@ Each layer captures a different aspect of intelligent decision-making:
 | 4 | `cognitive_router.py` | ~1100 | Orchestrates all components |
 | 5-6 | `routing_traces.py`, `routing_metrics.py` | ~500 | Validation & production |
 | 7 | `graph_evolution.py`, `rung_roles.py`, `path_crystallization.py`, `process_knowledge.py` | ~1500 | Long-term learning |
-| 8 | `eisenhower_layer.py` | ~635 | Urgency × importance prioritization |
-| 9 | `phenomenology_layer.py` | ~782 | FeltState compression & feedback |
+| 8 | `eisenhower_layer.py` | ~635 | Urgency × importance prioritization (wired to CognitiveParameters) |
+| 9 | `phenomenology_layer.py` | ~782 | FeltState compression & feedback (wired to CognitiveParameters) |
 | 10 | `valence_tagged_slot.py` | ~683 | Valence as inherent property |
-| 11 | `graph_evolution.py` (enhanced) | +200 | Valence-weighted crystallization |
+| 11 | `graph_evolution.py` (enhanced) | +200 | Valence-weighted crystallization (wired to CognitiveParameters) |
 
 ### Test Coverage
 
@@ -649,32 +651,40 @@ class EisenhowerQuadrant(Enum):
 @dataclass
 class UrgencyScore:
     """Computed urgency based on game state."""
-    time_pressure: float       # Actions remaining / budget
-    resource_scarcity: float   # How close to limits
+    budget_pressure: float     # Actions remaining / budget
     volatility: float          # How fast things change
-    external_forcing: float    # Deadline pressure
+    blocking_factor: float     # Dependencies blocking progress
+    cascade_risk: float        # Risk of cascading failures
 
     @property
     def total(self) -> float:
-        """Normalized urgency 0.0-1.0."""
-        return min(1.0, (self.time_pressure * 0.3 +
-                         self.resource_scarcity * 0.3 +
-                         self.volatility * 0.2 +
-                         self.external_forcing * 0.2))
+        """Normalized urgency 0.0-1.0. Uses CognitiveParameters weights."""
+        weighted = (
+            self.budget_pressure * _PARAMS.urgency_budget_weight +
+            self.volatility * _PARAMS.urgency_volatility_weight +
+            self.blocking_factor * _PARAMS.urgency_blocking_weight +
+            self.cascade_risk * _PARAMS.urgency_cascade_weight
+        )
+        # Cascade risk is critical - can override weighted average
+        return max(weighted, self.cascade_risk)
 
 @dataclass
 class ImportanceScore:
     """Computed importance based on expected impact."""
-    epistemic_value: float     # How much we'd learn
-    goal_alignment: float      # How much it helps winning
-    strategic_value: float     # Long-term benefit
+    win_probability_delta: float  # How much it helps winning
+    theory_validation: float      # How much it validates our theory
+    action_unlock: float          # What new actions it enables
+    edge_trust: float             # Edge trust from graph
 
     @property
     def total(self) -> float:
-        """Normalized importance 0.0-1.0."""
-        return min(1.0, (self.epistemic_value * 0.4 +
-                         self.goal_alignment * 0.4 +
-                         self.strategic_value * 0.2))
+        """Normalized importance 0.0-1.0. Uses CognitiveParameters weights."""
+        return (
+            self.win_probability_delta * _PARAMS.importance_win_prob_weight +
+            self.theory_validation * _PARAMS.importance_theory_weight +
+            self.action_unlock * _PARAMS.importance_unlock_weight +
+            self.edge_trust * _PARAMS.importance_trust_weight
+        )
 ```
 
 ### Eisenhower Layer
@@ -774,6 +784,11 @@ class FeltState:
 class PhenomenologyLayer:
     """Compress blackboard to FeltState, inject back."""
 
+    # Performance budget from CognitiveParameters
+    MAX_COMPRESSION_MS: float = _PARAMS.phenomenology_compression_budget_ms
+    MAX_HISTORY: int = _PARAMS.phenomenology_max_history
+    MAX_TRACE_LOG: int = _PARAMS.phenomenology_max_trace_log
+
     def __init__(self, blackboard: Blackboard):
         self.blackboard = blackboard
         self.stabilizer = FeltStateStabilizer()
@@ -782,6 +797,9 @@ class PhenomenologyLayer:
     def compress(self) -> FeltState:
         """
         Compress 100+ blackboard slots to 5D FeltState.
+
+        CRITICAL: Balances internal signals with external validation
+        to prevent "feeling good while losing".
 
         Valence determined by:
         - THREAT: cascade_failure OR action_budget_critical
@@ -819,16 +837,53 @@ class PhenomenologyLayer:
         """Convert current FeltState to algorithm parameter modulation."""
 ```
 
+### Internal vs External Validation (CRITICAL)
+
+The valence computation balances **internal signals** (how we "feel") with **external signals** (reality check) to prevent "feeling good while losing":
+
+```python
+def _compute_raw_valence(self) -> float:
+    """
+    CRITICAL: Balances internal signals (confidence, agency) with
+    external validation (score changes, action success, deaths).
+    """
+    # ===== INTERNAL SIGNALS (what we "feel") =====
+    confidence_trend = self.blackboard.get('confidence_delta', 0)
+    agency = self.blackboard.get('agency_score', 0.5)
+    certainty = certainty_map.get(epistemic_quadrant, 0.5)
+    internal_score = (confidence_trend + agency + certainty) / 3
+
+    # ===== EXTERNAL SIGNALS (reality check) =====
+    progress = levels_completed / total_levels
+    score_change = normalize(score_delta)  # Did score actually improve?
+    action_success_rate = self.blackboard.get('recent_success_rate', 0.5)
+    death_penalty = death_count * _PARAMS.valence_death_penalty_weight
+    external_score = progress + score_change + action_success_rate - penalties
+
+    # ===== WEIGHTED COMBINATION =====
+    # Uses CognitiveParameters: valence_internal_weight, valence_external_weight
+    raw = (
+        internal_score * _PARAMS.valence_internal_weight +  # 0.5 default
+        external_score * _PARAMS.valence_external_weight    # 0.5 default
+    )
+    return math.tanh(raw)  # Squash to [-1, 1]
+```
+
+**Why This Matters**: Without external validation, an agent can be confident and feel in control (high internal score) while actually losing badly. The external signals force reality checks.
+
 ### Stabilizer (Preventing Thrashing)
 
 ```python
 class FeltStateStabilizer:
     """Prevent rapid FeltState oscillation."""
 
+    # Cooldown from CognitiveParameters
+    TRANSITION_COOLDOWN: int = _PARAMS.phenomenology_transition_cooldown
+
     def __init__(self):
-        self.inertia = 0.3              # Blend with previous state
-        self.max_valence_changes = 2    # Per 5 cycles
-        self.smoothing_window = 5       # Cycles to average
+        self.inertia = _PARAMS.phenomenology_inertia  # Blend with previous
+        self.max_valence_changes = _PARAMS.phenomenology_max_valence_changes
+        self.smoothing_window = _PARAMS.phenomenology_smoothing_window
 
     def stabilize(self, raw: FeltState, previous: FeltState) -> FeltState:
         """Apply inertia and smoothing to raw FeltState."""
@@ -880,13 +935,21 @@ class ValenceSlotStore:
         """O(1) average importance across all tagged slots."""
         return self._importance_sum / self._count if self._count > 0 else 0.0
 
-# Auto-tagging rules for known slots
+# Auto-tagging rules - values from CognitiveParameters
 CRITICAL_SLOT_VALENCE_RULES = {
-    'cascade_failure': (Valence.THREAT, 1.0, 1.0),
+    'cascade_failure': (Valence.THREAT,
+                        _PARAMS.valence_tag_threat_urgency,
+                        _PARAMS.valence_tag_threat_importance),
     'action_budget_critical': (Valence.THREAT, 0.9, 0.8),
-    'contradiction_detected': (Valence.CONFUSION, 0.7, 0.9),
-    'discovery_made': (Valence.CURIOSITY, 0.3, 0.7),
-    'goal_achieved': (Valence.MASTERY, 0.2, 1.0),
+    'contradiction_detected': (Valence.CONFUSION,
+                               _PARAMS.valence_tag_confusion_urgency,
+                               _PARAMS.valence_tag_confusion_importance),
+    'discovery_made': (Valence.CURIOSITY,
+                       _PARAMS.valence_tag_curiosity_urgency,
+                       _PARAMS.valence_tag_curiosity_importance),
+    'goal_achieved': (Valence.MASTERY,
+                      _PARAMS.valence_tag_mastery_urgency,
+                      _PARAMS.valence_tag_mastery_importance),
 }
 ```
 
@@ -947,13 +1010,28 @@ class GameFeelTrajectory:
 
 ### Crystallization Thresholds
 
-| Discovery Valence | Threshold Multiplier | Rationale |
-|-------------------|---------------------|-----------|
-| MASTERY | 0.7x | High confidence discovery, crystallize faster |
-| CURIOSITY | 0.8x | Intentional exploration, slightly faster |
-| NEUTRAL | 1.0x | Standard threshold |
-| THREAT | 1.5x | Panic discovery, needs verification |
-| CONFUSION | 2.0x | Lucky fluke, needs much more validation |
+Thresholds are configured via `CognitiveParameters` for tuning:
+
+| Discovery Valence | Parameter | Default | Rationale |
+|-------------------|-----------|---------|----------|
+| MASTERY | `crystallization_mastery_multiplier` | 0.7x | High confidence, crystallize faster |
+| CURIOSITY | `crystallization_curiosity_multiplier` | 0.8x | Intentional exploration, slightly faster |
+| NEUTRAL | `crystallization_neutral_multiplier` | 1.0x | Standard threshold |
+| THREAT | `crystallization_threat_multiplier` | 1.5x | Panic discovery, needs verification |
+| CONFUSION | `crystallization_confusion_multiplier` | 2.0x | Lucky fluke, needs much more validation |
+
+```python
+# From graph_evolution.py - now uses CognitiveParameters
+BASE_CRYSTALLIZATION_THRESHOLD = _PARAMS.crystallization_base_threshold
+
+VALENCE_THRESHOLD_MULTIPLIERS: Dict[Valence, float] = {
+    Valence.THREAT: _PARAMS.crystallization_threat_multiplier,
+    Valence.CONFUSION: _PARAMS.crystallization_confusion_multiplier,
+    Valence.OPPORTUNITY: _PARAMS.crystallization_neutral_multiplier,
+    Valence.STABILITY: _PARAMS.crystallization_curiosity_multiplier,
+    Valence.BOREDOM: _PARAMS.crystallization_neutral_multiplier,
+}
+```
 
 ---
 
@@ -1033,12 +1111,143 @@ def route(self, game_state: Dict, context: Dict) -> RungResult:
 
 ---
 
+## Centralized Configuration: CognitiveParameters
+
+All tunable parameters are centralized in `config/cognitive_parameters.py` to:
+1. **Eliminate hardcoded values** across the codebase
+2. **Enable sensitivity analysis** and auto-tuning
+3. **Classify parameters by tier** for safe modification
+
+### Parameter Tiers
+
+| Tier | Risk | Examples | Auto-Tune? |
+|------|------|----------|------------|
+| **Tier 1** | CRITICAL | `urgency_threshold`, `valence_internal_weight` | NO - requires human review |
+| **Tier 2** | PERFORMANCE | `phenomenology_inertia`, `crystallization_*_multiplier` | With care |
+| **Tier 3** | FINE-TUNING | `felt_weight_*`, `edge_trust_decay` | YES - safe for online adaptation |
+
+### Key Parameter Groups
+
+```python
+@dataclass
+class CognitiveParameters:
+    # PHASE 8: Eisenhower Layer
+    urgency_threshold: float = 0.5
+    importance_threshold: float = 0.5
+    urgency_budget_weight: float = 0.4
+    importance_win_prob_weight: float = 0.4
+    rumsfeld_kk_urgency_boost: float = 0.2  # Cross-matrix mapping
+    # ...more Eisenhower params...
+
+    # PHASE 9: Phenomenology Layer
+    phenomenology_threat_threshold: float = -0.3
+    phenomenology_inertia: float = 0.3
+    valence_internal_weight: float = 0.5  # CRITICAL: prevents "feeling good while losing"
+    valence_external_weight: float = 0.5
+    # ...more Phenomenology params...
+
+    # PHASE 10: Valence-Tagged Knowledge
+    valence_tag_threat_urgency: float = 1.0
+    valence_aggregate_decay: float = 0.9
+    # ...more valence params...
+
+    # PHASE 11: Graph Evolution + Phenomenology
+    crystallization_mastery_multiplier: float = 0.7
+    crystallization_confusion_multiplier: float = 2.0
+    edge_trust_confusion_penalty: float = 0.2
+    # ...more crystallization params...
+```
+
+### Parameter History Tracking
+
+```python
+class CognitiveParameterHistory:
+    """Track parameter changes over time for debugging."""
+
+    def record(self, reason: str, old_params, new_params):
+        """Record what changed and why."""
+
+    def find_changes(self, param_name: str) -> List[ParameterChangeRecord]:
+        """Find all changes to a specific parameter."""
+
+    def to_json(self) -> str:
+        """Persist for "what changed last Tuesday" debugging."""
+```
+
+---
+
+## Centralized Configuration: CognitiveParameters
+
+All tunable parameters are centralized in `config/cognitive_parameters.py` to:
+1. **Eliminate hardcoded values** across the codebase
+2. **Enable sensitivity analysis** and auto-tuning
+3. **Classify parameters by tier** for safe modification
+
+### Parameter Tiers
+
+| Tier | Risk | Examples | Auto-Tune? |
+|------|------|----------|------------|
+| **Tier 1** | CRITICAL | `urgency_threshold`, `valence_internal_weight` | NO - requires human review |
+| **Tier 2** | PERFORMANCE | `phenomenology_inertia`, `crystallization_*_multiplier` | With care |
+| **Tier 3** | FINE-TUNING | `felt_weight_*`, `edge_trust_decay` | YES - safe for online adaptation |
+
+### Key Parameter Groups
+
+```python
+@dataclass
+class CognitiveParameters:
+    # PHASE 8: Eisenhower Layer
+    urgency_threshold: float = 0.5
+    importance_threshold: float = 0.5
+    urgency_budget_weight: float = 0.4
+    importance_win_prob_weight: float = 0.4
+    rumsfeld_kk_urgency_boost: float = 0.2  # Cross-matrix mapping
+    # ...more Eisenhower params...
+
+    # PHASE 9: Phenomenology Layer
+    phenomenology_threat_threshold: float = -0.3
+    phenomenology_inertia: float = 0.3
+    valence_internal_weight: float = 0.5  # CRITICAL: prevents "feeling good while losing"
+    valence_external_weight: float = 0.5
+    # ...more Phenomenology params...
+
+    # PHASE 10: Valence-Tagged Knowledge
+    valence_tag_threat_urgency: float = 1.0
+    valence_aggregate_decay: float = 0.9
+    # ...more valence params...
+
+    # PHASE 11: Graph Evolution + Phenomenology
+    crystallization_mastery_multiplier: float = 0.7
+    crystallization_confusion_multiplier: float = 2.0
+    edge_trust_confusion_penalty: float = 0.2
+    # ...more crystallization params...
+```
+
+### Parameter History Tracking
+
+```python
+class CognitiveParameterHistory:
+    """Track parameter changes over time for debugging."""
+
+    def record(self, reason: str, old_params, new_params):
+        """Record what changed and why."""
+
+    def find_changes(self, param_name: str) -> List[ParameterChangeRecord]:
+        """Find all changes to a specific parameter."""
+
+    def to_json(self) -> str:
+        """Persist for 'what changed last Tuesday' debugging."""
+```
+
+---
+
 ## File Reference
 
 ### Core Cognitive Routing (`engines/cognition/`)
 
 | File | LOC | Purpose |
 |------|-----|---------|
+| `config/cognitive_parameters.py` | ~635 | **Centralized parameters for all phases** |
 | `blackboard.py` | ~1360 | Shared working memory with typed slots |
 | `cognitive_router.py` | ~1100 | Main routing orchestrator |
 | `cognitive_graph.py` | ~400 | Rungs as nodes, edges with trust |
@@ -1046,8 +1255,8 @@ def route(self, game_state: Dict, context: Dict) -> RungResult:
 | `algorithms.py` | ~500 | Search algorithms (Greedy, Targeted, etc.) |
 | `epistemic_tracker.py` | ~200 | Rumsfeld state machine |
 | `epistemic_state.py` | ~150 | Epistemic data structures |
-| `eisenhower_layer.py` | ~635 | Urgency × importance prioritization |
-| `phenomenology_layer.py` | ~782 | FeltState compression & feedback |
+| `eisenhower_layer.py` | ~635 | Urgency × importance (wired to CognitiveParameters) |
+| `phenomenology_layer.py` | ~782 | FeltState compression (wired to CognitiveParameters) |
 | `valence_tagged_slot.py` | ~683 | Valence as inherent property |
 | `hysteresis.py` | ~150 | Transition stability |
 | `question_manager.py` | ~200 | Question lifecycle |
@@ -1062,7 +1271,7 @@ def route(self, game_state: Dict, context: Dict) -> RungResult:
 
 | File | LOC | Purpose |
 |------|-----|---------|
-| `graph_evolution.py` | ~813 | Edge trust, crystallization, valence integration |
+| `graph_evolution.py` | ~813 | Edge trust, crystallization (wired to CognitiveParameters) |
 | `path_crystallization.py` | ~400 | Detect reliable paths |
 | `process_knowledge.py` | ~450 | Abstract pattern extraction |
 | `rung_roles.py` | ~300 | Rung role taxonomy |
@@ -1080,10 +1289,10 @@ def route(self, game_state: Dict, context: Dict) -> RungResult:
 | `test_phenomenology_layer.py` | 32 | FeltState compression |
 | `test_valence_tagged_slot.py` | 38 | Valence tagging |
 | `test_graph_evolution.py` | 54 | Edge trust & crystallization |
-| `test_phase5_validation.py` | 50 | Phase 5 validation |
-| `test_phase6_production.py` | 42 | Phase 6 production |
-| `test_phase7_evolution.py` | 45 | Phase 7 evolution |
-| `test_phase75_stabilization.py` | 21 | Stabilization |
+| `test_critical_systems.py` | 20+ | CognitiveParameters wiring |
+| `test_reasoning_system_fixes.py` | 15+ | Reasoning integration |
+| `test_recent_changes.py` | 10+ | Recent changes validation |
+| **Total** | **660+** | All phases |
 
 ---
 
@@ -1102,6 +1311,8 @@ def route(self, game_state: Dict, context: Dict) -> RungResult:
 - **Pragmatic prioritization**: Urgency × importance filtering
 - **Affective feedback**: Phenomenology layer closes the loop
 - **Long-term learning**: Paths crystallize, patterns transfer
+- **Centralized configuration**: All parameters in `CognitiveParameters` (v1.1)
+- **External validation**: Phenomenology prevents "feeling good while losing" (v1.1)
 
 ### Deprecation Timeline
 
@@ -1116,5 +1327,5 @@ def route(self, game_state: Dict, context: Dict) -> RungResult:
 **End of Document**
 
 *Last Updated: 2026-02-05*
-*Version: 1.0*
-*Status: All phases implemented and tested*
+*Version: 1.1*
+*Status: All phases implemented, tested, and wired to CognitiveParameters*
