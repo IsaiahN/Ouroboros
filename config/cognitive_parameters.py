@@ -581,6 +581,51 @@ class CognitiveParameterHistory:
         """Get all snapshots."""
         return self._snapshots.copy()
 
+    def to_json(self) -> str:
+        """
+        Serialize history for persistence.
+
+        Useful for persisting parameter history across restarts to investigate
+        "what changed last Tuesday when things started failing."
+
+        Returns:
+            JSON string of all parameter change records
+        """
+        import json
+        return json.dumps([
+            {
+                'timestamp': r.timestamp.isoformat(),
+                'reason': r.reason,
+                'param_name': r.param_name,
+                'old_value': r.old_value,
+                'new_value': r.new_value,
+            }
+            for r in self.records
+        ])
+
+    @classmethod
+    def from_json(cls, json_str: str) -> 'CognitiveParameterHistory':
+        """
+        Deserialize history from JSON.
+
+        Args:
+            json_str: JSON string from to_json()
+
+        Returns:
+            New CognitiveParameterHistory with loaded records
+        """
+        import json
+        history = cls()
+        for item in json.loads(json_str):
+            history.records.append(ParameterChangeRecord(
+                timestamp=datetime.fromisoformat(item['timestamp']),
+                reason=item['reason'],
+                param_name=item['param_name'],
+                old_value=item['old_value'],
+                new_value=item['new_value'],
+            ))
+        return history
+
 
 # Default parameters instance
 DEFAULT_COGNITIVE_PARAMS = CognitiveParameters()
