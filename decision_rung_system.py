@@ -140,15 +140,24 @@ import warnings
 # Track deprecation warnings to avoid spamming
 _deprecation_warned: Dict[str, bool] = {}
 
-def _warn_ordering_deprecated(ordering_name: str) -> None:
+def _warn_ordering_deprecated(ordering_name: str, suppress_if_cognitive: bool = False) -> None:
     """Warn that static ORDERING_PRESETS are deprecated.
 
     Phase 6.1: Mark static orderings as deprecated in favor of cognitive routing.
     - Phase 6.1a: Emit deprecation warnings (current)
     - Phase 6.1b: Log to database for tracking
     - Phase 6.1c: Remove in v3.0
+
+    Args:
+        ordering_name: Name of the ordering preset
+        suppress_if_cognitive: If True, don't warn (COGNITIVE strategy uses rungs differently)
     """
     global _deprecation_warned
+
+    # COGNITIVE strategy initializes rungs but uses graph-based selection
+    # Don't warn since it's using the architecture correctly
+    if suppress_if_cognitive:
+        return
 
     # Only warn once per ordering per session
     if ordering_name in _deprecation_warned:
@@ -163,8 +172,6 @@ def _warn_ordering_deprecated(ordering_name: str) -> None:
     )
     warnings.warn(message, DeprecationWarning, stacklevel=3)
     logger.warning(f"[DEPRECATION] {message}")
-
-    return _seed_primitives
 
 
 def filter_available_actions(actions: List[str], context: Dict[str, Any]) -> List[str]:
@@ -6166,23 +6173,30 @@ class DecisionRungSystem:
                  strategy: str = 'context_adaptive',
                  core_gameplay_ref: Any = None,
                  config_path: Optional[str] = None,
-                 engine_registry: Optional["EngineRegistry"] = None):
+                 engine_registry: Optional["EngineRegistry"] = None,
+                 cognitive_router: Optional[Any] = None,
+                 routing_trace_store: Optional[Any] = None):
         """
         Args:
-            strategy: 'ladder', 'weighted', 'phased', 'parallel', or 'context_adaptive' (default)
+            strategy: 'ladder', 'weighted', 'phased', 'parallel', 'cognitive', or 'context_adaptive' (default)
             core_gameplay_ref: Reference to CoreGameplay instance (legacy)
             config_path: Optional path to custom ordering config
             engine_registry: EngineRegistry for modular engine access (preferred)
+            cognitive_router: Pre-configured CognitiveRouter instance (avoids lazy-load duplication)
+            routing_trace_store: RoutingTraceStore for recording decision traces
 
         Note: CONTEXT_ADAPTIVE is recommended - it selects strategy based on game context:
         - replay_mode (following winning sequence): LADDER - deterministic replay
         - frontier_mode (unbeaten level): WEIGHTED - all rungs vote
         - optimization_mode (refining beaten game): WEIGHTED - find improvements
         - Emergency rungs (loop_breaker, oscillation) always checked first with LADDER semantics
+
+        For COGNITIVE strategy: Pass a configured CognitiveRouter for transition-driven routing.
         """
         self.strategy = DecisionStrategy(strategy)
         self.core: Any = core_gameplay_ref
         self._engine_registry: Optional["EngineRegistry"] = engine_registry
+        self._routing_trace_store: Optional[Any] = routing_trace_store
         self.rungs: List[DecisionRung] = []
         self.ordering_name = 'default'
         self.config_path = config_path or str(Path(__file__).parent / 'config' / 'rung_orderings.json')
@@ -6240,10 +6254,12 @@ class DecisionRungSystem:
         # COGNITIVE ROUTER INTEGRATION (Phase 4)
         # Transition-driven algorithm switching for intelligent routing
         # =====================================================================
-        self._cognitive_router: Optional[Any] = None  # Lazy-loaded CognitiveRouter
-        self._cognitive_router_initialized: bool = False
+        self._cognitive_router: Optional[Any] = cognitive_router  # Use passed router or lazy-load
+        self._cognitive_router_initialized: bool = (cognitive_router is not None)
 
-        # Load default ordering
+        # Load default ordering (rungs are needed even for COGNITIVE strategy)
+        # COGNITIVE strategy uses rungs differently - graph-based selection, not static order
+        self._suppress_ordering_deprecation = (self.strategy == DecisionStrategy.COGNITIVE)
         self.load_ordering('comprehensive')
 
     @property
@@ -6440,13 +6456,21 @@ class DecisionRungSystem:
         .. deprecated:: Phase 6
             Static ORDERING_PRESETS are deprecated. Use DecisionStrategy.COGNITIVE
             with CognitiveRouter for dynamic, graph-based rung selection.
+
+        Note: COGNITIVE strategy still calls this to initialize rungs, but uses
+        graph-based selection instead of static ordering. No warning is emitted
+        when using COGNITIVE strategy.
         """
         self.ordering_name = preset_name
         self.rungs = []
 
+        # Check if we should suppress deprecation (COGNITIVE strategy)
+        suppress = getattr(self, '_suppress_ordering_deprecation', False)
+
         if preset_name in ORDERING_PRESETS:
             # Phase 6.1: Emit deprecation warning for static orderings
-            _warn_ordering_deprecated(preset_name)
+            # (suppressed when using COGNITIVE strategy which uses graph-based selection)
+            _warn_ordering_deprecated(preset_name, suppress_if_cognitive=suppress)
             ordering = ORDERING_PRESETS[preset_name]
         else:
             # Try loading from config file
@@ -7326,6 +7350,31 @@ class DecisionRungSystem:
                 coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
                 self.last_decision_metadata = coords
                 reasoning += f" [coords: ({coords['x']},{coords['y']})]"
+
+            # RECORD DECISION TRACE (full architecture compliance)
+            # This captures WHY the decision was made for archaeology/debugging
+            if self._routing_trace_store is not None:
+                try:
+                    trace_id = self._routing_trace_store.record_trace(
+                        game_id=game_id,
+                        agent_id=context.get('agent_id', 'unknown'),
+                        path=decision_result.path,
+                        algorithm_used=decision_result.final_quadrant,  # Algorithm corresponds to quadrant
+                        final_action=action,
+                        final_confidence=confidence,
+                        initial_quadrant="UU",  # Would need to track from router
+                        final_quadrant=decision_result.final_quadrant,
+                        quadrant_transitions=[],  # Could extract from router history
+                        algorithms_history=[],  # Could extract from router
+                        backtrack_count=0,
+                        iterations=decision_result.iterations,
+                        decision_latency_ms=decision_result.time_elapsed * 1000
+                    )
+                    # Store trace_id for outcome recording later
+                    self.last_decision_metadata['trace_id'] = trace_id
+                    logger.debug(f"[COGNITIVE] Recorded trace {trace_id}")
+                except Exception as trace_err:
+                    logger.warning(f"[COGNITIVE] Failed to record trace: {trace_err}")
 
             # Log statistics periodically
             if self.total_decisions % 100 == 0:

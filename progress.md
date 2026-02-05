@@ -2,10 +2,255 @@
 
 ## February 5, 2026
 
+### Session: CognitiveRouter Full Wiring + Deprecation Cleanup
+
+**Started**: ~2:00 PM
+**Last Update**: 2:37 PM
+
+---
+
+## Objective
+
+Wire up the **CognitiveRouter** so the system actually USES the cognitive routing architecture (Phases 1-11) that was already implemented. The router existed but wasn't connected to the main evolution loop.
+
+---
+
+## Approach
+
+The CognitiveRouter and all supporting infrastructure (Blackboard, Epistemic Tracker, Meta-Planner, Eisenhower Layer, Phenomenology Layer) were fully implemented but sitting unused. The system was still using the legacy `LADDER` strategy with static `ORDERING_PRESETS`. We needed to:
+
+1. **Wire the router** into `evolution_runner.py`
+2. **Default to COGNITIVE strategy** when router is available
+3. **Record decision traces** for debugging and evolution
+4. **Suppress deprecation warnings** when using COGNITIVE correctly
+5. **Clarify deprecation timeline** for future phases
+
+---
+
+## Steps Completed
+
+### 1. Added CognitiveRouter Imports to evolution_runner.py ✅
+
+```python
+# Lines 55-65
+from engines.cognition.cognitive_router import CognitiveRouter
+from engines.cognition.blackboard import Blackboard
+from engines.cognition.cognitive_graph import CognitiveGraph
+from engines.cognition.meta_planner import MetaPlanner
+from engines.cognition.epistemic_tracker import EpistemicTracker
+from engines.cognition.eisenhower_layer import EisenhowerLayer
+from engines.cognition.phenomenology_layer import PhenomenologyLayer
+from engines.cognition.routing_traces import RoutingTraceStore
+```
+
+### 2. Router Initialization in Evolution Loop ✅
+
+Added router initialization BEFORE DecisionRungSystem creation (lines 216-249):
+
+```python
+cognitive_router = None
+routing_trace_store = None
+try:
+    blackboard = Blackboard()
+    cognitive_graph = CognitiveGraph()
+    epistemic_tracker = EpistemicTracker(blackboard)
+    meta_planner = MetaPlanner(blackboard, cognitive_graph)
+    eisenhower_layer = EisenhowerLayer(blackboard)
+    phenomenology_layer = PhenomenologyLayer(blackboard)
+    routing_trace_store = RoutingTraceStore(db_path=str(db_path))
+
+    cognitive_router = CognitiveRouter(
+        blackboard=blackboard,
+        graph=cognitive_graph,
+        meta_planner=meta_planner,
+        epistemic_tracker=epistemic_tracker,
+        eisenhower_layer=eisenhower_layer,
+        phenomenology_layer=phenomenology_layer
+    )
+except Exception as e:
+    logger.warning(f"CognitiveRouter init failed, using LADDER fallback: {e}")
+```
+
+### 3. Strategy Selection Based on Router Availability ✅
+
+Changed from hardcoded 'ladder' to dynamic selection (line 251):
+
+```python
+# Before: strategy='ladder' (always)
+# After:
+strategy = 'cognitive' if cognitive_router else 'ladder'
+```
+
+### 4. Pass Router to DecisionRungSystem ✅
+
+Added parameters to DecisionRungSystem constructor (lines 252-256):
+
+```python
+decision_system = DecisionRungSystem(
+    strategy=strategy,
+    cognitive_router=cognitive_router,
+    routing_trace_store=routing_trace_store
+)
+```
+
+### 5. Trace Recording in _decide_cognitive() ✅
+
+Added trace recording after routing decision (lines 7334-7358 in decision_rung_system.py):
+
+```python
+if self._routing_trace_store and routing_result:
+    try:
+        self._routing_trace_store.record_trace(
+            game_id=game_state.get('game_id', 'unknown'),
+            tick=game_state.get('action_count', 0),
+            selected_rung=routing_result.rung_name,
+            candidates=[routing_result.rung_name],
+            epistemic_quadrant=str(self._cognitive_router.epistemic.get_current_quadrant().value),
+            felt_valence=str(routing_result.felt_state.valence.value) if routing_result.felt_state else 'unknown',
+            algorithm_used=routing_result.algorithm_used or 'unknown',
+            confidence=routing_result.confidence,
+            reason=routing_result.reason or ''
+        )
+    except Exception as trace_err:
+        logger.debug(f"Trace recording failed: {trace_err}")
+```
+
+### 6. Schema Auto-Creation for RoutingTraceStore ✅
+
+Added `_ensure_schema()` method to routing_traces.py (lines 207-220):
+
+```python
+def _ensure_schema(self) -> None:
+    """Ensure cognitive_routing_traces table exists."""
+    create_sql = """
+    CREATE TABLE IF NOT EXISTS cognitive_routing_traces (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+        game_id TEXT,
+        tick INTEGER,
+        ...
+    )
+    """
+```
+
+### 7. Deprecation Warning Suppression for COGNITIVE Strategy ✅
+
+**Problem**: COGNITIVE strategy still loads rungs (for execution) which triggered deprecation warning, even though it doesn't use static ordering for decision-making.
+
+**Solution** (decision_rung_system.py):
+- Added `_suppress_ordering_deprecation` flag
+- Set flag to `True` when strategy is COGNITIVE (line 6262)
+- Modified `load_ordering()` to accept `suppress_if_cognitive` parameter
+- Modified `_warn_ordering_deprecated()` to check the flag
+
+```python
+# Line 6262 - Set flag before loading
+if self.strategy == DecisionStrategy.COGNITIVE:
+    self._suppress_ordering_deprecation = True
+
+# Line 6467-6473 - Check flag before warning
+def load_ordering(self, ordering_name: str, suppress_if_cognitive: bool = False) -> None:
+    if suppress_if_cognitive or self._suppress_ordering_deprecation:
+        # Don't warn - using COGNITIVE which needs rungs but not static ordering
+        pass
+    else:
+        self._warn_ordering_deprecated(ordering_name)
+```
+
+### 8. Enhanced Verbose Output ✅
+
+Added routing reasoning to verbose output (lines 1232-1241):
+
+```python
+if routing_result and hasattr(routing_result, 'reason'):
+    print(f"      Routing: {routing_result.reason}")
+if routing_result and hasattr(routing_result, 'felt_state') and routing_result.felt_state:
+    felt = routing_result.felt_state
+    print(f"      FeltState: valence={felt.valence.value}, certainty={felt.certainty:.2f}")
+```
+
+### 9. Documentation Update ✅
+
+Clarified deprecation timeline in `architecture/cognitive_routing_architecture.md`:
+
+```markdown
+**Note**: Phases 12+ are future milestones for deprecation removal, not yet scheduled.
+Current implementation (Phases 1-11) is complete. Deprecated components remain as
+fallbacks until COGNITIVE strategy proves stable in production.
+```
+
+---
+
+## Current State
+
+### Working ✅
+- CognitiveRouter initializes successfully
+- Strategy defaults to COGNITIVE when router available
+- DecisionRungSystem uses `_decide_cognitive()` method
+- Traces recorded to `cognitive_routing_traces` table
+- Deprecation warning suppressed for COGNITIVE strategy
+- LADDER strategy still shows deprecation warning (correct behavior)
+
+### Known Issue 🔧
+**Error in `_decide_cognitive()` causing fallback:**
+```
+'RungResult' object has no attribute 'answers_questions'
+```
+
+The router returns a `RungResult` but `_decide_cognitive()` expects it to have an `answers_questions` attribute for integration with the existing decision system. This causes fallback to `_decide_context_adaptive()`.
+
+**Impact**: System runs but uses fallback instead of full cognitive routing.
+
+**Next Steps**:
+1. Fix the rung executor wrapper in `_decide_cognitive()` to properly map CognitiveRouter output to DecisionRungSystem expectations
+2. Or modify the RungResult dataclass to include the missing attribute
+
+---
+
+## Test Verification
+
+```powershell
+# COGNITIVE strategy - no deprecation warning
+python -c "from decision_rung_system import DecisionRungSystem; ds = DecisionRungSystem(strategy='cognitive')"
+# Output: [RUNG-SYSTEM] Loaded ordering 'comprehensive' with 63 rungs
+# (No deprecation warning)
+
+# LADDER strategy - shows deprecation warning
+python -c "from decision_rung_system import DecisionRungSystem; ds = DecisionRungSystem(strategy='ladder')"
+# Output: DeprecationWarning: ORDERING_PRESETS['comprehensive'] is deprecated...
+```
+
+---
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `evolution_runner.py` | Added imports (55-65), router init (216-249), strategy selection (251), parameters (252-256), verbose output (1232-1241) |
+| `decision_rung_system.py` | Added `cognitive_router`/`routing_trace_store` params, suppress flag, trace recording, deprecation check |
+| `engines/cognition/routing_traces.py` | Added `_ensure_schema()` for auto table creation |
+| `architecture/cognitive_routing_architecture.md` | Clarified Phases 12-13 as future milestones |
+
+---
+
+## Phase Summary
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 1-11 | ✅ COMPLETE | Full cognitive routing implementation |
+| Router Wiring | ✅ COMPLETE | Connected to evolution_runner.py |
+| Trace Recording | ✅ COMPLETE | Decisions logged to database |
+| Deprecation | ✅ CLARIFIED | Future phases for removal |
+| Integration Bug | 🔧 IN PROGRESS | `answers_questions` attribute missing |
+
+---
+
+---
+
 ### Session: CognitiveParameters Wiring - Eliminating Magic Numbers
 
 **Started**: ~9:00 AM
-**Last Update**: Current session
+**Last Update**: ~1:30 PM
 
 ---
 

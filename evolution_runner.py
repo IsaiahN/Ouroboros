@@ -48,6 +48,21 @@ from arcengine import GameAction, GameState
 from database_interface import DatabaseInterface
 from decision_rung_system import DecisionRungSystem
 
+# Cognitive Router - Full architecture integration (Phases 1-11)
+try:
+    from engines.cognition.blackboard import Blackboard
+    from engines.cognition.cognitive_router import (
+        CognitiveRouter,
+        DecisionResult,
+        RouterConfig,
+    )
+    from engines.cognition.epistemic_tracker import RungResult
+    from engines.cognition.routing_traces import RoutingTrace, RoutingTraceStore
+    COGNITIVE_ROUTER_AVAILABLE = True
+except ImportError as e:
+    COGNITIVE_ROUTER_AVAILABLE = False
+    print(f"[WARN] CognitiveRouter not available: {e}")
+
 # Symbolic reasoning components (Phase 0-1)
 from engines.perception.player_localizer import PlayerLocalizer
 from engines.perception.property_extractor import PropertyExtractor, properties_to_json
@@ -202,9 +217,50 @@ class EvolutionRunner:
         # Scorecard will be created per-agent with proper tags
         self.current_scorecard_id: Optional[str] = None
 
-        # Decision system with configurable rung ordering
-        self.decision_system = DecisionRungSystem(strategy='ladder')
+        # Cognitive Router - Full architecture implementation (Phases 1-11)
+        # This implements the Blackboard + Meta-Planner + Cognitive Graph architecture
+        # with Phenomenology, Epistemic, and Eisenhower layers
+        self.cognitive_router: Optional[CognitiveRouter] = None
+        self.routing_trace_store: Optional[RoutingTraceStore] = None
+        self._use_cognitive_router = False  # Will be set True if router initializes
+
+        if COGNITIVE_ROUTER_AVAILABLE:
+            try:
+                # Configure router per architecture spec
+                router_config = RouterConfig(
+                    max_iterations=50,
+                    max_rungs_per_call=5,
+                    commit_threshold=0.85,
+                    time_budget_seconds=5.0,
+                    use_hysteresis=True,
+                    use_meta_planner_cache=True,
+                    use_catastrophic_fallback=True,
+                    algorithm_switch_cooldown=3,
+                    precompute_on_init=True,
+                )
+                self.cognitive_router = CognitiveRouter(config=router_config)
+                self.routing_trace_store = RoutingTraceStore(db_interface=self.db)
+                self._use_cognitive_router = True
+                if self.verbose:
+                    print("[INIT] CognitiveRouter initialized - Full architecture enabled")
+                    print("       Phases: Blackboard + Epistemic + Phenomenology + Eisenhower + Meta-Planner")
+            except Exception as e:
+                print(f"[WARN] Could not initialize CognitiveRouter: {e}")
+                self._use_cognitive_router = False
+
+        # Decision system - uses COGNITIVE strategy when router available, LADDER fallback
+        strategy = 'cognitive' if self._use_cognitive_router else 'ladder'
+        self.decision_system = DecisionRungSystem(
+            strategy=strategy,
+            cognitive_router=self.cognitive_router,
+            routing_trace_store=self.routing_trace_store  # For recording decision traces
+        )
         self.decision_system.load_ordering(self.rung_ordering)
+
+        if self.verbose and self._use_cognitive_router:
+            print(f"[INIT] DecisionSystem strategy: COGNITIVE (full routing pipeline)")
+        elif self.verbose:
+            print(f"[INIT] DecisionSystem strategy: LADDER (fallback mode)")
 
         # Evolutionary engine for sophisticated evolution (youth bonus, prestige, mutation, etc.)
         self.evolutionary_engine = EvolutionaryEngine(self.db)
@@ -1177,7 +1233,15 @@ class EvolutionRunner:
                 coord_str = ''
                 if action.name == 'ACTION6' and action_data:
                     coord_str = f" @ ({action_data.get('x', '?')}, {action_data.get('y', '?')})"
-                print(f"    [{actions_taken:3d}] {action.name:8s}{coord_str} -> levels={levels}/{win_levels} state={state_str}{level_indicator}")
+
+                # Build routing trace info if using cognitive strategy
+                trace_str = ''
+                if self._use_cognitive_router and 'reason' in dir() and reason:
+                    # Show first 60 chars of reasoning
+                    short_reason = reason[:60] + '...' if len(reason) > 60 else reason
+                    trace_str = f" | {short_reason}"
+
+                print(f"    [{actions_taken:3d}] {action.name:8s}{coord_str} -> levels={levels}/{win_levels} state={state_str}{level_indicator}{trace_str}")
 
             # Check for game end
             if obs and obs.state == GameState.WIN:

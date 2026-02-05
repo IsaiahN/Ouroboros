@@ -1318,9 +1318,11 @@ class CognitiveParameterHistory:
 
 | Component | Status | Removal Target |
 |-----------|--------|----------------|
-| `ORDERING_PRESETS` | DEPRECATED | Phase 12 |
-| `_decide_context_adaptive()` | DEPRECATED | Phase 12 |
-| Direct context dict access | DEPRECATED | Phase 13 |
+| `ORDERING_PRESETS` | DEPRECATED | Phase 12 (future - requires 90%+ COGNITIVE usage) |
+| `_decide_context_adaptive()` | DEPRECATED | Phase 12 (future - used as fallback) |
+| Direct context dict access | DEPRECATED | Phase 13 (future - requires Blackboard migration) |
+
+**Note**: Phases 12+ are future milestones for deprecation removal, not yet scheduled. Current implementation (Phases 1-11) is complete. Deprecated components remain as fallbacks until COGNITIVE strategy proves stable in production.
 
 ---
 

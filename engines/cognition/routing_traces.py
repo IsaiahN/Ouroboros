@@ -193,6 +193,10 @@ class RoutingTraceStore:
         """Initialize trace store."""
         self.db = db_interface
 
+        # Ensure schema exists
+        if self.db:
+            self._ensure_schema()
+
         # In-memory cache for recent traces
         self._recent_traces: Dict[str, RoutingTrace] = {}
         self._max_cache_size = 1000
@@ -202,6 +206,20 @@ class RoutingTraceStore:
         self._traces_with_outcome = 0
 
         logger.info("[TRACE-STORE] Routing trace store initialized")
+
+    def _ensure_schema(self) -> None:
+        """Ensure the routing traces table exists."""
+        if not self.db:
+            return
+        try:
+            # Execute each statement in the schema
+            for statement in ROUTING_TRACES_SCHEMA.split(';'):
+                statement = statement.strip()
+                if statement:
+                    self.db.execute(statement)
+            logger.debug("[TRACE-STORE] Schema verified/created")
+        except Exception as e:
+            logger.warning(f"[TRACE-STORE] Schema creation warning: {e}")
 
     # -------------------------------------------------------------------------
     # TRACE RECORDING
