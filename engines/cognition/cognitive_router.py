@@ -36,25 +36,22 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
-from engines.cognition.algorithms import (
-    ALGORITHM_CLASSES,
-    DOMAIN_ALGORITHMS,
-    QUADRANT_ALGORITHMS,
-    SearchAlgorithm,
-    get_algorithm,
-)
+from engines.cognition.algorithms import SearchAlgorithm, get_algorithm
 from engines.cognition.blackboard import Blackboard, RumsfeldQuadrant
 from engines.cognition.catastrophic_fallback import CatastrophicFallback, FailureType
+from engines.cognition.eisenhower_layer import EisenhowerLayer, EisenhowerQuadrant
 from engines.cognition.epistemic_state import EpistemicTransition, TransitionResponse
 from engines.cognition.epistemic_tracker import EpistemicTracker, RungResult
 from engines.cognition.hysteresis import HysteresisManager
 from engines.cognition.meta_planner import MetaPlanner
+from engines.cognition.phenomenology_layer import (
+    AlgorithmModulation,
+    PhenomenologyLayer,
+)
 from engines.cognition.precomputation import PrecomputationManager, PrecomputedData
 from engines.cognition.search_context import (
-    MutationRequest,
     MutationType,
     SearchContext,
-    SearchPhase,
     create_search_context,
 )
 
@@ -318,6 +315,12 @@ class CognitiveRouter:
         self.precomputation = PrecomputationManager()
         self._precomputed_data: Optional[PrecomputedData] = None
 
+        # Phase 8: Eisenhower Layer for urgency x importance prioritization
+        self.eisenhower = EisenhowerLayer(self.blackboard)
+
+        # Phase 9: Phenomenology Layer for compressed state feedback
+        self.phenomenology = PhenomenologyLayer(self.blackboard)
+
         # Graph structure
         self._nodes: Dict[str, Dict[str, Any]] = {}
         self._edges: Dict[str, List[str]] = {}
@@ -369,6 +372,8 @@ class CognitiveRouter:
 
         # Reset components
         self.blackboard = Blackboard()
+        self.eisenhower = EisenhowerLayer(self.blackboard)  # Recreate with new blackboard
+        self.phenomenology = PhenomenologyLayer(self.blackboard)  # Recreate with new blackboard
         self.epistemic_tracker.reset()
         if self.hysteresis:
             self.hysteresis.reset()
@@ -470,8 +475,34 @@ class CognitiveRouter:
 
         This implements the Part 3 insight: Switch algorithms only on transitions,
         not every iteration.
+
+        Phase 8 enhancement: Eisenhower layer gates each rung execution with
+        urgency x importance evaluation. Queue aging can promote Q2 tasks.
+
+        Phase 9 enhancement: Phenomenology layer compresses state to FeltState
+        and feeds it back into the blackboard, creating a consciousness-like loop.
         """
         algorithm_switches = 0
+
+        # Phase 9: Compress previous state and inject (phenomenology feedback)
+        # This creates the High-D → Compress → Summary → Feed back loop
+        felt = self.phenomenology.compress()
+        self.phenomenology.inject(felt)
+
+        # Phase 9: Get algorithm modulation from felt state
+        # This is where 'feeling' becomes actionable
+        modulation = self.phenomenology.get_algorithm_modulation(felt)
+
+        # Phase 8: Age scheduled queue at start of cycle
+        # This can promote Q2 tasks to Q1 through urgency increase
+        self.eisenhower.age_scheduled_queue()
+
+        # Check for tasks promoted via aging
+        promoted = self.eisenhower.pop_promoted_task()
+        if promoted:
+            logger.debug(f"[ROUTER] Executing promoted task from aging: {promoted}")
+            result = self._execute_rung(promoted, game_state, rung_executor)
+            # Process the result normally below
 
         while self._state.iteration < self.config.max_iterations:
             self._state.iteration += 1
@@ -515,8 +546,39 @@ class CognitiveRouter:
                     self.fallback.record_empty_frontier()
                 continue
 
-            # Execute the rung
-            rung_name = next_rungs[0]
+            # Phase 8: Eisenhower gate - evaluate urgency x importance
+            # Get edge trust for each candidate (from graph evolution if available)
+            rung_name = None
+            for candidate in next_rungs:
+                edge_trust = self._get_edge_trust(candidate)
+                quadrant, action = self.eisenhower.gate_single_rung(candidate, edge_trust)
+
+                if quadrant == EisenhowerQuadrant.Q1_DO:
+                    # Urgent + Important: Execute now
+                    rung_name = action
+                    break
+                elif quadrant == EisenhowerQuadrant.Q3_DELEGATE:
+                    # Urgent + Not Important: Use cached path or execute
+                    rung_name = action
+                    break
+                elif quadrant == EisenhowerQuadrant.Q2_SCHEDULE:
+                    # Not Urgent + Important: Added to queue, try next candidate
+                    continue
+                else:  # Q4_ELIMINATE
+                    # Not Urgent + Not Important: Skip entirely
+                    continue
+
+            # If all candidates were eliminated or scheduled, check for fallback
+            if rung_name is None:
+                # Check if any scheduled tasks have been promoted
+                promoted = self.eisenhower.pop_promoted_task()
+                if promoted:
+                    rung_name = promoted
+                else:
+                    # All eliminated - trigger fallback
+                    rung_name = self.eisenhower.handle_all_eliminate()
+
+            # Execute the selected rung
             result = self._execute_rung(rung_name, game_state, rung_executor)
 
             # Update state
@@ -607,10 +669,36 @@ class CognitiveRouter:
         self,
         algorithm_name: str,
         context: SearchContext,
-        params: Optional[Dict[str, Any]] = None
+        params: Optional[Dict[str, Any]] = None,
+        modulation: Optional[AlgorithmModulation] = None
     ) -> None:
-        """Switch to a new algorithm."""
+        """
+        Switch to a new algorithm.
+
+        Args:
+            algorithm_name: Name of algorithm to switch to
+            context: Current search context
+            params: Additional parameters for algorithm
+            modulation: Phase 9 modulation from phenomenology layer
+        """
         params = params or {}
+
+        # Phase 9: Apply phenomenology modulation if provided
+        if modulation:
+            # Algorithm override from FeltState (e.g., panic mode)
+            if modulation.algorithm_override:
+                algorithm_name = modulation.algorithm_override
+                logger.debug(
+                    f"[ROUTER] Phenomenology override: {algorithm_name}"
+                )
+
+            # Apply exploration boost
+            if modulation.exploration_boost > 0:
+                params['exploration_bonus'] = params.get('exploration_bonus', 0) + modulation.exploration_boost
+
+            # Apply exclusion set
+            if modulation.exclusion_set:
+                context.excluded_rungs.update(modulation.exclusion_set)
 
         # Use meta-planner for selection if available
         if self.meta_planner:
@@ -623,6 +711,15 @@ class CognitiveRouter:
         # Get algorithm instance
         try:
             algorithm = get_algorithm(algorithm_name, **params)
+
+            # Phase 9: Apply beam width modulation
+            if modulation and modulation.beam_width_multiplier != 1.0:
+                if hasattr(algorithm, 'beam_width'):
+                    algorithm.beam_width = int(algorithm.beam_width * modulation.beam_width_multiplier)
+                    logger.debug(
+                        f"[ROUTER] Beam width adjusted to: {algorithm.beam_width}"
+                    )
+
             # Use the actual algorithm name (get_algorithm may fall back)
             self._state.current_algorithm = algorithm
             self._state.current_algorithm_name = algorithm.name
@@ -877,6 +974,35 @@ class CognitiveRouter:
             'topological_order': [],
         }
 
+    def _get_edge_trust(self, rung_name: str) -> float:
+        """
+        Get edge trust score for a rung from graph evolution.
+
+        Edge trust represents historical success rate of this rung.
+        Used by Eisenhower layer for importance calculation.
+
+        Args:
+            rung_name: Name of the rung to get trust for
+
+        Returns:
+            Trust score 0.0-1.0 (default 0.5 if unknown)
+        """
+        # Try to get from blackboard (set by graph evolution)
+        edge_trust = self.blackboard.get(f'edge_trust_{rung_name}')
+        if edge_trust is not None:
+            return float(edge_trust)
+
+        # Try to get from precomputed data
+        if self._precomputed_data:
+            # Check if rung has high historical success
+            node_info = self._nodes.get(rung_name, {})
+            priority = node_info.get('priority', 50)
+            # Convert priority (0-100) to trust (0-1)
+            return priority / 100.0
+
+        # Default trust for unknown rungs
+        return 0.5
+
     # -------------------------------------------------------------------------
     # MUTATION PROCESSING
     # -------------------------------------------------------------------------
@@ -916,6 +1042,15 @@ class CognitiveRouter:
             'fallback_rate': self._total_fallbacks / max(1, self._total_decisions),
             'algorithm_usage': dict(self._algorithm_usage),
             'game_id': self._game_id,
+            # Phase 8: Eisenhower layer stats
+            'eisenhower': self.eisenhower.get_stats(),
+            'eisenhower_scheduled_queue': self.eisenhower.get_scheduled_queue_summary(),
+            # Phase 9: Phenomenology layer stats
+            'phenomenology': self.phenomenology.get_stats(),
+            'current_felt_state': (
+                self.phenomenology.previous_felt.to_dict()
+                if self.phenomenology.previous_felt else None
+            ),
         }
 
     # -------------------------------------------------------------------------

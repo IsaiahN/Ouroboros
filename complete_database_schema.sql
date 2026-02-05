@@ -1193,6 +1193,64 @@ CREATE TABLE cods_test_contexts (
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
+-- Phase 8: Cognitive Flight Recorder (Appendix C)
+-- Unified trace format for all cognitive routing decisions
+CREATE TABLE cognitive_flight_records (
+                record_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                game_id TEXT NOT NULL,
+                level_number INTEGER,
+                generation INTEGER,
+
+                -- Timing
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                cycle_number INTEGER NOT NULL,
+
+                -- Dual-matrix state
+                rumsfeld_quadrant TEXT NOT NULL,           -- KK, KU, UK, UU
+                eisenhower_quadrant TEXT,                  -- Q1_DO, Q2_SCHEDULE, Q3_DELEGATE, Q4_ELIMINATE
+
+                -- Scores (JSON for flexibility)
+                urgency_scores TEXT,                       -- JSON: {budget_pressure, volatility, blocking_factor, cascade_risk}
+                importance_scores TEXT,                    -- JSON: {win_probability_delta, theory_validation, action_unlock, edge_trust}
+
+                -- Decision
+                rung_selected TEXT,
+                rung_candidates TEXT,                      -- JSON array of candidates considered
+                gate_action TEXT,                          -- DO, SCHEDULE, DELEGATE, SKIP
+
+                -- FeltState snapshot (for phenomenology integration)
+                felt_valence REAL,
+                felt_arousal REAL,
+                felt_certainty REAL,
+                felt_agency REAL,
+                felt_salience REAL,
+
+                -- Context
+                budget_remaining REAL,
+                budget_total REAL,
+                theory_confidence REAL,
+                volatility REAL,
+
+                -- Parameters used (for tuning analysis)
+                urgency_threshold REAL,
+                importance_threshold REAL,
+
+                -- Queue state
+                scheduled_queue_size INTEGER,
+                promoted_from_queue BOOLEAN DEFAULT FALSE,
+
+                -- Outcome (filled in post-hoc)
+                action_taken TEXT,
+                outcome_score_delta REAL,
+                was_successful BOOLEAN
+            );
+
+CREATE INDEX idx_cognitive_flight_agent ON cognitive_flight_records(agent_id, game_id);
+CREATE INDEX idx_cognitive_flight_quadrant ON cognitive_flight_records(rumsfeld_quadrant, eisenhower_quadrant);
+CREATE INDEX idx_cognitive_flight_rung ON cognitive_flight_records(rung_selected);
+CREATE INDEX idx_cognitive_flight_timestamp ON cognitive_flight_records(timestamp);
+
 CREATE TABLE collective_action_proposals (
                     proposal_id TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL,
@@ -6239,3 +6297,240 @@ CREATE INDEX IF NOT EXISTS idx_deliberation_outcome ON deliberation_audit_log(ou
 CREATE INDEX IF NOT EXISTS idx_deliberation_wrong ON deliberation_audit_log(was_correct) WHERE was_correct = 0;
 CREATE INDEX IF NOT EXISTS idx_deliberation_frame ON deliberation_audit_log(frame_hash);
 CREATE INDEX IF NOT EXISTS idx_deliberation_timestamp ON deliberation_audit_log(timestamp DESC);
+
+-- =============================================================================
+-- PHENOMENOLOGY TRACE (Phase 9: Compressed state feedback loop)
+-- =============================================================================
+-- Records the FeltState compression for each decision cycle.
+-- This enables debugging "why did it feel this way?" and analyzing
+-- how phenomenological state affects decision-making.
+
+CREATE TABLE IF NOT EXISTS phenomenology_trace (
+    trace_id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Context
+    agent_id TEXT NOT NULL,
+    game_id TEXT,
+    game_type TEXT,
+    level_number INTEGER,
+    tick INTEGER NOT NULL,
+
+    -- 5D FeltState (compressed representation)
+    valence TEXT NOT NULL,           -- THREAT, OPPORTUNITY, STABILITY, CONFUSION, BOREDOM
+    arousal REAL NOT NULL,           -- Energy/activation level (0-1)
+    certainty REAL NOT NULL,         -- Confidence level (0-1)
+    agency REAL NOT NULL,            -- Sense of control (0-1)
+    salience REAL NOT NULL,          -- Attention-grabbing level (0-1)
+    momentum REAL NOT NULL,          -- Change direction (-1 to 1)
+
+    -- Compression metadata
+    raw_valence_score REAL,          -- Pre-discretization score (-1 to 1)
+    compression_ratio REAL,          -- How much was compressed (slots/5)
+    dominant_contributors TEXT,       -- JSON: which slots drove the state
+
+    -- Stabilizer state
+    was_stabilized INTEGER DEFAULT 0,  -- 1 if valence was overridden by hysteresis
+    original_valence TEXT,             -- What valence would have been without stabilizer
+
+    -- Algorithm modulation applied
+    algorithm_override TEXT,          -- Which algorithm was forced (if any)
+    beam_width_multiplier REAL,
+    exploration_boost REAL,
+    exclusion_set TEXT,               -- JSON: rungs excluded
+
+    -- Blackboard snapshot (sparse - only key slots)
+    blackboard_snapshot TEXT,         -- JSON: key blackboard values at this tick
+
+    timestamp_ms INTEGER NOT NULL,    -- Unix timestamp in milliseconds
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Performance indexes
+CREATE INDEX IF NOT EXISTS idx_phenomenology_agent ON phenomenology_trace(agent_id);
+CREATE INDEX IF NOT EXISTS idx_phenomenology_game ON phenomenology_trace(game_id);
+CREATE INDEX IF NOT EXISTS idx_phenomenology_valence ON phenomenology_trace(valence);
+CREATE INDEX IF NOT EXISTS idx_phenomenology_tick ON phenomenology_trace(game_id, tick);
+CREATE INDEX IF NOT EXISTS idx_phenomenology_timestamp ON phenomenology_trace(created_at DESC);
+
+-- Partial index for threat states (for analyzing panic situations)
+CREATE INDEX IF NOT EXISTS idx_phenomenology_threats ON phenomenology_trace(game_id, tick)
+    WHERE valence = 'threat';
+
+-- Partial index for confusion states (for debugging stuck situations)
+CREATE INDEX IF NOT EXISTS idx_phenomenology_confusion ON phenomenology_trace(game_id, tick)
+    WHERE valence = 'confusion';
+
+-- =============================================================================
+-- VALENCE-TAGGED SLOTS (Phase 10: Knowledge with Inherent Urgency)
+-- =============================================================================
+-- Records valence-tagged slot values for persistence across sessions.
+-- The key insight: urgency IS part of the encoding, not metadata.
+-- This enables O(1) urgency access and context-appropriate urgency.
+
+CREATE TABLE IF NOT EXISTS valence_tagged_slots (
+    slot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Context
+    agent_id TEXT NOT NULL,
+    game_id TEXT,
+    game_type TEXT,
+
+    -- Slot identification
+    slot_name TEXT NOT NULL,
+    slot_value TEXT NOT NULL,              -- JSON-serialized value
+
+    -- Valence encoding (the key insight: urgency IS the format)
+    valence TEXT NOT NULL,                 -- THREAT, OPPORTUNITY, STABILITY, CONFUSION, BOREDOM
+    urgency_inherent REAL NOT NULL,        -- 0-1: urgency baked into the data
+    importance_inherent REAL NOT NULL,     -- 0-1: importance baked into the data
+
+    -- Context for why this urgency was assigned
+    urgency_reason TEXT,
+    importance_reason TEXT,
+
+    -- Source tracking
+    source_rung TEXT,
+    source_tick INTEGER,
+
+    -- Timestamps
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Performance indexes for valence-tagged slots
+CREATE INDEX IF NOT EXISTS idx_vts_agent ON valence_tagged_slots(agent_id);
+CREATE INDEX IF NOT EXISTS idx_vts_game ON valence_tagged_slots(game_id);
+CREATE INDEX IF NOT EXISTS idx_vts_slot_name ON valence_tagged_slots(slot_name);
+CREATE INDEX IF NOT EXISTS idx_vts_valence ON valence_tagged_slots(valence);
+CREATE INDEX IF NOT EXISTS idx_vts_urgency ON valence_tagged_slots(urgency_inherent DESC);
+
+-- Partial index for threat slots (fast access to critical threats)
+CREATE INDEX IF NOT EXISTS idx_vts_threats ON valence_tagged_slots(agent_id, slot_name)
+    WHERE valence = 'threat';
+
+-- Partial index for high-urgency slots
+CREATE INDEX IF NOT EXISTS idx_vts_urgent ON valence_tagged_slots(agent_id, slot_name)
+    WHERE urgency_inherent > 0.7;
+-- =============================================================================
+-- VALENCE-WEIGHTED EDGES (Phase 11: Phenomenology <-> Graph Evolution)
+-- =============================================================================
+-- Tracks edges in the cognitive graph with FeltState context at discovery.
+-- Paths discovered under different emotional states have different reliability:
+-- - THREAT paths: Discovered under panic - require 1.5x validation
+-- - CONFUSION paths: Discovered while lost - require 2.0x validation
+-- - BOREDOM paths with high success: Fast-track at 0.7x threshold
+
+CREATE TABLE IF NOT EXISTS valence_weighted_edges (
+    edge_id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Edge identification
+    from_rung TEXT NOT NULL,
+    to_rung TEXT NOT NULL,
+
+    -- Traversal statistics
+    traversal_count INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+
+    -- FeltState context at discovery (key insight: emotional context affects trust)
+    discovery_valence TEXT NOT NULL,       -- THREAT, OPPORTUNITY, STABILITY, CONFUSION, BOREDOM
+    discovery_arousal REAL NOT NULL,       -- 0-1: arousal level when discovered
+
+    -- Crystallization state
+    is_crystallized INTEGER NOT NULL DEFAULT 0,
+    crystallization_timestamp DATETIME,
+
+    -- Context
+    agent_id TEXT,                         -- NULL for global edges
+    game_type TEXT,                        -- Domain context
+
+    -- Timestamps
+    discovery_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_traversal DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    -- Ensure unique edges per context
+    UNIQUE(from_rung, to_rung, agent_id, game_type)
+);
+
+-- Performance indexes for valence-weighted edges
+CREATE INDEX IF NOT EXISTS idx_vwe_from_rung ON valence_weighted_edges(from_rung);
+CREATE INDEX IF NOT EXISTS idx_vwe_to_rung ON valence_weighted_edges(to_rung);
+CREATE INDEX IF NOT EXISTS idx_vwe_valence ON valence_weighted_edges(discovery_valence);
+CREATE INDEX IF NOT EXISTS idx_vwe_crystallized ON valence_weighted_edges(is_crystallized);
+CREATE INDEX IF NOT EXISTS idx_vwe_agent ON valence_weighted_edges(agent_id);
+
+-- Partial index for crystallized edges (fast preferred path lookup)
+CREATE INDEX IF NOT EXISTS idx_vwe_preferred ON valence_weighted_edges(from_rung, to_rung)
+    WHERE is_crystallized = 1;
+
+-- Partial index for high-traffic edges
+CREATE INDEX IF NOT EXISTS idx_vwe_traffic ON valence_weighted_edges(from_rung, traversal_count DESC)
+    WHERE traversal_count > 10;
+
+-- =============================================================================
+-- GAME FEEL TRAJECTORIES (Phase 11: Optional Cross-Game Pattern Analysis)
+-- =============================================================================
+-- Tracks typical emotional progression for different game types.
+-- Enables anomaly detection when a playthrough "feels wrong" compared to typical.
+
+CREATE TABLE IF NOT EXISTS game_feel_trajectories (
+    trajectory_id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Game identification
+    game_id TEXT NOT NULL UNIQUE,
+    game_type TEXT,
+
+    -- Typical valence by phase
+    typical_opening_valence TEXT NOT NULL DEFAULT 'confusion',
+    typical_midgame_valence TEXT NOT NULL DEFAULT 'opportunity',
+    typical_resolution_valence TEXT NOT NULL DEFAULT 'stability',
+
+    -- Variance tracking (how much deviation is normal)
+    opening_variance REAL NOT NULL DEFAULT 0.3,
+    midgame_variance REAL NOT NULL DEFAULT 0.4,
+    resolution_variance REAL NOT NULL DEFAULT 0.3,
+
+    -- Sample tracking
+    sample_count INTEGER NOT NULL DEFAULT 0,
+
+    -- Timestamps
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Performance indexes for game feel trajectories
+CREATE INDEX IF NOT EXISTS idx_gft_game_type ON game_feel_trajectories(game_type);
+CREATE INDEX IF NOT EXISTS idx_gft_opening ON game_feel_trajectories(typical_opening_valence);
+CREATE INDEX IF NOT EXISTS idx_gft_samples ON game_feel_trajectories(sample_count DESC);
+
+-- =============================================================================
+-- FEEL ANOMALIES (Phase 11: Detected Deviations from Typical Trajectories)
+-- =============================================================================
+-- Records when a game playthrough deviates significantly from expected patterns.
+-- Useful for identifying games that are harder/easier than expected.
+
+CREATE TABLE IF NOT EXISTS feel_anomalies (
+    anomaly_id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Context
+    game_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    session_id TEXT,
+
+    -- Anomaly details
+    phase TEXT NOT NULL,                   -- opening, midgame, resolution
+    expected_valence TEXT NOT NULL,
+    actual_valence TEXT NOT NULL,
+    severity REAL NOT NULL,                -- 0-1: how severe the deviation
+
+    -- Description for debugging
+    description TEXT,
+
+    -- Timestamps
+    detected_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Performance indexes for feel anomalies
+CREATE INDEX IF NOT EXISTS idx_fa_game ON feel_anomalies(game_id);
+CREATE INDEX IF NOT EXISTS idx_fa_agent ON feel_anomalies(agent_id);
+CREATE INDEX IF NOT EXISTS idx_fa_severity ON feel_anomalies(severity DESC);
+CREATE INDEX IF NOT EXISTS idx_fa_recent ON feel_anomalies(detected_at DESC);

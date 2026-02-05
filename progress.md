@@ -1,5 +1,155 @@
 # Progress Log
 
+## February 5, 2026
+
+### Session: Cognitive Routing Phases 8-11 Implementation + Integration Fix
+
+**Started**: ~8:00 AM
+**Last Update**: 8:59:39 AM
+
+---
+
+## Approach
+
+Continuing the **Cognitive Routing System** implementation from `architecture/cognitive_routing_implementation_plan.md`. Building on completed Phases 0-7.5, we are now implementing Phases 8-11 which focus on:
+
+- **Phase 8**: Eisenhower Layer - Urgency × Importance prioritization into Q1-Q4 quadrants
+- **Phase 9**: Phenomenology Layer - 5D FeltState compression (valence, arousal, certainty, agency, salience)
+- **Phase 10**: Valence-Tagged Knowledge - Valence as inherent property of slot values (O(1) urgency/importance lookup)
+- **Phase 11**: Phenomenology ↔ Graph Evolution Integration - Crystallization thresholds from discovery valence
+
+---
+
+## Steps Completed
+
+### 1. Phase 8: Eisenhower Layer (Completed - Previous Session)
+
+Created `engines/cognition/eisenhower_layer.py` (~635 LOC):
+- `UrgencyScore` / `ImportanceScore` dataclasses with normalized 0-1 values
+- `EisenhowerQuadrant` enum: Q1_DO, Q2_SCHEDULE, Q3_DELEGATE, Q4_ELIMINATE
+- `EisenhowerClassification` dataclass combining urgency, importance, quadrant
+- `EisenhowerLayer` class:
+  - `compute_urgency()` - time pressure, resource scarcity, external forcing
+  - `compute_importance()` - epistemic value, goal alignment, strategic value
+  - `classify()` - combine into quadrant classification
+  - `prioritize()` - yield candidates in quadrant order
+  - Integration with Blackboard for real-time context
+- Created `tests/test_eisenhower_layer.py` (33 tests)
+
+### 2. Phase 9: Phenomenology Layer (Completed - Previous Session)
+
+Created `engines/cognition/phenomenology_layer.py` (~782 LOC):
+- `Valence` enum: THREAT, CONFUSION, NEUTRAL, CURIOSITY, MASTERY
+- `FeltState` dataclass: 5D compression (valence, arousal, certainty, agency, salience) + momentum
+- `FeltStateStabilizer`: Prevents thrashing via inertia and smoothing
+- `PhenomenologyLayer` class:
+  - `compress()` - compress high-D blackboard state to 5D FeltState
+  - `inject()` - write FeltState back to blackboard for rungs to read
+  - Cold-start handling with gradual warm-up
+  - Integration with Eisenhower via `to_urgency_bias()` / `to_importance_bias()`
+- Created `tests/test_phenomenology_layer.py` (32 tests)
+
+### 3. Phase 10: Valence-Tagged Knowledge (Completed - Previous Session)
+
+Created `engines/cognition/valence_tagged_slot.py` (~683 LOC):
+- `ValenceTaggedValue` dataclass: value + valence + urgency + importance + timestamp
+- `ValenceSlotStore`: Store for valence-tagged values with O(1) aggregate lookups
+- `CRITICAL_SLOT_VALENCE_RULES`: Auto-tagging rules for known slots
+- Integration with Blackboard via `write_with_valence()` method
+- Created `tests/test_valence_tagged_slot.py` (38 tests)
+
+### 4. Phase 11: Graph Evolution Integration (Completed - Previous Session)
+
+Enhanced `engines/reasoning/graph_evolution.py` (~813 LOC):
+- `ValenceWeightedEdge` dataclass: edge with discovery valence context
+- `GameFeelTrajectory`: Track FeltState trajectory across game
+- `GraphEvolution.record_traversal_with_feel()` - record traversals with phenomenology context
+- Dynamic crystallization thresholds based on discovery valence:
+  - MASTERY discoveries: Lower threshold (crystallize faster)
+  - THREAT discoveries: Higher threshold (more validation needed)
+- Created `tests/test_graph_evolution.py` (54 tests)
+
+### 5. Integration Review & Critical Bug Fix (This Session)
+
+**Discovered Critical Integration Bug:**
+
+The Blackboard class uses `slot(key, value, source_rung=...)` as its write API, but:
+- `phenomenology_layer.py` called `self.blackboard.write()` (8 occurrences in `inject()` method)
+- `eisenhower_layer.py` called `self.blackboard.write()` (1 occurrence in `handle_all_eliminate()`)
+
+**Root Cause:** Tests used MockBlackboard with a `write()` method, but the real Blackboard class doesn't have this method - only `slot()`.
+
+**Fixes Applied:**
+
+| File | Lines | Change |
+|------|-------|--------|
+| `engines/cognition/phenomenology_layer.py` | 646-655 | Changed 8x `blackboard.write(key, value)` to `blackboard.slot(key, value, source_rung='phenomenology')` |
+| `engines/cognition/eisenhower_layer.py` | 589 | Changed `blackboard.write(...)` to `blackboard.slot(..., source_rung='eisenhower')` |
+| `tests/test_phenomenology_layer.py` | MockBlackboard | Added `slot()` method to match real Blackboard API |
+| `tests/test_eisenhower_layer.py` | MockBlackboard | Added `slot()` method to match real Blackboard API |
+
+**Verification:**
+- Real integration test with actual Blackboard class: PASSING
+- All 194 Phase 8-11 related tests: PASSING
+
+---
+
+## Test Results
+
+| Phase | Tests | Status |
+|-------|-------|--------|
+| Phase 8 (Eisenhower) | 33 | PASSING |
+| Phase 9 (Phenomenology) | 32 | PASSING |
+| Phase 10 (Valence-Tagged) | 38 | PASSING |
+| Phase 11 (Graph Evolution) | 54 | PASSING |
+| Blackboard Integration | 37 | PASSING |
+| **Total Phase 8-11** | **194** | **ALL PASSING** |
+
+---
+
+## Files Created/Modified
+
+### Files Modified This Session:
+| File | Changes |
+|------|---------|
+| `engines/cognition/phenomenology_layer.py` | Fixed `write()` → `slot()` API calls |
+| `engines/cognition/eisenhower_layer.py` | Fixed `write()` → `slot()` API call |
+| `tests/test_phenomenology_layer.py` | Added `slot()` method to MockBlackboard |
+| `tests/test_eisenhower_layer.py` | Added `slot()` method to MockBlackboard |
+
+---
+
+## Current Status
+
+**Phase 8-11 Implementation: COMPLETE**
+
+All phases are now verified working with real Blackboard integration:
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 8 | Eisenhower Layer | COMPLETE |
+| Phase 9 | Phenomenology Layer | COMPLETE |
+| Phase 10 | Valence-Tagged Knowledge | COMPLETE |
+| Phase 11 | Graph Evolution Integration | COMPLETE |
+| **Integration** | **Real Blackboard API** | **VERIFIED** |
+
+**Key Fix:** The `blackboard.write()` → `blackboard.slot()` fix was critical. Without it, the phenomenology feedback loop would fail at runtime with `AttributeError: 'Blackboard' object has no attribute 'write'`.
+
+---
+
+## Architecture Summary (Phases 8-11)
+
+The new layers add emotional/phenomenological grounding to cognitive routing:
+
+1. **Eisenhower Layer** - Prioritizes by urgency × importance into 4 quadrants
+2. **Phenomenology Layer** - Compresses blackboard to 5D "felt sense" (valence, arousal, certainty, agency, salience)
+3. **Valence-Tagged Slots** - Knowledge carries inherent urgency/importance (no lookup needed)
+4. **Graph Evolution + Feel** - Crystallization thresholds adapt based on discovery valence
+
+**Key Insight**: Feelings are not noise - they're compressed summaries of high-dimensional state that guide attention and prioritization.
+
+---
+
 ## February 4, 2026
 
 ### Session: Cognitive Routing Implementation (Phases 5-7.5 Complete)

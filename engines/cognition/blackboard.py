@@ -18,6 +18,7 @@ The Blackboard enables:
 3. Checkpoint/restore for backtracking
 4. Legacy context dict compatibility
 5. Phase 7 forward compatibility (graph evolution structures)
+6. Phase 10: Valence-tagged slots with inherent urgency/importance
 """
 # RULE 1: PYTHONDONTWRITEBYTECODE=1 (no .pyc files)
 import sys
@@ -32,8 +33,22 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from pathlib import Path
-from typing import Any, Callable, Dict, Generic, List, Optional, Set, Tuple, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+)
+
+# Conditional import for type hints only
+if TYPE_CHECKING:
+    from engines.cognition.valence_tagged_slot import ValenceSlotStore
 
 T = TypeVar('T')
 
@@ -598,6 +613,9 @@ class Blackboard:
         self._slot_registry = slot_registry or {}
         self._logger = logging.getLogger(__name__)
 
+        # Phase 10: Valence-tagged slot store (lazy-loaded to avoid circular imports)
+        self._valence_store: Optional['ValenceSlotStore'] = None
+
         # Pre-populate slots from registry if provided
         if self._slot_registry:
             self._initialize_from_registry()
@@ -1097,7 +1115,7 @@ class Blackboard:
     def summary(self) -> Dict[str, Any]:
         """Get a summary of blackboard state for debugging."""
         rumsfeld = self.get_rumsfeld_counts()
-        return {
+        summary_dict = {
             "total_slots": len(self.slots),
             "populated_slots": len(self),
             "rumsfeld_counts": rumsfeld,
@@ -1106,6 +1124,204 @@ class Blackboard:
             "edge_trust_records": len(self._edge_trust),
             "crystallized_paths": len(self._crystallized_paths)
         }
+
+        # Add valence store stats if initialized
+        if self._valence_store is not None:
+            summary_dict["valence_store"] = self._valence_store.get_stats()
+
+        return summary_dict
+
+    # =========================================================================
+    # Phase 10: Valence-Tagged Slot Access
+    # =========================================================================
+
+    @property
+    def valence_store(self) -> 'ValenceSlotStore':
+        """
+        Lazy-load the valence store to avoid circular imports.
+
+        The valence store provides O(1) urgency/importance access
+        for slots that have been written with valence tagging.
+        """
+        if self._valence_store is None:
+            from engines.cognition.valence_tagged_slot import ValenceSlotStore
+            self._valence_store = ValenceSlotStore()
+        return self._valence_store
+
+    def write_with_valence(
+        self,
+        key: str,
+        value: Any,
+        *,
+        valence: Optional['Valence'] = None,
+        urgency: Optional[float] = None,
+        importance: Optional[float] = None,
+        reason: Optional[str] = None,
+        source_rung: str = "unknown",
+        confidence: float = 1.0,
+    ) -> Any:
+        """
+        Write a value with inherent urgency/importance encoding.
+
+        This is the Phase 10 "valence-tagged" write where urgency
+        IS part of the encoding, not looked up separately.
+
+        Also writes to regular slot for backward compatibility.
+
+        Args:
+            key: Slot name
+            value: Value to store
+            valence: Optional explicit valence (auto-detected if not provided)
+            urgency: Optional explicit urgency 0-1 (auto-detected if not provided)
+            importance: Optional explicit importance 0-1 (auto-detected if not provided)
+            reason: Optional reason for this urgency/importance
+            source_rung: Rung that wrote this value
+            confidence: Confidence in this value
+
+        Returns:
+            The stored value
+
+        Example:
+            # Auto-tagged based on CRITICAL_SLOT_VALENCE_RULES
+            blackboard.write_with_valence('contradiction_detected', True)
+
+            # Explicit valence/urgency
+            from engines.cognition.phenomenology_layer import Valence
+            blackboard.write_with_valence(
+                'custom_threat', True,
+                valence=Valence.THREAT,
+                urgency=0.9,
+                importance=0.8,
+                reason="Custom threat condition"
+            )
+        """
+        # Write to regular slot for backward compatibility
+        self.slot(key, value, source_rung=source_rung, confidence=confidence)
+
+        # Write to valence store with inherent urgency/importance
+        self.valence_store.write(
+            slot_name=key,
+            value=value,
+            valence=valence,
+            urgency=urgency,
+            importance=importance,
+            reason=reason,
+            source_rung=source_rung,
+        )
+
+        return value
+
+    def get_urgency(self, key: str) -> float:
+        """
+        Get inherent urgency for a slot - O(1) access.
+
+        This is the key benefit of Phase 10: no computation needed,
+        urgency is read directly from the stored encoding.
+
+        Args:
+            key: Slot name
+
+        Returns:
+            Urgency value 0-1, or 0.5 if slot not valence-tagged
+        """
+        return self.valence_store.read_urgency(key)
+
+    def get_importance(self, key: str) -> float:
+        """
+        Get inherent importance for a slot - O(1) access.
+
+        Args:
+            key: Slot name
+
+        Returns:
+            Importance value 0-1, or 0.5 if slot not valence-tagged
+        """
+        return self.valence_store.read_importance(key)
+
+    def get_valence(self, key: str) -> Optional['Valence']:
+        """
+        Get the valence for a slot.
+
+        Args:
+            key: Slot name
+
+        Returns:
+            Valence enum or None if slot not valence-tagged
+        """
+        return self.valence_store.read_valence(key)
+
+    def get_with_valence(self, key: str) -> Tuple[Any, Optional['Valence'], float, float]:
+        """
+        Get value with its inherent urgency/importance - O(1) access.
+
+        This returns the value along with its encoded urgency/importance,
+        allowing Eisenhower layer to make decisions without computation.
+
+        Args:
+            key: Slot name
+
+        Returns:
+            (value, valence, urgency, importance) tuple
+            If not valence-tagged: (value, None, 0.5, 0.5)
+        """
+        value = self.get(key)
+        tagged = self.valence_store.read(key)
+
+        if tagged:
+            return (value, tagged.valence, tagged.urgency_inherent, tagged.importance_inherent)
+        return (value, None, 0.5, 0.5)
+
+    def get_urgent_slots(self, threshold: float = 0.6) -> List[Tuple[str, float]]:
+        """
+        Get all slots with urgency above threshold.
+
+        Useful for Eisenhower layer to identify urgent matters.
+
+        Args:
+            threshold: Minimum urgency to include
+
+        Returns:
+            List of (slot_name, urgency) tuples sorted by urgency descending
+        """
+        return self.valence_store.get_urgent_slots(threshold)
+
+    def get_important_slots(self, threshold: float = 0.6) -> List[Tuple[str, float]]:
+        """
+        Get all slots with importance above threshold.
+
+        Args:
+            threshold: Minimum importance to include
+
+        Returns:
+            List of (slot_name, importance) tuples sorted by importance descending
+        """
+        return self.valence_store.get_important_slots(threshold)
+
+    def get_threat_slots(self) -> List[str]:
+        """Get all slots currently tagged with THREAT valence."""
+        return self.valence_store.get_threat_slots()
+
+    def get_aggregate_urgency(self) -> float:
+        """
+        Get maximum urgency across all valence-tagged slots.
+
+        A single high-urgency item drives aggregate urgency.
+
+        Returns:
+            Maximum urgency 0-1, or 0.0 if no valence-tagged slots
+        """
+        return self.valence_store.compute_aggregate_urgency()
+
+    def get_aggregate_importance(self) -> float:
+        """
+        Get weighted average importance across valence-tagged slots.
+
+        Higher-urgency items contribute more weight.
+
+        Returns:
+            Weighted average importance 0-1
+        """
+        return self.valence_store.compute_aggregate_importance()
 
     def __repr__(self) -> str:
         """String representation for debugging."""
@@ -1138,4 +1354,6 @@ __all__ = [
     "UKPotentialEntry",
     # Blackboard class
     "Blackboard",
+    # Phase 10: Valence-tagged slots (imported from valence_tagged_slot.py)
+    # Note: ValenceSlotStore, ValenceTaggedValue, etc. imported separately
 ]
