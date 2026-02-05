@@ -1,6 +1,6 @@
 # Ouroboros: Distributed Multi-Agent Learning System
 
-**Architecture**: Database-centric multi-agent evolution with horizontal knowledge transfer
+**Architecture**: Database-centric multi-agent evolution with horizontal knowledge transfer + Cognitive Routing
 
 **Foundational Papers & Theories**:
 - Paper: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
@@ -9,12 +9,13 @@
 
 ## System Architecture
 
-Three integrated subsystems:
+Four integrated subsystems:
 
 | Subsystem | Function | Implementation |
 |-----------|----------|----------------|
 | **Storage Layer** | Persistent knowledge, game results | SQLite database |
-| **Decision Layer** | Action selection via weighted rungs | 42-rung Decision System + Two Streams (wA/wB) |
+| **Cognitive Layer** | Dynamic routing via blackboard + graph | Cognitive Router (Phases 1-11) |
+| **Decision Layer** | Action selection via weighted rungs | 67-rung Decision System + Two Streams (wA/wB) |
 | **Evolution Layer** | Population management, fitness selection | Evolutionary engine + Agents |
 
 ---
@@ -127,9 +128,28 @@ The system mimics biological evolution with three distinct layers of information
 - **Viral Packages**: Successful strategies spread rapidly through the network
 - **Pariahs**: Failed patterns marked for avoidance (with decay to allow innovation)
 
-### 3. Decision Rung System (Action Selection)
+### 3. Cognitive Routing System (NEW in v1.1)
 
-The core intelligence is a **42-rung modular decision ladder**. Each rung is a pluggable component that can propose actions with confidence scores.
+The core intelligence now uses a **dynamic Blackboard + Meta-Planner + Cognitive Graph** architecture with three metacognitive layers:
+
+| Layer | Question | Output | Module |
+|-------|----------|--------|--------|
+| **Phenomenology** | "How do I feel?" | FeltState (5D) | `phenomenology_layer.py` |
+| **Epistemic** | "What do I know?" | Rumsfeld quadrant (KK/KU/UK/UU) | `epistemic_tracker.py` |
+| **Pragmatic** | "What do I do?" | Eisenhower quadrant (Q1-Q4) | `eisenhower_layer.py` |
+
+**Key Complexity Win**: O(26) typical case vs O(1575) static A* via early termination + focused search + exclusions.
+
+All parameters centralized in `config/cognitive_parameters.py` with tier-based classification:
+- **Tier 1 (CRITICAL)**: `urgency_threshold`, `valence_internal_weight` - NO auto-tuning
+- **Tier 2 (PERFORMANCE)**: `phenomenology_inertia`, `crystallization_*_multiplier` - Tune with care
+- **Tier 3 (FINE-TUNING)**: `felt_weight_*`, `edge_trust_decay` - Safe for online adaptation
+
+See [architecture/cognitive_routing_architecture.md](architecture/cognitive_routing_architecture.md) for full documentation.
+
+### 4. Decision Rung System (Action Selection)
+
+The action selection uses a **67-rung modular decision ladder**. Each rung is a pluggable component that can propose actions with confidence scores.
 
 **Strategies**:
 - **LADDER**: First confident answer wins (fast, deterministic)
@@ -154,7 +174,7 @@ The core intelligence is a **42-rung modular decision ladder**. Each rung is a p
 - `PrimitiveSuggesterRung` - Maps seed primitives to action suggestions
 - `FrontierCheckpointRung` - Uses checkpoints for efficient exploration
 
-### 4. Pattern Validation via RLVR
+### 5. Pattern Validation via RLVR
 
 Patterns are validated through Reinforcement Learning with Verifiable Rewards:
 
@@ -166,7 +186,7 @@ Patterns are validated through Reinforcement Learning with Verifiable Rewards:
 
 **Architecture**: Decentralized exploration (agents), centralized fitness (RLVR), distributed storage (database).
 
-### 5. Seed Primitives
+### 6. Seed Primitives
 
 Bootstrap operators available at initialization:
 
@@ -182,7 +202,7 @@ Bootstrap operators available at initialization:
 | Explore/Exploit | 4 | `curiosity_drive`, `exploration_bonus` |
 | Metacognition | 5 | `get_confidence`, `detect_stuck` |
 
-### 6. Agent Role Specialization
+### 7. Agent Role Specialization
 
 Roles emerge from stream weights and context:
 
@@ -195,7 +215,7 @@ Roles emerge from stream weights and context:
 
 Role transitions based on performance metrics (`Progress_Score`, `resource_efficiency`, domain contributions).
 
-### 7. Persona Ensemble (Multi-Perspective Reasoning)
+### 8. Persona Ensemble (Multi-Perspective Reasoning)
 
 Agents use an ensemble of internal models for action proposal and evaluation:
 
@@ -207,7 +227,7 @@ Agents use an ensemble of internal models for action proposal and evaluation:
 
 Persona disagreement triggers explicit deliberation. Synthesis can produce novel action combinations not proposed by any single persona.
 
-### 8. Dual-Currency Resource System
+### 9. Dual-Currency Resource System
 
 Two independent resource types prevent feedback loops:
 
@@ -218,7 +238,7 @@ Two independent resource types prevent feedback loops:
 
 Separation prevents high-prestige agents from monopolizing compute, maintaining population diversity.
 
-### 9. Mastery System (Earn the Right to Replay)
+### 10. Mastery System (Earn the Right to Replay)
 
 Agents must **earn** the privilege to replay winning sequences - no free shortcuts:
 
@@ -234,7 +254,7 @@ Agents must **earn** the privilege to replay winning sequences - no free shortcu
 - Privileges revoked if understanding degrades
 - Sequences always stored but never automatically replayed
 
-### 10. Cross-Domain Pattern Detection
+### 11. Cross-Domain Pattern Detection
 
 System identifies structurally similar patterns discovered independently across different game types:
 
@@ -242,7 +262,7 @@ System identifies structurally similar patterns discovered independently across 
 - **Resonance scoring**: Higher weight when multiple agent roles converge on same pattern
 - **Complexity reduction**: Validated cross-domain patterns reduce search space for new games
 
-### 11. Game State Modes
+### 12. Game State Modes
 
 | Mode | Trigger | Distribution |
 |------|---------|-------------|
@@ -251,7 +271,7 @@ System identifies structurally similar patterns discovered independently across 
 
 Transition on first full win; Pioneers reassign to remaining unbeaten games.
 
-### 12. System Maintenance
+### 13. System Maintenance
 
 | Component | Behavior |
 |-----------|----------|
@@ -261,7 +281,7 @@ Transition on first full win; Pioneers reassign to remaining unbeaten games.
 | Pycache | Disabled (`PYTHONDONTWRITEBYTECODE=1`) |
 | Shutdown | `Ctrl+C` triggers WAL checkpoint |
 
-### 13. System Health Metrics
+### 14. System Health Metrics
 
 | Metric | Target | Warning | Critical |
 |--------|--------|---------|----------|
@@ -285,14 +305,38 @@ Transition on first full win; Pioneers reassign to remaining unbeaten games.
 | Module | Purpose |
 |--------|---------|
 | `core_gameplay.py` | Main gameplay loop and action execution |
-| `decision_rung_system.py` | 42-rung ladder for action selection |
+| `decision_rung_system.py` | 67-rung ladder for action selection |
 | `seed_primitives.py` | Innate cognitive primitives (attention, affordance, physics) |
 | `database_interface.py` | SQLite database operations |
 | `evolutionary_engine.py` | Population evolution and breeding |
-| `engines/consciousness/i_thread.py` | Stream A/B weighting, identity persistence |
-| `engines/consciousness/sensation_engine.py` | Emotional gameplay and navigation state |
-| `engines/social/viral_package_engine.py` | Viral knowledge exchange system |
-| `engines/social/prestige_engine.py` | Social capital and contribution tracking |
+| `config/cognitive_parameters.py` | **Centralized tunable parameters (Tier 1-3)** |
+
+### Cognitive Routing (`engines/cognition/`)
+
+| Module | Purpose |
+|--------|---------|
+| `blackboard.py` | Shared working memory with typed slots |
+| `cognitive_router.py` | Main routing orchestrator |
+| `phenomenology_layer.py` | FeltState compression & feedback (5D affect) |
+| `eisenhower_layer.py` | Urgency × importance prioritization (Q1-Q4) |
+| `epistemic_tracker.py` | Rumsfeld state machine (KK/KU/UK/UU) |
+| `meta_planner.py` | Algorithm selection with caching |
+| `graph_evolution.py` | Edge trust, path crystallization |
+| `valence_tagged_slot.py` | Valence as inherent property |
+
+### Consciousness & Identity (`engines/consciousness/`)
+
+| Module | Purpose |
+|--------|---------|
+| `i_thread.py` | Stream A/B weighting, identity persistence |
+| `sensation_engine.py` | Emotional gameplay and navigation state |
+
+### Social Systems (`engines/social/`)
+
+| Module | Purpose |
+|--------|---------|
+| `viral_package_engine.py` | Viral knowledge exchange system |
+| `prestige_engine.py` | Social capital and contribution tracking |
 
 ### Supporting Systems
 
@@ -301,6 +345,7 @@ Transition on first full win; Pioneers reassign to remaining unbeaten games.
 | `engines/regulation/regulatory_signal_engine.py` | Adaptive signals for population control |
 | `engines/perception/terminal_pattern_detector.py` | Game-over foresight - learns fatal patterns |
 | `engines/postgame/orchestrator.py` | RLVR fitness calculation |
+| `engines/reasoning/graph_evolution.py` | Long-term graph learning and path crystallization |
 | `safe_cleanup.py` | Database maintenance (runs every 10 generations) |
 
 ### Architecture & Theory Documentation
@@ -318,7 +363,8 @@ Architectural decisions in `architecture/`:
 
 | File | Contents |
 |------|----------|
-| `decision_cognitive_architecture.md` | Decision rung system design |
+| `cognitive_routing_architecture.md` | **Complete cognitive routing system (Phases 1-11)** |
+| `decision_cognitive_architecture.md` | Legacy decision rung system design (deprecated) |
 | `frontier_checkpoint_system.md` | Checkpoint and progress tracking |
 
 ---
@@ -351,11 +397,14 @@ python manual_tools/database/schema_inspector.py --table agents --sample
 Tests are located in `tests/` folder (exception to "No Test Files" rule):
 
 ```bash
-# Run all tests
+# Run all tests (660+ tests)
 pytest tests/
 
 # Run specific test
-pytest tests/test_primitives.py -v
+pytest tests/test_phenomenology_layer.py -v
+
+# Run cognitive routing tests
+pytest tests/test_cognitive_router.py tests/test_eisenhower_layer.py -v
 ```
 
 ---
