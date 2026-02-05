@@ -367,15 +367,14 @@ class TestRuleInductionIntegration(unittest.TestCase):
     DB_PATH = MAIN_DB_PATH
 
     def test_rule_induction_can_be_imported(self):
-        """Verify rule_induction_engine can be imported."""
-        from rule_induction_engine import RuleInductionEngine
+        """Verify rule_induction can be imported."""
+        from engines.cognition.rule_induction import RuleInductionEngine
         self.assertTrue(True)
 
     def test_rule_induction_can_be_instantiated(self):
         """Verify RuleInductionEngine can be instantiated with DatabaseInterface."""
-        from rule_induction_engine import RuleInductionEngine
-
         from database_interface import DatabaseInterface
+        from engines.cognition.rule_induction import RuleInductionEngine
 
         db = DatabaseInterface()
         engine = RuleInductionEngine(db)
@@ -383,9 +382,8 @@ class TestRuleInductionIntegration(unittest.TestCase):
 
     def test_rule_induction_has_extract_method(self):
         """Verify engine has rule extraction methods."""
-        from rule_induction_engine import RuleInductionEngine
-
         from database_interface import DatabaseInterface
+        from engines.cognition.rule_induction import RuleInductionEngine
 
         db = DatabaseInterface()
         engine = RuleInductionEngine(db)

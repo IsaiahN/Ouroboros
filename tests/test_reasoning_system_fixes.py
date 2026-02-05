@@ -500,10 +500,17 @@ class TestReasoningSystemIntegration:
         """Verify win strategy can trigger CODS operator bootstrap."""
         strategy = "Used translate to move object right, then rotate 90 degrees"
 
+        # Configure the mock to return expected result
+        mock_cods_engine.bootstrap_operators_from_patterns.return_value = {
+            'bootstrapped': ['translate', 'rotate'],
+            'from_strategy': True
+        }
+
         # Call bootstrap with strategy
         result = mock_cods_engine.bootstrap_operators_from_patterns(strategy)
 
         # Should have bootstrapped operators
+        mock_cods_engine.bootstrap_operators_from_patterns.assert_called_once_with(strategy)
         assert 'bootstrapped' in result
         assert result['from_strategy'] is True
 

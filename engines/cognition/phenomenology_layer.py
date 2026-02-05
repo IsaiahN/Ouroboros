@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
+from config.cognitive_parameters import DEFAULT_COGNITIVE_PARAMS as _PARAMS
+
 if TYPE_CHECKING:
     from engines.cognition.blackboard import Blackboard
 
@@ -115,11 +117,11 @@ class FeltState:
         High certainty + high agency = exploit (important)
         Low certainty + high salience = investigate (important)
         """
-        if self.certainty > 0.7 and self.agency > 0.7:
+        if self.certainty > _PARAMS.phenomenology_certainty_high and self.agency > _PARAMS.phenomenology_agency_high:
             return 0.8  # We know what to do and can do it
-        if self.certainty < 0.3 and self.salience > 0.7:
+        if self.certainty < _PARAMS.phenomenology_certainty_low and self.salience > _PARAMS.phenomenology_salience_high:
             return 0.7  # We don't know, but this matters
-        if self.momentum < -0.3:
+        if self.momentum < _PARAMS.phenomenology_momentum_negative:
             return 0.6  # Things are getting worse
         return 0.4  # Default moderate importance
 
@@ -209,8 +211,8 @@ class FeltStateStabilizer:
         (Valence.OPPORTUNITY, Valence.THREAT): 2,  # Don't panic when exploring
     }
 
-    # Cooldown after transition (cycles before can transition again)
-    TRANSITION_COOLDOWN: int = 3
+    # Cooldown after transition (cycles before can transition again) - from CognitiveParameters
+    TRANSITION_COOLDOWN: int = _PARAMS.phenomenology_transition_cooldown
 
     def __init__(self):
         self.pending_valence: Optional[Valence] = None
@@ -347,12 +349,12 @@ class PhenomenologyLayer:
         High-D state → Compress → Summary → Feed back → High-D state → ...
     """
 
-    # Performance budget: compression must complete in 5ms
-    MAX_COMPRESSION_MS: float = 5.0
+    # Performance budget: compression must complete in time limit
+    MAX_COMPRESSION_MS: float = _PARAMS.phenomenology_compression_budget_ms
 
-    # History size limits
-    MAX_HISTORY: int = 100
-    MAX_TRACE_LOG: int = 500
+    # History size limits - from CognitiveParameters
+    MAX_HISTORY: int = _PARAMS.phenomenology_max_history
+    MAX_TRACE_LOG: int = _PARAMS.phenomenology_max_trace_log
 
     def __init__(self, blackboard: 'Blackboard'):
         """
@@ -488,10 +490,10 @@ class PhenomenologyLayer:
         if self.blackboard.get('action_budget_critical', False):
             return Valence.THREAT
 
-        # Score-based mapping
-        if raw_score < -0.3:
+        # Score-based mapping - uses CognitiveParameters thresholds
+        if raw_score < _PARAMS.phenomenology_valence_threat_threshold:
             return Valence.THREAT
-        elif raw_score > 0.3:
+        elif raw_score > _PARAMS.phenomenology_valence_opportunity_threshold:
             return Valence.OPPORTUNITY
 
         # CONFUSION signals
@@ -511,24 +513,71 @@ class PhenomenologyLayer:
         Compute continuous valence score from multiple signals.
         Uses tanh squashing for bounded output.
 
+        CRITICAL: Balances internal signals (confidence, agency) with
+        external validation (score changes, action success, deaths) to
+        prevent "feeling good while losing" - per LLM architecture feedback.
+
         Returns:
             Score in range [-1, 1]
         """
-        # Positive signals: making progress, gaining confidence
+        # ===== INTERNAL SIGNALS (what we "feel") =====
+        # Confidence trend from our own reasoning
         confidence_trend = self.blackboard.get('confidence_delta', 0)
+
+        # Agency - how much we feel in control
+        agency = self.blackboard.get('agency_score', 0.5)  # Default moderate
+
+        # Certainty from epistemic state
+        epistemic = self.blackboard.get('epistemic_quadrant', 'UU')
+        certainty_map = {'KK': 0.9, 'KU': 0.5, 'UK': 0.6, 'UU': 0.2}
+        certainty = certainty_map.get(epistemic, 0.5)
+
+        # Internal score: confidence + agency + certainty
+        internal_score = (confidence_trend + agency + certainty) / 3
+
+        # ===== EXTERNAL SIGNALS (reality check) =====
+        # Actual game progress
         levels_completed = self.blackboard.get('levels_completed', 0)
         total_levels = max(self.blackboard.get('total_levels', 1), 1)
         progress = levels_completed / total_levels
 
-        # Negative signals: contradictions, deaths, stuck
+        # Score delta - did our score actually improve?
+        score_delta = self.blackboard.get('score_delta', 0)
+        # Normalize to reasonable range (assuming scores change by 0-100 typically)
+        score_change = max(min(score_delta / 100, 1.0), -1.0)
+
+        # Action success rate - are our actions working?
+        action_success_rate = self.blackboard.get('recent_success_rate', 0.5)
+
+        # Death count - external failure signal
+        death_count = self.blackboard.get('death_count', 0)
+        death_penalty = death_count * _PARAMS.valence_death_penalty_weight
+
+        # Known unknowns - contradictions found
         known_unknowns = self.blackboard.get('known_unknowns', [])
         contradiction_count = len(known_unknowns) if isinstance(known_unknowns, list) else 0
         contradictions = contradiction_count * -0.1
-        death_count = self.blackboard.get('death_count', 0)
-        deaths = death_count * -0.2
+
+        # Stuck detection
         stuck_penalty = -0.3 if self.blackboard.get('stuck_detected') else 0
 
-        raw = confidence_trend + progress + contradictions + deaths + stuck_penalty
+        # External score: progress + score_change + action_success - penalties
+        external_score = (
+            progress * _PARAMS.valence_progress_weight +
+            score_change * _PARAMS.valence_score_delta_weight +
+            action_success_rate * _PARAMS.valence_action_success_weight +
+            death_penalty +
+            contradictions +
+            stuck_penalty
+        )
+
+        # ===== WEIGHTED COMBINATION =====
+        # This prevents "feeling good while losing" by requiring external validation
+        raw = (
+            internal_score * _PARAMS.valence_internal_weight +
+            external_score * _PARAMS.valence_external_weight
+        )
+
         return math.tanh(raw)  # Squash to [-1, 1]
 
     # =========================================================================

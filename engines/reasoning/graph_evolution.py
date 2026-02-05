@@ -20,6 +20,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+# Import centralized parameters
+from config.cognitive_parameters import DEFAULT_COGNITIVE_PARAMS as _PARAMS
+
 # Import Valence from phenomenology layer
 from engines.cognition.phenomenology_layer import FeltState, Valence
 
@@ -27,20 +30,21 @@ from engines.cognition.phenomenology_layer import FeltState, Valence
 # CRYSTALLIZATION THRESHOLDS
 # ============================================================================
 
-BASE_CRYSTALLIZATION_THRESHOLD = 5  # Default traversals needed to crystallize
 
-# Multipliers for valence-adjusted thresholds
+BASE_CRYSTALLIZATION_THRESHOLD = _PARAMS.crystallization_base_threshold
+
+# Multipliers for valence-adjusted thresholds (from CognitiveParameters)
 VALENCE_THRESHOLD_MULTIPLIERS: Dict[Valence, float] = {
-    Valence.THREAT: 1.5,      # Panic decisions need more validation
-    Valence.CONFUSION: 2.0,   # Lucky flukes need lots of validation
-    Valence.OPPORTUNITY: 1.0, # Standard threshold
-    Valence.STABILITY: 0.9,   # Confident decisions, slightly faster
-    Valence.BOREDOM: 1.0,     # Base, but special case for high success
+    Valence.THREAT: _PARAMS.crystallization_threat_multiplier,
+    Valence.CONFUSION: _PARAMS.crystallization_confusion_multiplier,
+    Valence.OPPORTUNITY: _PARAMS.crystallization_neutral_multiplier,
+    Valence.STABILITY: _PARAMS.crystallization_curiosity_multiplier,  # Maps to "confident"
+    Valence.BOREDOM: _PARAMS.crystallization_neutral_multiplier,  # Base, special case below
 }
 
 # Success rate threshold for BOREDOM fast-track crystallization
 BOREDOM_SUCCESS_THRESHOLD = 0.7
-BOREDOM_FAST_TRACK_MULTIPLIER = 0.7
+BOREDOM_FAST_TRACK_MULTIPLIER = _PARAMS.crystallization_mastery_multiplier
 
 # Minimum success rate for crystallization to occur at all
 MIN_SUCCESS_RATE_FOR_CRYSTALLIZATION = 0.6

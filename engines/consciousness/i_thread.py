@@ -322,7 +322,7 @@ class IThread:
             agent_id=agent_id,
             w_a=w_a,
             w_b=w_b,
-            total_conflicts=stats.get('total_conflicts', 0),
+            conflicts_resolved=stats.get('total_conflicts', 0),
             stream_a_wins=stats.get('stream_a_wins', 0),
             stream_b_wins=stats.get('stream_b_wins', 0),
             personality_label=self._compute_personality_label(w_a, w_b)
@@ -693,14 +693,14 @@ class IThread:
             'w_a': state.w_a,
             'w_b': state.w_b,
             'personality_label': state.personality_label,
-            'total_conflicts_resolved': state.total_conflicts,
+            'total_conflicts_resolved': state.conflicts_resolved,
             'stream_a_win_rate': (
-                state.stream_a_wins / state.total_conflicts
-                if state.total_conflicts > 0 else 0.5
+                state.stream_a_wins / state.conflicts_resolved
+                if state.conflicts_resolved > 0 else 0.5
             ),
             'stream_b_win_rate': (
-                state.stream_b_wins / state.total_conflicts
-                if state.total_conflicts > 0 else 0.5
+                state.stream_b_wins / state.conflicts_resolved
+                if state.conflicts_resolved > 0 else 0.5
             ),
             'learning_rate': state.learning_rate
         }

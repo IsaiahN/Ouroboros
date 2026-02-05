@@ -2,6 +2,130 @@
 
 ## February 5, 2026
 
+### Session: CognitiveParameters Wiring - Eliminating Magic Numbers
+
+**Started**: ~9:00 AM
+**Last Update**: Current session
+
+---
+
+## Objective
+
+Wire `config/cognitive_parameters.py` (83 centralized parameters) to actual engines that were using hardcoded magic numbers. This addresses the LLM architecture feedback concern: **"Magic numbers need centralization"**.
+
+## Critical Fix: "Feeling Good While Losing"
+
+The LLM feedback identified that valence was computed purely from internal signals (confidence, agency) without external validation. An agent could feel OPPORTUNITY while actually dying repeatedly.
+
+**Solution Implemented:**
+```python
+# config/cognitive_parameters.py
+valence_internal_weight: float = 0.5   # Confidence, agency, certainty
+valence_external_weight: float = 0.5   # Score delta, action success, deaths
+```
+
+The new `_compute_raw_valence_score()` in phenomenology_layer.py now:
+1. Computes internal score from confidence, agency, certainty
+2. Computes external score from progress, score_delta, action_success_rate, death_penalty
+3. Combines with configurable weights to prevent self-deception
+
+---
+
+## Engines Wired to CognitiveParameters
+
+### 1. `engines/reasoning/graph_evolution.py` ✅
+- `VALENCE_THRESHOLD_MULTIPLIERS` → `_PARAMS.crystallization_*_multiplier`
+- `BASE_CRYSTALLIZATION_THRESHOLD` → `_PARAMS.crystallization_base_threshold`
+
+### 2. `engines/cognition/eisenhower_layer.py` ✅
+- `UrgencyScore.total` → `_PARAMS.urgency_*_weight` (4 weights)
+- `UrgencyScore.is_urgent` → `_PARAMS.urgency_threshold`
+- `ImportanceScore.total` → `_PARAMS.importance_*_weight` (4 weights)
+- `ImportanceScore.is_important` → `_PARAMS.importance_threshold`
+- `EisenhowerLayer.MAX_SCHEDULED_QUEUE` → `_PARAMS.scheduled_queue_max`
+- `EisenhowerLayer.AGING_RATE` → `_PARAMS.queue_aging_rate`
+- `DEFAULT_UNLOCK_SCORE` → `_PARAMS.default_rung_unlock_score`
+
+### 3. `engines/cognition/phenomenology_layer.py` ✅
+- `FeltState.to_importance_bias()` thresholds → `_PARAMS.phenomenology_*_threshold`
+- `FeltStateStabilizer.TRANSITION_COOLDOWN` → `_PARAMS.phenomenology_transition_cooldown`
+- `PhenomenologyLayer.MAX_COMPRESSION_MS` → `_PARAMS.phenomenology_compression_budget_ms`
+- `PhenomenologyLayer.MAX_HISTORY` → `_PARAMS.phenomenology_max_history`
+- `PhenomenologyLayer.MAX_TRACE_LOG` → `_PARAMS.phenomenology_max_trace_log`
+- `_compute_valence()` thresholds → `_PARAMS.phenomenology_valence_*_threshold`
+- **`_compute_raw_valence_score()`** → COMPLETE REWRITE with internal/external weighting
+
+---
+
+## New Parameters Added to CognitiveParameters (Total: 98 parameters)
+
+### Phase 8 Additions:
+- `scheduled_queue_max: int = 10`
+- `queue_aging_rate: float = 0.05`
+- `default_rung_unlock_score: float = 0.3`
+- `urgency_threshold: float = 0.5`
+- `importance_threshold: float = 0.5`
+
+### Phase 9 Additions:
+- `phenomenology_transition_cooldown: int = 3`
+- `phenomenology_compression_budget_ms: float = 5.0`
+- `phenomenology_max_history: int = 100`
+- `phenomenology_max_trace_log: int = 500`
+- `phenomenology_certainty_high: float = 0.7`
+- `phenomenology_certainty_low: float = 0.3`
+- `phenomenology_agency_high: float = 0.7`
+- `phenomenology_salience_high: float = 0.7`
+- `phenomenology_momentum_negative: float = -0.3`
+- `phenomenology_valence_threat_threshold: float = -0.3`
+- `phenomenology_valence_opportunity_threshold: float = 0.3`
+- `valence_progress_weight: float = 0.3`
+
+---
+
+## Test Results
+
+| Test Suite | Tests | Status |
+|------------|-------|--------|
+| test_phenomenology_layer.py | 32 | PASSING |
+| test_eisenhower_layer.py | 33 | PASSING |
+| test_valence_tagged_slot.py | 38 | PASSING |
+| test_graph_evolution.py | 54 | PASSING |
+| test_cognitive_router.py | 42 | PASSING |
+| test_blackboard.py | 45 | PASSING |
+| **Total Phase 8-11** | **244** | **ALL PASSING** |
+
+Full test suite: 844 passed, 30 failed (pre-existing issues), 7 skipped
+
+---
+
+## Architecture Benefit
+
+Before: Magic numbers scattered across 4+ files
+```python
+# eisenhower_layer.py
+AGING_RATE: float = 0.05  # What is this? Where's the doc?
+
+# phenomenology_layer.py
+if raw_score < -0.3:  # Magic threshold
+```
+
+After: Single source of truth with documentation
+```python
+# config/cognitive_parameters.py
+queue_aging_rate: float = 0.05  # Urgency increase per cycle (documented)
+phenomenology_valence_threat_threshold: float = -0.3  # Score below = THREAT
+```
+
+**Benefits:**
+1. All tunable values visible in one file
+2. Runtime parameter override via `CognitiveParameters.from_dict()`
+3. Validation ensures weights sum to 1.0
+4. Tier classification for evolution sensitivity
+
+---
+
+## Previous Session Summary (Feb 5 AM)
+
 ### Session: Cognitive Routing Phases 8-11 Implementation + Integration Fix
 
 **Started**: ~8:00 AM

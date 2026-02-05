@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from config.cognitive_parameters import DEFAULT_COGNITIVE_PARAMS as _PARAMS
+
 if TYPE_CHECKING:
     from engines.cognition.blackboard import Blackboard
 
@@ -80,12 +82,13 @@ class UrgencyScore:
         Weighted combination with max of critical factors.
 
         Cascade risk alone can make something urgent.
+        Uses weights from CognitiveParameters.
         """
         weighted = (
-            self.budget_pressure * 0.4 +
-            self.volatility * 0.3 +
-            self.blocking_factor * 0.2 +
-            self.cascade_risk * 0.1
+            self.budget_pressure * _PARAMS.urgency_budget_weight +
+            self.volatility * _PARAMS.urgency_volatility_weight +
+            self.blocking_factor * _PARAMS.urgency_blocking_weight +
+            self.cascade_risk * _PARAMS.urgency_cascade_weight
         )
         # Cascade risk is critical - can override weighted average
         return max(weighted, self.cascade_risk)
@@ -93,7 +96,7 @@ class UrgencyScore:
     @property
     def is_urgent(self) -> bool:
         """Threshold for urgency classification."""
-        return self.total > 0.6
+        return self.total > _PARAMS.urgency_threshold
 
 
 @dataclass
@@ -116,18 +119,18 @@ class ImportanceScore:
 
     @property
     def total(self) -> float:
-        """Weighted combination emphasizing win probability."""
+        """Weighted combination emphasizing win probability. Uses CognitiveParameters."""
         return (
-            self.win_probability_delta * 0.4 +
-            self.theory_validation * 0.3 +
-            self.action_unlock * 0.2 +
-            self.edge_trust * 0.1
+            self.win_probability_delta * _PARAMS.importance_win_prob_weight +
+            self.theory_validation * _PARAMS.importance_theory_weight +
+            self.action_unlock * _PARAMS.importance_unlock_weight +
+            self.edge_trust * _PARAMS.importance_trust_weight
         )
 
     @property
     def is_important(self) -> bool:
         """Threshold for importance classification."""
-        return self.total > 0.5
+        return self.total > _PARAMS.importance_threshold
 
 
 @dataclass
@@ -198,7 +201,7 @@ RUNG_UNLOCK_SCORES: Dict[str, float] = {
 }
 
 # Default unlock score for unmapped rungs
-DEFAULT_UNLOCK_SCORE = 0.3
+DEFAULT_UNLOCK_SCORE = _PARAMS.default_rung_unlock_score
 
 
 # =============================================================================
@@ -221,9 +224,9 @@ class EisenhowerLayer:
     - Supports iterative gating (re-evaluate after each execution)
     """
 
-    # --- Configuration Constants ---
-    MAX_SCHEDULED_QUEUE: int = 10  # Prevent unbounded growth
-    AGING_RATE: float = 0.05       # Urgency increase per cycle
+    # --- Configuration from CognitiveParameters ---
+    MAX_SCHEDULED_QUEUE: int = _PARAMS.scheduled_queue_max
+    AGING_RATE: float = _PARAMS.queue_aging_rate
 
     def __init__(self, blackboard: 'Blackboard'):
         """
