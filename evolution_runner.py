@@ -1173,7 +1173,11 @@ class EvolutionRunner:
                 levels = current_levels
                 state_str = str(obs.state).replace('GameState.', '') if obs else '?'
                 level_indicator = ' [LEVEL UP!]' if level_up else ''
-                print(f"    [{actions_taken:3d}] {action.name:8s} -> levels={levels}/{win_levels} state={state_str}{level_indicator}")
+                # Show coordinates for ACTION6
+                coord_str = ''
+                if action.name == 'ACTION6' and action_data:
+                    coord_str = f" @ ({action_data.get('x', '?')}, {action_data.get('y', '?')})"
+                print(f"    [{actions_taken:3d}] {action.name:8s}{coord_str} -> levels={levels}/{win_levels} state={state_str}{level_indicator}")
 
             # Check for game end
             if obs and obs.state == GameState.WIN:

@@ -472,6 +472,12 @@ class GameLoop:
                 # Fallback: center of screen
                 data = {"x": 32, "y": 32}
 
+            # Log ACTION6 with coordinates when verbose
+            self._log(f"Action #{self._action_count + 1}: {action.name} @ ({data['x']}, {data['y']})")
+        else:
+            # Log non-coordinate actions when verbose
+            self._log(f"Action #{self._action_count + 1}: {action.name}")
+
         return self._env.step(action, data=data)
 
     def _update_state(self, obs: Observation, outcome: ActionOutcome) -> None:
