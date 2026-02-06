@@ -175,6 +175,49 @@ class TraceQuery:
 
 
 # =============================================================================
+# DATABASE ADAPTER
+# =============================================================================
+
+class _CursorProxy:
+    """Proxy for cursor-like result from DatabaseInterface.execute_query."""
+
+    def __init__(self, results: list):
+        self._results = results
+        self.rowcount = len(results)
+
+    def fetchone(self):
+        return self._results[0] if self._results else None
+
+    def fetchall(self):
+        return self._results
+
+
+class _DatabaseInterfaceAdapter:
+    """Adapts DatabaseInterface (execute_query) to sqlite3-like interface (execute).
+
+    The RoutingTraceStore was written for raw sqlite3 connections that have
+    .execute() returning cursors. DatabaseInterface provides .execute_query()
+    which returns List[Dict]. This adapter bridges the gap.
+    """
+
+    def __init__(self, db_interface: Any):
+        self._db = db_interface
+
+    def execute(self, sql: str, params: tuple = ()) -> '_CursorProxy':
+        """Execute SQL via DatabaseInterface.execute_query, return cursor-like proxy."""
+        try:
+            results = self._db.execute_query(sql, params)
+            # Convert List[Dict] to List[tuple] for positional row access
+            if results and isinstance(results[0], dict):
+                rows = [tuple(r.values()) for r in results]
+            else:
+                rows = results or []
+            return _CursorProxy(rows)
+        except Exception:
+            return _CursorProxy([])
+
+
+# =============================================================================
 # ROUTING TRACE STORE
 # =============================================================================
 
@@ -190,8 +233,18 @@ class RoutingTraceStore:
     """
 
     def __init__(self, db_interface: Optional[Any] = None):
-        """Initialize trace store."""
+        """Initialize trace store.
+
+        Args:
+            db_interface: Either a raw sqlite3 connection (has .execute)
+                         or a DatabaseInterface (has .execute_query).
+                         Wraps DatabaseInterface to provide .execute compatibility.
+        """
         self.db = db_interface
+
+        # If the db has execute_query but not execute, wrap it for compatibility
+        if self.db and not hasattr(self.db, 'execute') and hasattr(self.db, 'execute_query'):
+            self.db = _DatabaseInterfaceAdapter(self.db)
 
         # Ensure schema exists
         if self.db:
@@ -212,7 +265,6 @@ class RoutingTraceStore:
         if not self.db:
             return
         try:
-            # Execute each statement in the schema
             for statement in ROUTING_TRACES_SCHEMA.split(';'):
                 statement = statement.strip()
                 if statement:

@@ -209,7 +209,7 @@ class EpistemicTracker:
                     old_quadrant, new_quadrant, result
                 ),
                 timestamp=self.current_state.timestamp,
-                trigger_slot=result.slot_name,
+                trigger_slot=getattr(result, 'slot_name', None),
                 trigger_confidence=result.confidence,
                 questions_raised=[q.question_id for q in questions_raised],
                 questions_answered=questions_answered,
@@ -230,10 +230,12 @@ class EpistemicTracker:
 
     def _update_kk(self, rung_name: str, result: RungResult) -> None:
         """Update KK (Known Knowns) based on result confidence."""
-        if result.confidence > self.KK_CONFIDENCE_THRESHOLD and result.slot_name:
-            self.current_state.known_knowns[result.slot_name] = KnownFact(
-                slot_name=result.slot_name,
-                value=result.value,
+        slot_name = getattr(result, 'slot_name', None)
+        value = getattr(result, 'value', None)
+        if result.confidence > self.KK_CONFIDENCE_THRESHOLD and slot_name:
+            self.current_state.known_knowns[slot_name] = KnownFact(
+                slot_name=slot_name,
+                value=value,
                 confidence=result.confidence,
                 source_rung=rung_name,
                 verified_at=self.current_state.timestamp
@@ -274,14 +276,15 @@ class EpistemicTracker:
                     del self.current_state.known_unknowns[q_id]
 
         # Also check explicit answers from result
-        for q_id in result.answers_questions:
+        # Use getattr for robustness against legacy RungResult objects
+        for q_id in getattr(result, 'answers_questions', []):
             if q_id in self.current_state.known_unknowns:
                 self.current_state.known_unknowns[q_id].mark_answered(result.confidence)
                 answered.append(q_id)
                 del self.current_state.known_unknowns[q_id]
 
         # Add new questions raised by this rung
-        for question in result.raises_questions:
+        for question in getattr(result, 'raises_questions', []):
             self.current_state.known_unknowns[question.question_id] = question
             raised.append(question)
 
@@ -329,14 +332,17 @@ class EpistemicTracker:
             self.current_state.uu_estimate *= self.UU_DECAY_RATE
 
         # Surprises increase UU (we found something unexpected)
-        if result.surprise_level > self.SURPRISE_THRESHOLD:
+        # Use getattr for robustness against legacy RungResult objects
+        surprise_level = getattr(result, 'surprise_level', 0.0)
+        if surprise_level > self.SURPRISE_THRESHOLD:
             self.current_state.uu_estimate = min(
                 1.0,
                 self.current_state.uu_estimate + 0.2
             )
 
         # Contradictions significantly increase UU
-        if result.contradiction_detected:
+        contradiction_detected = getattr(result, 'contradiction_detected', False)
+        if contradiction_detected:
             self.current_state.uu_estimate = min(
                 1.0,
                 self.current_state.uu_estimate + 0.3
@@ -371,17 +377,21 @@ class EpistemicTracker:
     ) -> str:
         """Infer human-readable reason for transition."""
         key = (from_q, to_q)
+        # Use getattr for robustness against legacy RungResult objects
+        raises_questions = getattr(result, 'raises_questions', [])
+        rung_name = getattr(result, 'rung_name', 'unknown')
+        contradiction_with = getattr(result, 'contradiction_with', None)
 
         if key == (RumsfeldQuadrant.UU, RumsfeldQuadrant.KU):
-            return f"Found question: {result.raises_questions[0].description if result.raises_questions else 'unknown'}"
+            return f"Found question: {raises_questions[0].description if raises_questions else 'unknown'}"
         elif key == (RumsfeldQuadrant.KU, RumsfeldQuadrant.KK):
             return f"Answered question with confidence {result.confidence:.2f}"
         elif key == (RumsfeldQuadrant.UK, RumsfeldQuadrant.KK):
-            return f"Retrieved cached knowledge from {result.rung_name}"
+            return f"Retrieved cached knowledge from {rung_name}"
         elif key == (RumsfeldQuadrant.KK, RumsfeldQuadrant.KU):
             return f"Mild contradiction - confidence dropped"
         elif key == (RumsfeldQuadrant.KK, RumsfeldQuadrant.UU):
-            return f"Severe contradiction with {result.contradiction_with or 'previous belief'}"
+            return f"Severe contradiction with {contradiction_with or 'previous belief'}"
         elif key == (RumsfeldQuadrant.UU, RumsfeldQuadrant.UK):
             return f"Discovered untapped cached knowledge"
         else:

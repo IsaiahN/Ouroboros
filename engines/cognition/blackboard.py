@@ -1037,6 +1037,14 @@ class Blackboard:
             if slot.state == SlotState.POPULATED
         }
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Export Blackboard state as a dictionary snapshot.
+
+        Returns a dict of slot_name -> value for all populated slots,
+        suitable for search context snapshots and debugging.
+        """
+        return self.to_context()
+
     # =========================================================================
     # Edge Trust Management
     # =========================================================================

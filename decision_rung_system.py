@@ -7245,17 +7245,22 @@ class DecisionRungSystem:
 
     def _decide_cognitive(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
         """
-        Cognitive router strategy with transition-driven algorithm switching.
+        Cognitive routing strategy - full pipeline as described in architecture.
 
-        This is the Phase 4 integration of the cognitive routing system.
-        It uses the CognitiveRouter for intelligent, transition-based
-        algorithm selection instead of static orderings.
+        The cognitive router IS the decision system. It:
+        1. Compresses state via phenomenology (FeltState)
+        2. Assesses knowledge via epistemic tracker (Rumsfeld quadrant)
+        3. Selects search strategy via meta-planner
+        4. Prioritizes by urgency x importance (Eisenhower)
+        5. Executes the winning rung and records trajectory
 
-        Key features:
-        - Tracks epistemic state (KK/KU/UK/UU quadrants)
-        - Switches algorithms on quadrant transitions
-        - Uses hysteresis to prevent thrashing
-        - Falls back to static ordering on catastrophic failure
+        This method is a thin integration layer that:
+        - Checks emergency rungs first (safety invariant)
+        - Provides a rung_executor that properly bridges legacy rungs
+          to the cognitive RungResult protocol (with epistemic data)
+        - Extracts the actual ACTION string from DecisionResult.action_value
+          without re-executing rungs (the executor already ran them)
+        - Handles ACTION6 coordinates as a final safety net
 
         Falls back to context_adaptive strategy if CognitiveRouter is unavailable.
         """
@@ -7265,10 +7270,21 @@ class DecisionRungSystem:
             logger.warning("[RUNG-SYSTEM] CognitiveRouter unavailable, falling back to context_adaptive")
             return self._decide_context_adaptive(game_state, context)
 
+        # =====================================================================
+        # EMERGENCY RUNGS - Always checked first (safety invariant)
+        # These are checked BEFORE the cognitive router because they represent
+        # hard safety constraints (infinite loop breaking, oscillation detection)
+        # that should override any cognitive strategy.
+        # =====================================================================
+        emergency_result = self._check_emergency_rungs(game_state, context)
+        if emergency_result is not None:
+            return emergency_result
+
         # Initialize router if needed (once per game)
         game_id = context.get('game_id', context.get('scorecard_id', 'unknown'))
         if not hasattr(self, '_cognitive_game_id') or self._cognitive_game_id != game_id:
-            # Build node structure from rungs
+            # Build node structure from rungs (excluding emergency rungs -
+            # they're handled above, not part of the cognitive search space)
             nodes = {
                 rung.name: {
                     'name': rung.name,
@@ -7276,101 +7292,145 @@ class DecisionRungSystem:
                     'priority': rung.get_priority(),
                 }
                 for rung in self.rungs
+                if rung.name not in self.EMERGENCY_RUNG_NAMES
             }
-            edges: Dict[str, List[str]] = {}  # Can be populated from rung dependencies
+            edges: Dict[str, List[str]] = {}  # Populated by edge inference in future
             router.initialize(nodes, edges, game_id)
             self._cognitive_game_id = game_id
 
-        # Create rung executor that wraps our rungs
+        # =====================================================================
+        # RUNG EXECUTOR - Bridges legacy rungs to cognitive RungResult protocol
+        #
+        # This closure evaluates a legacy rung and converts its output to the
+        # cognitive RungResult format. Key design decisions:
+        #
+        # 1. The actual ACTION string goes into RungResult.value so the
+        #    cognitive router can carry it through to DecisionResult.action_value
+        #    without needing to re-execute the rung.
+        #
+        # 2. Epistemic data is extracted from the legacy result where possible:
+        #    - contradiction_detected from metadata
+        #    - surprise_level from confidence inversion (low confidence = surprise)
+        #    - The cognitive router's epistemic tracker uses these signals to
+        #      drive quadrant transitions (KK->KU on contradiction, etc.)
+        #
+        # 3. Rung metadata (coordinates, provenance) is cached in
+        #    _cognitive_last_rung_metadata so _decide_cognitive can attach it
+        #    to the final output without re-evaluation.
+        # =====================================================================
+        self._cognitive_last_rung_metadata: Dict[str, Any] = {}
+        self._cognitive_last_winning_rung: Optional[DecisionRung] = None
+
         def rung_executor(rung_name: str, _game_state_dict: Dict) -> Any:
-            """Execute a rung and convert to RungResult format."""
+            """Execute a legacy rung and bridge to cognitive RungResult."""
             rung = next((r for r in self.rungs if r.name == rung_name), None)
             if rung is None or not rung.enabled:
-                # Return minimal result for unknown/disabled rungs
                 if _RungResult_Cognitive:
                     return _RungResult_Cognitive(rung_name=rung_name, confidence=0.0)
                 return None
 
-            # Execute the rung
-            result = rung.evaluate(game_state, context)
+            # Execute the rung ONCE - this is the only evaluation
+            try:
+                result = rung.evaluate(game_state, context)
+            except Exception as eval_err:
+                logger.debug(f"[RUNG-EXECUTOR] {rung_name} evaluate() failed: {eval_err}")
+                if _RungResult_Cognitive:
+                    return _RungResult_Cognitive(rung_name=rung_name, confidence=0.0)
+                return None
 
-            # Convert to cognitive RungResult if available
+            # Cache the winning rung and metadata for post-processing
+            if result.action and result.confidence > 0:
+                self._cognitive_last_winning_rung = rung
+                self._cognitive_last_rung_metadata = result.metadata or {}
+
+            # Extract epistemic signals from legacy result
+            metadata = result.metadata or {}
+            contradiction_detected = metadata.get('contradiction_detected', False)
+            # Low confidence on a rung that usually succeeds = surprise
+            surprise_level = max(0.0, 1.0 - result.confidence) if result.action else 0.0
+
             if _RungResult_Cognitive:
                 return _RungResult_Cognitive(
                     rung_name=rung_name,
-                    slot_name=None,  # Would need extraction from result.metadata
-                    value=result.action,
+                    slot_name=metadata.get('slot_name'),
+                    value=result.action,  # Actual ACTION string (e.g., 'ACTION3')
                     confidence=result.confidence,
-                    raises_questions=[],
+                    raises_questions=[],  # Legacy rungs don't produce these yet
                     answers_questions=[],
-                    surprise_level=0.0,
-                    contradiction_detected=False,
+                    surprise_level=surprise_level,
+                    contradiction_detected=contradiction_detected,
+                    contradiction_with=metadata.get('contradiction_with'),
                 )
             return result
 
-        # Run the cognitive router
+        # =====================================================================
+        # RUN THE COGNITIVE ROUTER
+        # The router handles the full pipeline:
+        #   Phenomenology -> Epistemic -> Meta-Planner -> Eisenhower -> Execute
+        # =====================================================================
         try:
             decision_result = router.decide(
                 game_state={'frame': getattr(game_state, 'frame', None), **context},
                 rung_executor=rung_executor
             )
 
-            # Extract action from decision result
-            action = decision_result.action
+            # Extract the actual ACTION string - no re-execution needed
+            # The rung_executor already evaluated the rung and stored the
+            # action in RungResult.value, which flows through to
+            # DecisionResult.action_value
+            action = decision_result.action_value  # e.g., 'ACTION3'
+            rung_name = decision_result.action      # e.g., 'survey'
             confidence = decision_result.confidence
-            reasoning = decision_result.reasoning
+            reasoning = f"[COGNITIVE:{rung_name}] {decision_result.reasoning}"
 
-            # If action is a rung name, we need to get the actual action from that rung
-            if action in self.RUNG_REGISTRY:
-                # The cognitive router returned a rung name - execute it to get the action
-                rung = next((r for r in self.rungs if r.name == action), None)
-                if rung and rung.enabled:
-                    result = rung.evaluate(game_state, context)
-                    if result.action:
-                        action = result.action
-                        reasoning = f"[COGNITIVE:{rung.name}] {result.reason}"
-                        confidence = result.confidence
-                        self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
-                        rung.record_outcome(was_accepted=True)
+            # Track the winning rung for feedback
+            if self._cognitive_last_winning_rung is not None:
+                self._last_winning_rung = self._cognitive_last_winning_rung
+                self.rung_wins[rung_name] = self.rung_wins.get(rung_name, 0) + 1
+                self._cognitive_last_winning_rung.record_outcome(was_accepted=True)
 
-            # Validate action is available
-            if action and not is_action_available(action, context):
-                # Fall back to weighted choice
+            # Safety net: validate action is a real ACTION and is available
+            if not action or not is_action_available(action, context):
+                # The router found a rung but it didn't produce a usable action
+                # (e.g., filter rung, or action not available in this game)
                 accumulated_weights = get_available_action_weights(context, 1.0)
                 action = self._weighted_random_choice(accumulated_weights, context)
-                reasoning = f"[COGNITIVE] Fallback: suggested action unavailable"
+                reasoning = f"[COGNITIVE:{rung_name}] Fallback: no usable action from router"
 
-            # Default to random action if nothing found
-            if not action or action not in [f'ACTION{i}' for i in range(1, 8)]:
+            # Final format check (defense-in-depth)
+            if action not in {f'ACTION{i}' for i in range(1, 8)}:
                 action = get_random_available_action(context)
-                reasoning = f"[COGNITIVE] Random fallback after router"
+                reasoning = f"[COGNITIVE] Random fallback: invalid action format"
 
             # CRITICAL: If ACTION6, ensure coordinates
             if action == 'ACTION6':
-                coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
+                # Use cached metadata from the rung executor if it has coords
+                coords = self._cognitive_last_rung_metadata
+                if 'x' not in coords or 'y' not in coords:
+                    coords = Action6CoordinateProvider.get_coordinates(
+                        context, self._engine_registry, game_state
+                    )
                 self.last_decision_metadata = coords
-                reasoning += f" [coords: ({coords['x']},{coords['y']})]"
+                reasoning += f" [coords: ({coords.get('x', 32)},{coords.get('y', 32)})]"
 
             # RECORD DECISION TRACE (full architecture compliance)
-            # This captures WHY the decision was made for archaeology/debugging
             if self._routing_trace_store is not None:
                 try:
                     trace_id = self._routing_trace_store.record_trace(
                         game_id=game_id,
                         agent_id=context.get('agent_id', 'unknown'),
                         path=decision_result.path,
-                        algorithm_used=decision_result.final_quadrant,  # Algorithm corresponds to quadrant
+                        algorithm_used=decision_result.final_quadrant,
                         final_action=action,
                         final_confidence=confidence,
-                        initial_quadrant="UU",  # Would need to track from router
+                        initial_quadrant="UU",
                         final_quadrant=decision_result.final_quadrant,
-                        quadrant_transitions=[],  # Could extract from router history
-                        algorithms_history=[],  # Could extract from router
+                        quadrant_transitions=[],
+                        algorithms_history=[],
                         backtrack_count=0,
                         iterations=decision_result.iterations,
                         decision_latency_ms=decision_result.time_elapsed * 1000
                     )
-                    # Store trace_id for outcome recording later
                     self.last_decision_metadata['trace_id'] = trace_id
                     logger.debug(f"[COGNITIVE] Recorded trace {trace_id}")
                 except Exception as trace_err:

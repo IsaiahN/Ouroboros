@@ -55,6 +55,14 @@ from engines.cognition.search_context import (
     create_search_context,
 )
 
+# Graph evolution for edge trust tracking (Phase 7+11)
+try:
+    from engines.reasoning.graph_evolution import GraphEvolution as _GraphEvolution
+    _GRAPH_EVOLUTION_AVAILABLE = True
+except ImportError:
+    _GraphEvolution = None
+    _GRAPH_EVOLUTION_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -221,7 +229,7 @@ class RouterState:
 @dataclass
 class DecisionResult:
     """Result of a decision cycle."""
-    # Selected action (typically rung name)
+    # Selected rung name (the cognitive unit that won)
     action: str
 
     # Reasoning for the decision
@@ -229,6 +237,15 @@ class DecisionResult:
 
     # Confidence in the decision
     confidence: float
+
+    # The actual ACTION string (e.g., 'ACTION3') produced by the winning rung.
+    # This bridges the cognitive plane (rung names, epistemic tracking) with
+    # the action plane (ACTION1-7 sent to ARC API). When present, callers
+    # should use this instead of re-executing the rung named in `action`.
+    action_value: Optional[str] = None
+
+    # Metadata from the winning rung (e.g., coordinates for ACTION6)
+    action_metadata: Dict[str, Any] = field(default_factory=dict)
 
     # Statistics
     iterations: int = 0
@@ -251,6 +268,8 @@ class DecisionResult:
         """Serialize to dictionary."""
         return {
             'action': self.action,
+            'action_value': self.action_value,
+            'action_metadata': self.action_metadata,
             'reasoning': self.reasoning,
             'confidence': self.confidence,
             'iterations': self.iterations,
@@ -320,6 +339,10 @@ class CognitiveRouter:
 
         # Phase 9: Phenomenology Layer for compressed state feedback
         self.phenomenology = PhenomenologyLayer(self.blackboard)
+
+        # Phase 7+11: Graph Evolution for edge trust and crystallization
+        # Tracks traversals with FeltState context for intelligent path learning
+        self.graph_evolution = _GraphEvolution() if _GRAPH_EVOLUTION_AVAILABLE else None
 
         # Graph structure
         self._nodes: Dict[str, Dict[str, Any]] = {}
@@ -581,6 +604,16 @@ class CognitiveRouter:
             # Execute the selected rung
             result = self._execute_rung(rung_name, game_state, rung_executor)
 
+            # Phase 7+11: Record traversal with FeltState context for graph evolution
+            if self.graph_evolution and len(self._state.path) > 0:
+                prev_rung = self._state.path[-1]
+                self.graph_evolution.record_traversal(
+                    from_rung=prev_rung,
+                    to_rung=rung_name,
+                    success=result.confidence > 0.5,
+                    felt_state=felt
+                )
+
             # Update state
             self._state.path.append(rung_name)
             self._state.visited_rungs.add(rung_name)
@@ -747,10 +780,24 @@ class CognitiveRouter:
         Execute a rung and get the result.
 
         If a rung_executor is provided, use it. Otherwise, create a
-        synthetic result for testing.
+        synthetic result for testing. Always ensures the result is a
+        proper cognitive RungResult (adapts legacy results if needed).
         """
         if rung_executor:
-            return rung_executor(rung_name, game_state)
+            result = rung_executor(rung_name, game_state)
+            # Ensure we have a cognitive RungResult - adapt legacy if needed
+            if result is None:
+                return RungResult(rung_name=rung_name, confidence=0.0)
+            if not hasattr(result, 'answers_questions'):
+                # Legacy RungResult - adapt it
+                return RungResult(
+                    rung_name=rung_name,
+                    value=getattr(result, 'action', None),
+                    confidence=getattr(result, 'confidence', 0.0),
+                    surprise_level=max(0.0, 1.0 - getattr(result, 'confidence', 0.0)),
+                    contradiction_detected=getattr(result, 'metadata', {}).get('contradiction_detected', False) if isinstance(getattr(result, 'metadata', None), dict) else False,
+                )
+            return result
 
         # Create synthetic result for testing
         return RungResult(
@@ -869,11 +916,22 @@ class CognitiveRouter:
     # -------------------------------------------------------------------------
 
     def _commit_decision(self, result: RungResult) -> DecisionResult:
-        """Commit to a decision based on high-confidence result."""
+        """Commit to a decision based on high-confidence result.
+
+        The result.value field carries the actual ACTION string (e.g., 'ACTION3')
+        produced by the rung. This is set by the rung_executor closure in
+        _decide_cognitive, which evaluates the legacy rung and captures its output.
+        """
+        # Extract actual ACTION string from the rung result's value field
+        action_value = None
+        if isinstance(result.value, str) and result.value.startswith('ACTION'):
+            action_value = result.value
+
         return DecisionResult(
             action=result.rung_name,
             reasoning=f"High confidence ({result.confidence:.2f}) from {result.rung_name}",
             confidence=result.confidence,
+            action_value=action_value,
             iterations=self._state.iteration,
             rungs_evaluated=len(self._state.visited_rungs),
             transitions_count=len(self._state.transitions),
@@ -884,10 +942,14 @@ class CognitiveRouter:
 
     def _finalize_decision(self, algorithm_switches: int) -> DecisionResult:
         """Finalize decision after loop ends."""
+        action_value = None
         if self._state.best_result:
             action = self._state.best_result.rung_name
             confidence = self._state.best_result.confidence
             reasoning = f"Best result from {action} ({confidence:.2f})"
+            # Extract actual ACTION string if available
+            if isinstance(self._state.best_result.value, str) and self._state.best_result.value.startswith('ACTION'):
+                action_value = self._state.best_result.value
         else:
             action = self._state.path[-1] if self._state.path else "survey"
             confidence = self._state.max_confidence
@@ -897,6 +959,7 @@ class CognitiveRouter:
             action=action,
             reasoning=reasoning,
             confidence=confidence,
+            action_value=action_value,
             iterations=self._state.iteration,
             rungs_evaluated=len(self._state.visited_rungs),
             transitions_count=len(self._state.transitions),
@@ -938,10 +1001,56 @@ class CognitiveRouter:
         return context
 
     def _update_blackboard_from_game_state(self, game_state: Dict[str, Any]) -> None:
-        """Update blackboard from game state."""
+        """Update blackboard from game state.
+
+        This bridges the context dict (populated by ContextBuilder) to the
+        blackboard slots that cognitive components (Eisenhower, Phenomenology,
+        Epistemic Tracker) expect. It handles:
+
+        1. Direct pass-through of context keys -> blackboard slots
+        2. Aliasing context keys to cognitive slot names where they differ
+        3. Computing derived slots that cognitive components need
+        """
+        # Pass through all context keys (skip large data)
         for key, value in game_state.items():
-            if key not in ('frame', 'raw_frame'):  # Skip large data
+            if key not in ('frame', 'raw_frame'):
                 self.blackboard.slot(key, value)
+
+        # =====================================================================
+        # ALIASING: Context keys -> Cognitive slot names
+        # The context builder uses different names than cognitive components
+        # =====================================================================
+
+        # Eisenhower reads 'actions_taken' but context passes 'action_count'
+        if 'action_count' in game_state and self.blackboard.get('actions_taken') is None:
+            self.blackboard.slot('actions_taken', game_state['action_count'])
+
+        # =====================================================================
+        # DERIVED SLOTS: Computed from raw context for cognitive components
+        # =====================================================================
+
+        # Budget pressure as a fraction (for phenomenology)
+        action_budget = game_state.get('action_budget', 400)
+        action_count = game_state.get('action_count', 0)
+        if action_budget > 0:
+            budget_pressure = action_count / action_budget
+            self.blackboard.slot('budget_pressure', budget_pressure)
+            # Flag critical budget for phenomenology THREAT detection
+            if budget_pressure > 0.85:
+                self.blackboard.slot('action_budget_critical', True)
+
+        # Level progress for phenomenology external validation
+        levels_completed = game_state.get('levels_completed', 0)
+        total_levels = game_state.get('total_levels', 1)
+        if total_levels > 0:
+            self.blackboard.slot('level_progress', levels_completed / total_levels)
+
+        # Score tracking for phenomenology
+        current_score = game_state.get('current_score', 0)
+        previous_score = self.blackboard.get('_prev_score', 0)
+        score_delta = current_score - previous_score
+        self.blackboard.slot('score_delta', score_delta)
+        self.blackboard.slot('_prev_score', current_score)
 
     # -------------------------------------------------------------------------
     # FRONTIER MANAGEMENT
@@ -978,8 +1087,14 @@ class CognitiveRouter:
         """
         Get edge trust score for a rung from graph evolution.
 
-        Edge trust represents historical success rate of this rung.
-        Used by Eisenhower layer for importance calculation.
+        Edge trust represents historical success rate of traversals
+        TO this rung. Used by Eisenhower layer for importance calculation.
+
+        Priority order:
+        1. Graph evolution (real learned trust from traversal history)
+        2. Blackboard override (set by external systems)
+        3. Node priority heuristic (from rung metadata)
+        4. Neutral default (0.5)
 
         Args:
             rung_name: Name of the rung to get trust for
@@ -987,20 +1102,27 @@ class CognitiveRouter:
         Returns:
             Trust score 0.0-1.0 (default 0.5 if unknown)
         """
-        # Try to get from blackboard (set by graph evolution)
+        # Priority 1: Graph evolution with real traversal data
+        if self.graph_evolution and self._state.path:
+            prev_rung = self._state.path[-1]
+            trust = self.graph_evolution.get_edge_trust(prev_rung, rung_name)
+            if trust > 0.0:  # 0.0 means no data, not low trust
+                return trust
+
+        # Priority 2: Blackboard override (set by external systems)
         edge_trust = self.blackboard.get(f'edge_trust_{rung_name}')
         if edge_trust is not None:
             return float(edge_trust)
 
-        # Try to get from precomputed data
+        # Priority 3: Node priority heuristic
         if self._precomputed_data:
-            # Check if rung has high historical success
             node_info = self._nodes.get(rung_name, {})
             priority = node_info.get('priority', 50)
-            # Convert priority (0-100) to trust (0-1)
-            return priority / 100.0
+            # Convert priority (0=highest, 100=lowest) to trust (0-1)
+            # Lower priority number = higher trust
+            return max(0.1, 1.0 - priority / 100.0)
 
-        # Default trust for unknown rungs
+        # Priority 4: Neutral default
         return 0.5
 
     # -------------------------------------------------------------------------
@@ -1010,7 +1132,7 @@ class CognitiveRouter:
     def _process_mutations(self, context: SearchContext) -> None:
         """Process mutation requests from algorithms."""
         mutations = context.get_pending_mutations()
-        context.clear_pending_mutations()
+        # get_pending_mutations() already clears the list internally
 
         # Sort by priority
         mutations.sort(key=lambda m: -m.priority)
@@ -1051,6 +1173,11 @@ class CognitiveRouter:
                 self.phenomenology.previous_felt.to_dict()
                 if self.phenomenology.previous_felt else None
             ),
+            # Phase 7+11: Graph evolution stats
+            'graph_evolution': {
+                'total_edges': len(self.graph_evolution.edges) if self.graph_evolution else 0,
+                'crystallized_edges': len(self.graph_evolution._crystallized_paths) if self.graph_evolution else 0,
+            },
         }
 
     # -------------------------------------------------------------------------
