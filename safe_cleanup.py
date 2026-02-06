@@ -46,6 +46,7 @@ WHAT THIS CLEANS:
 - Old sensation learning events (keep 200,000)
 - Excessive navigation state history (keep 50,000)
 - Old action traces (keep 500,000)
+- Old player state history (keep 100,000 - dominates DB by volume)
 - Raw observation data from COMPLETED generations
 - Stale patterns (50+ generations without observation)
 
@@ -141,6 +142,7 @@ class SafeDatabaseCleaner:
         self.weaving_reports_retention = 50000
         self.cohort_wisdom_retention_days = 7
         self.failure_hypotheses_retention = 10000
+        self.player_state_history_retention = 100000  # 9.4M rows at 9.6GB - this is the biggest table
 
         # =================================================================
         # RAW OBSERVATION DATA RETENTION
@@ -233,6 +235,11 @@ class SafeDatabaseCleaner:
         if verbose:
             print('\n7. Old agent operating modes')
         results['tables_cleaned']['agent_operating_modes'] = self._clean_operating_modes(c, conn, dry_run, verbose)
+
+        # 7b. Player state history (HUGE - 97% of database by volume)
+        if verbose:
+            print('\n7b. Old player state history (symbolic reasoning raw data)')
+        results['tables_cleaned']['player_state_history'] = self._clean_player_state_history(c, conn, dry_run, verbose)
 
         # 8. Two-Streams: Decision weaving reports
         if verbose:
@@ -625,6 +632,55 @@ class SafeDatabaseCleaner:
             if verbose:
                 print(f'   Deleted: {excess:,} rows')
             return {'found': excess, 'deleted': excess}
+        elif excess > 0 and verbose:
+            print(f'   Would delete: {excess:,} rows')
+
+        return {'found': excess, 'deleted': 0}
+
+    def _clean_player_state_history(self, c, conn, dry_run, verbose):
+        """Keep only the most recent player state history.
+
+        This table dominates the database (97% by volume in diagnosis).
+        It stores per-action symbolic reasoning data. Keep recent rows
+        for active learning, older data has been processed into patterns.
+        """
+        try:
+            c.execute('SELECT COUNT(*) FROM player_state_history')
+            total = c.fetchone()[0]
+        except Exception:
+            if verbose:
+                print('   Table does not exist (skip)')
+            return {'found': 0, 'deleted': 0}
+
+        excess = max(0, total - self.player_state_history_retention)
+
+        if verbose:
+            print(f'   Total: {total:,}, Excess: {excess:,}')
+
+        if not dry_run and excess > 0:
+            # Delete in batches to avoid locking the DB for too long
+            batch_size = 500000
+            total_deleted = 0
+            while total_deleted < excess:
+                batch_to_delete = min(batch_size, excess - total_deleted)
+                c.execute(f'''
+                    DELETE FROM player_state_history
+                    WHERE id IN (
+                        SELECT id FROM player_state_history
+                        ORDER BY created_at ASC
+                        LIMIT {batch_to_delete}
+                    )
+                ''')
+                conn.commit()
+                deleted_this_batch = c.rowcount
+                total_deleted += deleted_this_batch
+                if verbose:
+                    print(f'   Batch deleted: {deleted_this_batch:,} (total: {total_deleted:,}/{excess:,})')
+                if deleted_this_batch == 0:
+                    break
+            if verbose:
+                print(f'   Deleted: {total_deleted:,} rows')
+            return {'found': excess, 'deleted': total_deleted}
         elif excess > 0 and verbose:
             print(f'   Would delete: {excess:,} rows')
 

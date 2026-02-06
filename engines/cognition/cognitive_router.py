@@ -32,9 +32,8 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from engines.cognition.algorithms import SearchAlgorithm, get_algorithm
 from engines.cognition.blackboard import Blackboard, RumsfeldQuadrant
@@ -1051,13 +1050,50 @@ class CognitiveRouter:
             if result is None:
                 return RungResult(rung_name=rung_name, confidence=0.0)
             if not hasattr(result, 'answers_questions'):
-                # Legacy RungResult - adapt it
+                # Legacy RungResult - adapt it with proper epistemic signals
+                # CRITICAL FIX: The old adapter set surprise_level = 1 - confidence,
+                # which inflated uu_estimate on every low-confidence result,
+                # permanently trapping the router in UU quadrant.
+                #
+                # Fix: Derive epistemic signals from blackboard (external evidence)
+                # rather than just rung confidence (internal). Per architecture:
+                # "Balances internal signals with external validation."
+                raw_confidence = getattr(result, 'confidence', 0.0)
+                metadata = getattr(result, 'metadata', {}) or {}
+
+                # Boost confidence when external evidence confirms the action
+                frame_changed = self.blackboard.get('frame_changed', False)
+                score_delta = self.blackboard.get('score_delta', 0.0)
+                last_outcome = self.blackboard.get('last_outcome', 'neutral')
+
+                adapted_confidence = raw_confidence
+                if score_delta > 0:
+                    # Score improved - strong external validation
+                    adapted_confidence = max(adapted_confidence, 0.85)
+                elif frame_changed and last_outcome == 'positive':
+                    # Frame changed positively
+                    adapted_confidence = max(adapted_confidence, 0.7)
+                elif frame_changed:
+                    # At least something happened
+                    adapted_confidence = max(adapted_confidence, 0.4)
+
+                # Surprise comes from UNEXPECTED changes, not low confidence
+                # A routine low-confidence result is not surprising
+                surprise = 0.0
+                if score_delta < 0:
+                    surprise = 0.4  # Unexpected regression
+                elif last_outcome == 'death':
+                    surprise = 0.6  # Unexpected death
+                elif isinstance(metadata, dict) and metadata.get('contradiction_detected'):
+                    surprise = 0.5  # Contradiction found
+
                 return RungResult(
                     rung_name=rung_name,
+                    slot_name=f"rung_{rung_name}",  # Enable KK accumulation
                     value=getattr(result, 'action', None),
-                    confidence=getattr(result, 'confidence', 0.0),
-                    surprise_level=max(0.0, 1.0 - getattr(result, 'confidence', 0.0)),
-                    contradiction_detected=getattr(result, 'metadata', {}).get('contradiction_detected', False) if isinstance(getattr(result, 'metadata', None), dict) else False,
+                    confidence=adapted_confidence,
+                    surprise_level=surprise,
+                    contradiction_detected=metadata.get('contradiction_detected', False) if isinstance(metadata, dict) else False,
                 )
             return result
 
@@ -1393,6 +1429,42 @@ class CognitiveRouter:
         score_delta = current_score - previous_score
         self.blackboard.slot('score_delta', score_delta)
         self.blackboard.slot('_prev_score', current_score)
+
+        # =====================================================================
+        # EPISTEMIC SIGNAL ENRICHMENT
+        # Bridge game-state evidence into epistemic-compatible signals.
+        # Without these, the epistemic tracker stays in UU permanently
+        # because legacy rungs never produce slot_name or questions.
+        # =====================================================================
+        frame_changed = game_state.get('frame_changed', False)
+        last_outcome = game_state.get('last_outcome', 'neutral')
+
+        # Track consecutive productive actions (frame changes that matter)
+        productive_streak = self.blackboard.get('_productive_streak', 0)
+        if frame_changed and score_delta >= 0:
+            productive_streak += 1
+        else:
+            productive_streak = max(0, productive_streak - 1)
+        self.blackboard.slot('_productive_streak', productive_streak)
+
+        # Write working_theory slot based on game progress
+        # This is what the epistemic tracker reads as a KK fact
+        if levels_completed > 0:
+            self.blackboard.slot(
+                'working_theory_confirmed', True,
+                confidence=min(1.0, 0.5 + levels_completed * 0.15),
+                source_rung='game_evidence'
+            )
+
+        # Novelty detection for phenomenology salience
+        if score_delta > 0:
+            self.blackboard.slot('novelty_score', 0.8, source_rung='game_evidence')
+        elif frame_changed:
+            self.blackboard.slot('novelty_score', 0.3, source_rung='game_evidence')
+
+        # Strategy stability signal
+        if productive_streak > 5:
+            self.blackboard.slot('strategy_stability', 0.8, source_rung='game_evidence')
 
     # -------------------------------------------------------------------------
     # FRONTIER MANAGEMENT

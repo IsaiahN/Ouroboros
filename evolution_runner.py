@@ -413,10 +413,12 @@ class EvolutionRunner:
         level_before: int,
         level_after: int,
         is_game_over: bool,
+        coordinates: Optional[Dict] = None,
     ) -> None:
         """Record action trace with frame hash and score change.
 
         This is CRITICAL for learning - without this, the network has no memory.
+        Coordinates are stored for ACTION6 spatial learning.
         """
         try:
             # Compute frame hashes
@@ -435,19 +437,26 @@ class EvolutionRunner:
             except Exception:
                 pass
 
+            # Serialize coordinates for ACTION6
+            coords_json = None
+            if coordinates:
+                import json as json_lib
+                coords_json = json_lib.dumps(coordinates)
+
             # Record to database
             self.db.execute_query("""
                 INSERT INTO action_traces (
-                    session_id, game_id, action_number, timestamp,
+                    session_id, game_id, action_number, coordinates, timestamp,
                     frame_before, frame_after, frame_changed,
                     score_before, score_after, score_change,
                     level_number, resulted_in_game_over,
                     frame_hash, created_at
-                ) VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """, (
                 self._current_session_id,
                 game_id,
                 action_num,
+                coords_json,
                 frame_before_str,
                 frame_after_str,
                 1 if frame_changed else 0,
@@ -920,6 +929,7 @@ class EvolutionRunner:
         is_replay_mode = False  # True when following a known sequence
         stuck_count = 0  # Count of consecutive stuck frames
         tried_colors: set = set()  # Colors we've tried clicking (for ACTION6 exploration)
+        level_start_action_index = 0  # Track where current level's actions begin (for per-level winning sequences)
 
         # Check if game already has a winning sequence (for frontier_mode)
         try:
@@ -1208,6 +1218,7 @@ class EvolutionRunner:
                 level_before=prev_levels,
                 level_after=current_levels,
                 is_game_over=is_game_over,
+                coordinates=action_data,
             )
 
             # NEW: Record player state for symbolic reasoning (Phase 0-1)
@@ -1226,6 +1237,50 @@ class EvolutionRunner:
                 action_result=action_result,
                 level_number=current_levels,
             )
+
+            # CRITICAL FIX: Save per-level winning subsequences on level_up
+            # The architecture requires winning_sequences to store per-level
+            # solutions (winning_sequences table has level_number column).
+            # Previously, only full-game wins were saved, so the matching
+            # pipeline had nothing to replay and no knowledge transferred.
+            if level_up:
+                try:
+                    level_subsequence = action_sequence[level_start_action_index:]
+                    if level_subsequence:
+                        import json as json_lib
+                        level_seq_id = f"seq_{uuid.uuid4().hex[:12]}"
+                        game_type = game_id[:4] if len(game_id) >= 4 else game_id
+                        level_just_beaten = prev_levels + 1  # The level that was just completed
+
+                        self.db.execute_query("""
+                            INSERT INTO winning_sequences (
+                                sequence_id, game_id, game_type, level_number,
+                                action_sequence, total_actions, total_score,
+                                efficiency_score, agent_id, session_id,
+                                generation_discovered, is_active,
+                                initial_frame, final_frame, discovered_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', '[]', datetime('now'))
+                        """, (
+                            level_seq_id,
+                            game_id,
+                            game_type,
+                            level_just_beaten,
+                            json_lib.dumps(level_subsequence),
+                            len(level_subsequence),
+                            current_score,
+                            current_score / max(1, len(level_subsequence)),
+                            agent.agent_id,
+                            self._current_session_id or 'unknown',
+                            self.current_generation,
+                        ))
+                        if self.verbose:
+                            print(f"    [SEQ-SAVE] Level {level_just_beaten} sequence saved: {level_seq_id[:16]} ({len(level_subsequence)} actions)")
+                except Exception as e:
+                    if self.verbose:
+                        print(f"    [SEQ-ERR] Failed to save level sequence: {e}")
+
+                # Reset for next level
+                level_start_action_index = len(action_sequence)
 
             prev_levels = current_levels
             prev_score = current_score
