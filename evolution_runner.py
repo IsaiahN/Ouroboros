@@ -1163,6 +1163,12 @@ class EvolutionRunner:
             else:
                 stuck_count = 0  # Reset on successful action
 
+            # Reset stuck counter after emergency fires so the cognitive
+            # router gets a fresh window instead of being permanently locked
+            # out by the self-reinforcing emergency -> no-change -> emergency loop.
+            if 'reason' in dir() and reason and 'EMERGENCY' in reason:
+                stuck_count = 0
+
             # Update sequence position if following a sequence
             if is_replay_mode and active_sequence and sequence_position < len(active_sequence):
                 sequence_position += 1

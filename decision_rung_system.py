@@ -1694,12 +1694,28 @@ class InfiniteLoopBreakerRung(DecisionRung):
             stuck_count = context.get('recent_stuck_count', 0)
 
             if stuck_count >= 15:
-                # Emergency! Pick random action from available
-                action = get_random_available_action(context)
+                # Emergency! Prefer movement actions (ACTION1-4) that haven't
+                # already failed, since random ACTION6 clicks rarely unstick
+                # the game and can create a self-reinforcing emergency loop.
+                available = context.get('available_actions', [1, 2, 3, 4])
+                failed = context.get('failed_actions', set())
+                failed_nums = {int(a.replace('ACTION', '')) for a in failed if isinstance(a, str) and a.startswith('ACTION')}
+
+                # Priority 1: untried movement actions
+                movement = [a for a in available if a in (1, 2, 3, 4) and a not in failed_nums]
+                if movement:
+                    action = f'ACTION{random.choice(movement)}'
+                # Priority 2: any untried action
+                elif [a for a in available if a not in failed_nums]:
+                    action = f'ACTION{random.choice([a for a in available if a not in failed_nums])}'
+                # Priority 3: true last resort - anything available
+                else:
+                    action = get_random_available_action(context)
+
                 return RungResult(
                     action=action,
                     confidence=0.95,
-                    reason=f"EMERGENCY: Breaking infinite loop (stuck {stuck_count}/20)",
+                    reason=f"EMERGENCY: Breaking infinite loop (stuck {stuck_count})",
                     metadata={'stuck_count': stuck_count, 'emergency': True}
                 )
             return RungResult()

@@ -493,6 +493,49 @@ class EisenhowerLayer:
         importance = self.compute_importance(rung_name, edge_trust)
         source = self.blackboard.get('epistemic_quadrant', 'UU')
 
+        # Apply Rumsfeld cross-matrix bias (same as prioritize() does)
+        # Without this, cold-start games score near-zero on both axes
+        # and every rung falls into Q4_ELIMINATE.
+        bias = RUMSFELD_TO_EISENHOWER_BIAS.get(source, {})
+        urgency_boost = bias.get('urgency_boost', 0.0)
+        importance_boost = bias.get('importance_boost', 0.0)
+        if urgency_boost != 0.0:
+            urgency.cascade_risk = max(0.0, min(1.0, urgency.cascade_risk + urgency_boost))
+        if importance_boost != 0.0:
+            importance.win_probability_delta = max(
+                0.0, min(1.0, importance.win_probability_delta + importance_boost)
+            )
+
+        # Signal-sparsity guard: Eisenhower reads several blackboard signals
+        # (rung_win_contribution_*, frame_delta_magnitude, strategy_stability,
+        # working_theory, open_questions, etc.) to compute urgency/importance.
+        # If those signals are missing — which they are until the upstream
+        # components that produce them are wired — every rung scores below
+        # the 0.5 thresholds and gets Q4_ELIMINATE'd.
+        #
+        # Detect sparsity by checking whether the key inputs actually exist
+        # on the blackboard.  When data is sparse, boost both axes above the
+        # thresholds so candidates classify as Q1_DO and get executed.
+        # Once upstream systems populate these slots the boosts become no-ops
+        # because the real values will already exceed the floor.
+        _key_signals = (
+            self.blackboard.get(f'rung_win_contribution_{rung_name}'),
+            self.blackboard.get('frame_delta_magnitude'),
+            self.blackboard.get('strategy_stability'),
+            self.blackboard.get('working_theory'),
+        )
+        populated = sum(1 for s in _key_signals if s is not None)
+        if populated < 2:
+            # Sparse data — be optimistic rather than eliminative.
+            # Importance: need total > 0.5
+            #   win_prob(w=0.4) + theory(w=0.3) + unlock(w=0.2) + trust(w=0.1)
+            importance.win_probability_delta = max(importance.win_probability_delta, 0.6)
+            importance.action_unlock = max(importance.action_unlock, 0.8)
+            # Urgency: need total > 0.5
+            #   budget(w=0.4) + volatility(w=0.3) + blocking(w=0.2) + cascade(w=0.1)
+            #   cascade_risk also feeds max() in UrgencyScore.total
+            urgency.cascade_risk = max(urgency.cascade_risk, 0.55)
+
         task = PrioritizedTask.classify(rung_name, urgency, importance, source)
         self.stats['tasks_classified'] += 1
 

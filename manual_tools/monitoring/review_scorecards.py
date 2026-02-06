@@ -50,8 +50,8 @@ class ScorecardReviewer:
         """
         # This would be implemented using browser_subagent
         # For now, this is a placeholder
-        print(f"🔐 Checking login status at {self.scorecards_url}")
-        print(f"🔑 GitHub passkey available: {'Yes' if self.passkey_pin else 'No (check .env)'}")
+        print(f"[AUTH] Checking login status at {self.scorecards_url}")
+        print(f"[AUTH] GitHub passkey available: {'Yes' if self.passkey_pin else 'No (check .env)'}")
         return True
 
     async def review_scorecards_table(self) -> Dict:

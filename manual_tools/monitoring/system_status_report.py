@@ -71,7 +71,7 @@ def main():
     # Knowledge Base
     sequences = db.execute_query("SELECT COUNT(*) as count FROM winning_sequences")
     patterns = db.execute_query("SELECT COUNT(*) as count FROM discovered_patterns")
-    print(f"\n📚 KNOWLEDGE BASE")
+    print(f"\n[KB] KNOWLEDGE BASE")
     print(f"   Winning sequences: {sequences[0]['count']}")
     print(f"   Discovered patterns: {patterns[0]['count']}")
 
@@ -134,7 +134,7 @@ def main():
         print(f"[OK] Phase 3: {packages[0]['active_packages']} viral packages active")
 
     if recent_games[0]['count'] == 0:
-        print("\n🔸 NOTE: No games played in last hour")
+        print("\n[NOTE] No games played in last hour")
         print("   → ARC API may be having issues")
         print("   → Or system is idle waiting for next evolution cycle")
 

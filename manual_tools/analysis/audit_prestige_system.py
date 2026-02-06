@@ -174,14 +174,14 @@ class PrestigeAuditor:
             report_lines.append(f"Raw stats: {stats}")
 
         # Health Checks
-        report_lines.append("🏥 HEALTH CHECKS")
+        report_lines.append("[HEALTH] HEALTH CHECKS")
         report_lines.append("-" * 80)
 
         # Check 1: Negative values
         negatives = [a for a in data["agents"] if a["prestige"] < 0]
         if negatives:
             report_lines.append(
-                f"🔴 FAILED: Found {len(negatives)} agents with negative prestige"
+                f"[FAIL] FAILED: Found {len(negatives)} agents with negative prestige"
             )
         else:
             report_lines.append("[OK] PASSED: No negative prestige values")
@@ -190,7 +190,7 @@ class PrestigeAuditor:
         outliers = self.find_outliers(data)
         if outliers:
             report_lines.append(
-                f"🟡 WARNING: Found {len(outliers)} outliers (>5x median)"
+                f"[WARN] WARNING: Found {len(outliers)} outliers (>5x median)"
             )
             for o in outliers[:3]:
                 report_lines.append(

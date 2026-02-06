@@ -635,7 +635,7 @@ class HorizontalTransferEngine:
                         total_transfers += 1
                         transfers_this_donor += 1
 
-                        print(f"  ✓ Transfer {donor_id[:8]}...→{recipient_id[:8]}... "
+                        print(f"  [OK] Transfer {donor_id[:8]}...>{recipient_id[:8]}... "
                               f"({transfer_type}, compat:{compatibility:.2f})")
 
                     if transfers_this_donor >= max_transfers_per_agent:
@@ -781,7 +781,7 @@ def create_horizontal_transfer_tables(db: DatabaseInterface) -> bool:
 def main():
     """Test Phase 5 horizontal transfer system."""
 
-    print("🧬 Phase 5: Horizontal Gene Transfer with Emotional Intelligence")
+    print("[DNA] Phase 5: Horizontal Gene Transfer with Emotional Intelligence")
     print("=" * 70)
 
     # Initialize database and transfer engine
@@ -795,7 +795,7 @@ def main():
     transfer_engine = HorizontalTransferEngine(db)
 
     # Test emotional compatibility calculation
-    print("\n🧠 Testing emotional compatibility calculation...")
+    print("\n[BRAIN] Testing emotional compatibility calculation...")
 
     # Get some test agents
     test_agents = db.execute_query("""

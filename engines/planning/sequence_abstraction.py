@@ -392,7 +392,7 @@ class SequenceAbstraction:
 
         if scored:
             best_seq, score = max(scored, key=lambda x: x[1])
-            logger.info(f"✓ Concept match: {best_seq['sequence_id'][:12]} ({score:.1%} similar)")
+            logger.info(f"[OK] Concept match: {best_seq['sequence_id'][:12]} ({score:.1%} similar)")
             return best_seq
 
         return candidates[0] if candidates else None

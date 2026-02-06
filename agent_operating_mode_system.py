@@ -168,7 +168,7 @@ class AgentOperatingModeSystem:
         # Create database table if not exists
         self._initialize_database()
 
-        logger.info("[✓] Agent Operating Mode System initialized")
+        logger.info("[OK] Agent Operating Mode System initialized")
         logger.info(
             f"   Target distribution: {self.TARGET_PIONEER_PCT * 100:.0f}% pioneers, {self.TARGET_OPTIMIZER_PCT * 100:.0f}% optimizers, {self.TARGET_GENERALIST_PCT * 100:.0f}% generalists, {self.TARGET_EXPLOITER_PCT * 100:.0f}% exploiters"
         )

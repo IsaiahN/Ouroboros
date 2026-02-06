@@ -52,7 +52,7 @@ class NetworkIntelligenceEngine:
         Returns:
             Dict with all ecosystem health metrics
         """
-        self.logger.info(f"[🌐 NETWORK] Capturing ecosystem snapshot for generation {generation}")
+        self.logger.info(f"[NETWORK] Capturing ecosystem snapshot for generation {generation}")
 
         snapshot_id = f"snapshot_{generation}_{uuid.uuid4().hex[:8]}"
 
@@ -98,7 +98,7 @@ class NetworkIntelligenceEngine:
 
         self._store_snapshot(snapshot)
 
-        self.logger.info(f"[🌐 NETWORK] Snapshot captured: {health_status} (score: {health_score:.3f})")
+        self.logger.info(f"[NETWORK] Snapshot captured: {health_status} (score: {health_score:.3f})")
 
         return snapshot
 

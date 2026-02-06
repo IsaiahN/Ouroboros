@@ -61,7 +61,7 @@ class DiskSpaceMonitor:
         # Critical: Disk almost full
         if free_gb < self.CRITICAL_FREE_SPACE_GB:
             critical = True
-            warnings.append(f"🚨 CRITICAL: Only {free_gb:.2f} GB free (< {self.CRITICAL_FREE_SPACE_GB} GB)")
+            warnings.append(f"[CRITICAL] Only {free_gb:.2f} GB free (< {self.CRITICAL_FREE_SPACE_GB} GB)")
 
         # Warning: Low disk space
         elif free_gb < self.MIN_FREE_SPACE_GB:
@@ -73,7 +73,7 @@ class DiskSpaceMonitor:
             warnings.append(msg)
             if db_size_gb > self.MAX_DB_SIZE_GB * 2:
                 critical = True
-                warnings.append(f"🚨 CRITICAL: Database is {(db_size_gb/self.MAX_DB_SIZE_GB):.1f}x over limit!")
+                warnings.append(f"[CRITICAL] Database is {(db_size_gb/self.MAX_DB_SIZE_GB):.1f}x over limit!")
 
         # Build message
         if warnings:
@@ -81,7 +81,7 @@ class DiskSpaceMonitor:
             message += f"\n\nStats: {free_gb:.2f} GB free / {total_gb:.2f} GB total"
             message += f"\nDatabase: {db_size_gb:.2f} GB"
         else:
-            message = f"✓ Disk space OK: {free_gb:.2f} GB free, DB: {db_size_gb:.2f} GB"
+            message = f"[OK] Disk space OK: {free_gb:.2f} GB free, DB: {db_size_gb:.2f} GB"
 
         safe_to_continue = not critical
 
@@ -157,7 +157,7 @@ def check_disk_space_or_abort(logger=None) -> bool:
     else:
         print(message)
         if not safe:
-            print("\n🚨 ABORTING: Disk space critical!")
+            print("\n[CRITICAL] ABORTING: Disk space critical!")
             suggestions = monitor.suggest_cleanup_actions()
             if suggestions:
                 print("\nCleanup suggestions:")

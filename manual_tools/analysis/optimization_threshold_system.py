@@ -102,7 +102,7 @@ class OptimizationThresholdSystem:
             ON optimization_status(is_optimized, generations_without_improvement)
         """)
 
-        logger.info("[✓] Optimization threshold system initialized")
+        logger.info("[OK] Optimization threshold system initialized")
 
     def update_optimization_status(self, generation: int) -> Dict[str, int]:
         """
@@ -205,7 +205,7 @@ class OptimizationThresholdSystem:
             if is_optimized and (not existing or not existing[0]['is_optimized']):
                 newly_optimized += 1
                 optimized_at = datetime.now().isoformat()
-                logger.info(f"✓ {game_id} L{level_number} OPTIMIZED: {best_actions} actions, "
+                logger.info(f"[OK] {game_id} L{level_number} OPTIMIZED: {best_actions} actions, "
                           f"{sequence_count} sequences, {generations_without_improvement} gens stagnant")
             elif is_optimized:
                 optimized_at = existing[0].get('optimized_at')

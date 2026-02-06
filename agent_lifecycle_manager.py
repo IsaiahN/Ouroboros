@@ -91,7 +91,7 @@ class AgentLifecycleManager:
         Returns:
             Deletion statistics
         """
-        logger.info(f"🗑️  Agent cleanup: Generation {current_generation}")
+        logger.info(f"[CLEANUP] Agent cleanup: Generation {current_generation}")
 
         stats = {
             'zero_score_deleted': 0,
