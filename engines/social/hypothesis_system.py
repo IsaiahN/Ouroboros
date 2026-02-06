@@ -43,8 +43,14 @@ class AgentHypothesisSystem:
     This requires FORMAL_OPERATIONAL cognitive stage.
     """
 
-    def __init__(self, db: 'DatabaseInterface', cognitive_system: 'CognitiveStageSystem'):
-        """Initialize agent hypothesis system."""
+    def __init__(self, db: 'DatabaseInterface', cognitive_system: 'CognitiveStageSystem' = None):
+        """Initialize agent hypothesis system.
+
+        Args:
+            db: Database interface for persistence
+            cognitive_system: Optional CognitiveStageSystem for stage-gated hypothesis creation.
+                If None, hypothesis creation is open to all agents (no stage gating).
+        """
         self.db = db
         self.cognitive_system = cognitive_system
         self._ensure_tables()
@@ -130,6 +136,8 @@ class AgentHypothesisSystem:
 
     def can_create_hypothesis(self, agent_id: str) -> bool:
         """Check if agent has the cognitive capability to create hypotheses."""
+        if not self.cognitive_system:
+            return True  # No stage gating - allow all agents
         capabilities = self.cognitive_system.get_stage_capabilities(agent_id)
         return capabilities.get('hypothesis_generation', False)
 
@@ -194,8 +202,9 @@ class AgentHypothesisSystem:
               hypothesis_type, evidence_json, 0.5,
               primitives_json, trigger_json, predicted_action, sequence_json))
 
-        # Update agent's competency
-        self.cognitive_system.update_competencies(agent_id, hypotheses_created_delta=1)
+        # Update agent's competency (only if cognitive system available)
+        if self.cognitive_system:
+            self.cognitive_system.update_competencies(agent_id, hypotheses_created_delta=1)
 
         # Log with primitive info if available
         if primitives_used:

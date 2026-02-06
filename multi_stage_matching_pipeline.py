@@ -398,11 +398,11 @@ class MultiStageMatchingPipeline:
         if maturity in [MATURITY_COLD_START, MATURITY_EARLY]:
             # KID B phase: we're still enumerating, exact matches are valid
             cascade_order = ['exact', 'prefix', 'suffix', 'subsequence', 'conceptual']
-            logger.info(f"[Pipeline] Maturity={maturity}: using EXACT-FIRST cascade (building entropy)")
+            logger.debug(f"[Pipeline] Maturity={maturity}: using EXACT-FIRST cascade (building entropy)")
         else:
             # KID A phase: we have the formula, prefer abstraction
             cascade_order = ['conceptual', 'subsequence', 'suffix', 'prefix', 'exact']
-            logger.info(f"[Pipeline] Maturity={maturity}: using ABSTRACTION-FIRST cascade (formula available)")
+            logger.debug(f"[Pipeline] Maturity={maturity}: using ABSTRACTION-FIRST cascade (formula available)")
 
         # Execute cascade in order
         for stage_name in cascade_order:
@@ -418,7 +418,7 @@ class MultiStageMatchingPipeline:
 
         # All stages failed - random exploration
         self.stage_success_counts['random'] += 1
-        logger.info(f"[Pipeline] All matching stages failed for game {game_id} L{level_number}, using random exploration")
+        logger.debug(f"[Pipeline] All matching stages failed for game {game_id} L{level_number}, using random exploration")
         return None, 'random', {'confidence': 0.0, 'maturity': maturity}
 
     # REMOVED: The old sequential stage calls are replaced by the cascade loop above

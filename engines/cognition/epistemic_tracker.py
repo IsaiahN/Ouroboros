@@ -116,10 +116,13 @@ class EpistemicTracker:
     """
 
     # Confidence threshold for KK classification
-    KK_CONFIDENCE_THRESHOLD = 0.8
+    # NOTE: Most rungs output confidence=0.6, threshold must be at or below that
+    KK_CONFIDENCE_THRESHOLD = 0.55
 
     # Confidence threshold for answering questions
-    ANSWER_CONFIDENCE_THRESHOLD = 0.6
+    # Legacy rungs typically output confidence=0.6. Set below that
+    # so successful rung results can answer auto-generated questions.
+    ANSWER_CONFIDENCE_THRESHOLD = 0.4
 
     # Surprise threshold for increasing UU
     SURPRISE_THRESHOLD = 0.7
@@ -139,7 +142,44 @@ class EpistemicTracker:
         self._tick = 0
 
     def reset(self) -> None:
-        """Reset tracker for a new decision/game."""
+        """Soft reset for a new decision within same game.
+
+        Preserves accumulated knowledge so learning carries across decisions:
+        - known_knowns: Facts we've established (which rungs produce actions)
+        - kk_confidence: Aggregate confidence in our knowledge
+        - uu_estimate: Exploration decay (prevents permanent UU)
+        - known_unknowns: Open questions (enables KU transitions)
+
+        Only resets transient state (UK potential, history, transitions).
+        """
+        # Preserve cross-decision learning
+        preserved_kk = self.current_state.known_knowns
+        preserved_kk_conf = self.current_state.kk_confidence
+        preserved_uu = self.current_state.uu_estimate
+        preserved_ku = self.current_state.known_unknowns
+        preserved_ku_urgency = self.current_state.ku_urgency
+
+        self.current_state = EpistemicState()
+
+        # Restore accumulated knowledge
+        self.current_state.known_knowns = preserved_kk
+        self.current_state.kk_confidence = preserved_kk_conf
+        self.current_state.uu_estimate = preserved_uu
+        self.current_state.known_unknowns = preserved_ku
+        self.current_state.ku_urgency = preserved_ku_urgency
+
+        # CRITICAL: Recompute primary_quadrant from preserved state.
+        # Without this, primary_quadrant defaults to UU (from EpistemicState())
+        # even when the preserved uu_estimate and kk_confidence say KK.
+        self.current_state.primary_quadrant = self.current_state.compute_primary_quadrant()
+
+        self.history.clear()
+        self.transitions.clear()
+        self._last_quadrant = self.current_state.primary_quadrant
+        self._tick = 0
+
+    def hard_reset(self) -> None:
+        """Full reset for a completely new game (no knowledge preserved)."""
         self.current_state = EpistemicState()
         self.history.clear()
         self.transitions.clear()
@@ -326,8 +366,23 @@ class EpistemicTracker:
             self.current_state.uk_potential = 0.0
 
     def _update_uu(self, result: RungResult) -> None:
-        """Update UU (Unknown Unknowns) - exploration estimate."""
-        # Learning reduces UU (we're filling in the map)
+        """Update UU (Unknown Unknowns) - exploration estimate.
+
+        UU represents how much territory remains unexplored. It decreases as
+        we explore (visit rungs) and increases when we encounter genuine surprises.
+
+        Key fix: Every rung visit reduces UU slightly (baseline decay 0.98x)
+        because visiting a rung IS exploration even if the rung produced nothing.
+        Without this, UU only decays on confident results and 49/50 rungs
+        produce nothing, keeping UU permanently high.
+        """
+        # Baseline decay: every visited rung reduces the unknown frontier
+        # 0.98^50 iterations = 0.364, so UU drops from 0.8 to ~0.29 over
+        # a full 50-iteration search, even without any confident results.
+        BASELINE_DECAY = 0.98
+        self.current_state.uu_estimate *= BASELINE_DECAY
+
+        # Confident results decay UU faster (we found something real)
         if result.confidence > 0.5:
             self.current_state.uu_estimate *= self.UU_DECAY_RATE
 
@@ -362,8 +417,22 @@ class EpistemicTracker:
         if network_cache and rung_name in network_cache:
             return True
 
-        # Check if it's a network/retrieval rung
-        retrieval_prefixes = ('network_', 'cached_', 'winning_sequence')
+        # Check if it's a network/retrieval/knowledge rung.
+        # These rungs pull from external knowledge (database, network,
+        # cached patterns) rather than analyzing the current frame.
+        # Broadened from just network_/cached_/winning_sequence to include
+        # all rungs that represent "knowledge the agent hasn't accessed yet".
+        retrieval_prefixes = (
+            'network_',           # network_wisdom, network_sharing, etc.
+            'cached_',            # cached sequences
+            'winning_sequence',   # winning sequence replay
+            'prior_lessons',      # lessons from past games
+            'embedding_',         # embedding_suggestion, embedding_matcher
+            'replay_',            # replay_learning
+            'rule_transfer',      # cross-game rule transfer
+            'few_shot_',          # few_shot_invariants, few_shot_relations
+            'resonance_',         # resonance_detector (cross-domain patterns)
+        )
         if any(rung_name.startswith(p) for p in retrieval_prefixes):
             return True
 

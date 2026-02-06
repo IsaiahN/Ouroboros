@@ -44,14 +44,18 @@ class TransitionGate:
             (RumsfeldQuadrant.UU, RumsfeldQuadrant.KU): 1,  # Questions are cheap
             (RumsfeldQuadrant.UK, RumsfeldQuadrant.KK): 1,  # Retrieval is fast
             (RumsfeldQuadrant.UU, RumsfeldQuadrant.UK): 1,  # Retrieval is cheap
+            (RumsfeldQuadrant.UU, RumsfeldQuadrant.KK): 1,  # Forward progress - allow immediately
 
             # Moderate transitions
             (RumsfeldQuadrant.KU, RumsfeldQuadrant.KK): 2,  # Need solid answer
             (RumsfeldQuadrant.KK, RumsfeldQuadrant.KU): 2,  # Don't abandon hastily
             (RumsfeldQuadrant.KU, RumsfeldQuadrant.UU): 2,  # Broadening search
+            (RumsfeldQuadrant.UK, RumsfeldQuadrant.KU): 2,  # Retrieval raised questions
+            (RumsfeldQuadrant.KK, RumsfeldQuadrant.UK): 2,  # Found untapped knowledge
 
             # Hard transitions (high confirmation)
             (RumsfeldQuadrant.KK, RumsfeldQuadrant.UU): 3,  # Nuclear option - severe contradiction
+            (RumsfeldQuadrant.UK, RumsfeldQuadrant.UU): 3,  # Cached knowledge contradicted
         }
     )
 

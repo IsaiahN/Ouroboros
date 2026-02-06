@@ -25,9 +25,9 @@ import sys
 
 sys.dont_write_bytecode = True
 
-import heapq
 import logging
 import math
+import random
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -436,9 +436,11 @@ class InformationMaximizingSearch(SearchAlgorithm):
     time_complexity = "O(V)"
     space_complexity = "O(1)"
 
-    def __init__(self, exploration_bonus: float = 1.0, curiosity_weight: float = 0.2):
+    def __init__(self, exploration_bonus: float = 1.0, curiosity_weight: float = 0.2,
+                 epsilon: float = 0.05):
         self.exploration_bonus = exploration_bonus
         self.curiosity_weight = curiosity_weight
+        self.epsilon = epsilon  # Stochastic tie-breaking noise
 
     def get_next_rungs(
         self,
@@ -458,7 +460,12 @@ class InformationMaximizingSearch(SearchAlgorithm):
             visit_count = graph_info.get('visit_counts', {}).get(rung, 0)
             exploration = self.exploration_bonus / math.sqrt(1 + visit_count)
 
-            acquisition = info_gain / (cost + 0.1) + self.curiosity_weight * exploration
+            # Add small random noise for stochastic tie-breaking
+            # Without this, deterministic scoring produces identical rung
+            # orderings every single decision (all 49 rungs, same order)
+            noise = random.uniform(0, self.epsilon)
+
+            acquisition = info_gain / (cost + 0.1) + self.curiosity_weight * exploration + noise
             scored.append((acquisition, rung))
 
         scored.sort(reverse=True)

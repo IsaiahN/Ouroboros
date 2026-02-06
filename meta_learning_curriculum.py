@@ -36,7 +36,7 @@ class MetaLearningCurriculum:
             'stage_name': 'specialization',
             'description': 'Master one game deeply to build foundational skills',
             'games_strategy': 'single_game',  # Focus on one game
-            'min_win_rate': 0.70,  # Must achieve 70% win rate
+            'min_win_rate': 0.10,  # Must achieve 10% win rate (beat at least 1 level)
             'min_transfer_rate': None,  # Not applicable yet
             'max_repeats_per_game': 50,  # Can repeat many times
             'exploration_weight': 0.3,  # Low exploration
@@ -153,8 +153,8 @@ class MetaLearningCurriculum:
         strategy = stage['games_strategy']
 
         if strategy == 'single_game':
-            # Stage 1: Single game focus
-            return self._select_single_game(agent_id, available_games)
+            # Stage 1: Single game focus (play focus game num_games times)
+            return self._select_single_game(agent_id, available_games, num_games)
 
         elif strategy == 'similar_pair':
             # Stage 2: Original game + one similar game
@@ -173,8 +173,23 @@ class MetaLearningCurriculum:
             import random
             return random.sample(available_games, min(num_games, len(available_games)))
 
-    def _select_single_game(self, agent_id: str, available_games: List[str]) -> List[str]:
-        """Stage 1: Select single game for deep specialization"""
+    def _select_single_game(self, agent_id: str, available_games: List[str],
+                             num_games: int = 5) -> List[str]:
+        """Stage 1: Select single game for deep specialization.
+
+        Distributes agents across available games rather than always picking
+        the first game. Uses agent's existing history if available, otherwise
+        assigns deterministically based on agent_id hash to ensure even
+        distribution without coordination.
+
+        Returns the focus game repeated num_games times so agents get
+        multiple practice attempts per generation.
+        """
+        if not available_games:
+            return []
+
+        focus_game = None
+
         # Check if agent already has a focus game
         result = self.db.execute_query("""
             SELECT game_id, attempts
@@ -186,13 +201,15 @@ class MetaLearningCurriculum:
 
         if result and result[0]['attempts'] > 0:
             # Continue with same game
-            return [result[0]['game_id']]
+            focus_game = result[0]['game_id']
+        else:
+            # Distribute new agents across available games using agent_id hash
+            # This ensures even distribution without needing global coordination
+            game_index = hash(agent_id) % len(available_games)
+            focus_game = available_games[game_index]
 
-        # Assign first available game
-        if available_games:
-            return [available_games[0]]
-
-        return []
+        # Return the focus game repeated num_games times for deep practice
+        return [focus_game] * max(1, num_games)
 
     def _select_similar_pair(self, agent_id: str, available_games: List[str]) -> List[str]:
         """Stage 2: Select original game + one similar game"""

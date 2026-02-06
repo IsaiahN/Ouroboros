@@ -213,7 +213,8 @@ class _DatabaseInterfaceAdapter:
             else:
                 rows = results or []
             return _CursorProxy(rows)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[TRACE-ADAPTER] execute_query failed: {type(e).__name__}: {e}")
             return _CursorProxy([])
 
 

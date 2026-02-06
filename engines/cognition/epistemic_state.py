@@ -48,7 +48,7 @@ class EpistemicState:
     uk_potential: float = 0.0  # Estimated value of untapped knowledge (0.0 to 1.0)
 
     # UU: Estimate of unexplored territory
-    uu_estimate: float = 0.5  # 0.0 = fully known, 1.0 = totally novel
+    uu_estimate: float = 0.8  # 0.0 = fully known, 1.0 = totally novel (start high)
 
     # Primary quadrant determines base algorithm
     primary_quadrant: RumsfeldQuadrant = RumsfeldQuadrant.UU
@@ -68,18 +68,28 @@ class EpistemicState:
         - UU third: If nothing specific, explore (learn)
         - KK last: Only exploit when we have high confidence (careful)
 
+        Thresholds are set to allow transitions from auto-generated
+        epistemic signals (slot_name from rung names, questions from
+        failed rungs). Without these low thresholds, the system stays
+        permanently locked in UU.
+
         Returns:
             The dominant quadrant that should drive algorithm selection
         """
-        if self.uk_potential > 0.5 and len(self.unknown_knowns) > 3:
+        if self.uk_potential > 0.03 and len(self.unknown_knowns) >= 2:
             return RumsfeldQuadrant.UK
-        if len(self.known_unknowns) >= 2 and self.ku_urgency > 0.4:
+        # KU: Even ONE open question with moderate urgency triggers targeted search
+        if len(self.known_unknowns) >= 1 and self.ku_urgency > 0.2:
             return RumsfeldQuadrant.KU
         if self.uu_estimate > 0.6:
             return RumsfeldQuadrant.UU
-        if self.kk_confidence > 0.7:
+        if self.kk_confidence > 0.5:
             return RumsfeldQuadrant.KK
-        return RumsfeldQuadrant.UU  # Default to exploration
+        # If we have ANY accumulated knowledge, exploit it rather than
+        # defaulting back to UU exploration (breaks the UU→UU loop)
+        if self.known_knowns:
+            return RumsfeldQuadrant.KK
+        return RumsfeldQuadrant.UU  # True default: no knowledge at all
 
     def update_primary_quadrant(self) -> RumsfeldQuadrant:
         """Compute and update the primary quadrant. Returns the new quadrant."""
@@ -267,6 +277,8 @@ QUADRANT_DEFAULT_ALGORITHMS = {
 REGRESSION_TRANSITIONS = {
     (RumsfeldQuadrant.KK, RumsfeldQuadrant.KU),  # Mild contradiction
     (RumsfeldQuadrant.KK, RumsfeldQuadrant.UU),  # Severe contradiction
+    (RumsfeldQuadrant.KU, RumsfeldQuadrant.UU),  # Question led to confusion
+    (RumsfeldQuadrant.UK, RumsfeldQuadrant.UU),  # Cached knowledge contradicted
 }
 
 # Transition types that indicate progress
@@ -275,6 +287,9 @@ PROGRESSION_TRANSITIONS = {
     (RumsfeldQuadrant.KU, RumsfeldQuadrant.KK),  # Answered a question
     (RumsfeldQuadrant.UK, RumsfeldQuadrant.KK),  # Retrieved knowledge
     (RumsfeldQuadrant.UU, RumsfeldQuadrant.UK),  # Found cached knowledge
+    (RumsfeldQuadrant.UU, RumsfeldQuadrant.KK),  # Exploration yielded knowledge
+    (RumsfeldQuadrant.KK, RumsfeldQuadrant.UK),  # Found untapped knowledge while exploiting
+    (RumsfeldQuadrant.UK, RumsfeldQuadrant.KU),  # Retrieved knowledge raised questions
 }
 
 # Stagnation transitions (staying in same quadrant too long)

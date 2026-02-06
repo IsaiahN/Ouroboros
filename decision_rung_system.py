@@ -6272,6 +6272,9 @@ class DecisionRungSystem:
         # =====================================================================
         self._cognitive_router: Optional[Any] = cognitive_router  # Use passed router or lazy-load
         self._cognitive_router_initialized: bool = (cognitive_router is not None)
+        if cognitive_router is not None:
+            # Ensure _RungResult_Cognitive is set even when router is passed in
+            _load_cognitive_router()
 
         # Load default ordering (rungs are needed even for COGNITIVE strategy)
         # COGNITIVE strategy uses rungs differently - graph-based selection, not static order
@@ -7331,6 +7334,8 @@ class DecisionRungSystem:
 
             router.initialize(nodes, edges, game_id)
             self._cognitive_game_id = game_id
+            # Reset per-game contradiction tracking
+            self._cognitive_previously_successful_rungs = set()
 
         # =====================================================================
         # RUNG EXECUTOR - Bridges legacy rungs to cognitive RungResult protocol
@@ -7355,6 +7360,13 @@ class DecisionRungSystem:
         self._cognitive_last_rung_metadata: Dict[str, Any] = {}
         self._cognitive_last_winning_rung: Optional[DecisionRung] = None
 
+        # Track rungs that produced actions in previous decisions (per-game).
+        # Used to detect contradictions: a rung that previously worked but
+        # now fails is a genuine surprise/contradiction signal that can
+        # drive KK->KU/KK->UU regressions in the epistemic state machine.
+        if not hasattr(self, '_cognitive_previously_successful_rungs'):
+            self._cognitive_previously_successful_rungs: set = set()
+
         def rung_executor(rung_name: str, _game_state_dict: Dict) -> Any:
             """Execute a legacy rung and bridge to cognitive RungResult."""
             rung = next((r for r in self.rungs if r.name == rung_name), None)
@@ -7376,21 +7388,99 @@ class DecisionRungSystem:
             if result.action and result.confidence > 0:
                 self._cognitive_last_winning_rung = rung
                 self._cognitive_last_rung_metadata = result.metadata or {}
+                # Track this rung as previously successful for contradiction detection
+                self._cognitive_previously_successful_rungs.add(rung_name)
 
             # Extract epistemic signals from legacy result
             metadata = result.metadata or {}
             contradiction_detected = metadata.get('contradiction_detected', False)
-            # Low confidence on a rung that usually succeeds = surprise
-            surprise_level = max(0.0, 1.0 - result.confidence) if result.action else 0.0
+            # Legacy rungs can't express genuine surprise. Low confidence
+            # is NOT surprise — it's just uncertainty. Set to 0.0 to prevent
+            # UU from being boosted by weak suggestions.
+            # Real surprise would require comparing result to expectation.
+            surprise_level = 0.0
+
+            # =========================================================
+            # CONTRADICTION DETECTION (bridge for KK->KU/KK->UU regressions)
+            #
+            # A rung that previously produced an action but now fails is a
+            # genuine contradiction — the world changed or our model was wrong.
+            # This is the primary mechanism for KK->KU (mild) and KK->UU
+            # (severe) regressions. Without this, KK is a terminal state.
+            # =========================================================
+            if (not result.action
+                    and rung_name in self._cognitive_previously_successful_rungs):
+                # Previously-successful rung now fails = contradiction
+                contradiction_detected = True
+                # Genuine surprise: we expected success, got failure
+                surprise_level = 0.8
+
+            # =========================================================
+            # EPISTEMIC SIGNAL SYNTHESIS (bridge legacy rungs to state machine)
+            #
+            # Legacy rungs don't produce slot_name, questions, or answers.
+            # Without these signals, the epistemic tracker is blind:
+            # - No slot_name -> KK never accumulates
+            # - No raises_questions -> KU never triggers
+            # - No answers_questions -> KU->KK never happens
+            #
+            # Fix: Synthesize these signals from what we DO have.
+            # =========================================================
+
+            # (B) slot_name: Use rung_name as proxy when legacy doesn't provide one.
+            # A rung producing an action IS knowledge about "what to do".
+            slot_name = metadata.get('slot_name')
+            if not slot_name and result.action:
+                slot_name = rung_name  # The rung's identity IS the knowledge slot
+
+            # (C) Question generation: When a rung returns no action, that's a
+            # discovery - we know we DON'T know what to do. Classic Known Unknown.
+            questions_raised = []
+            answers = []
+            if not result.action and not self._cognitive_last_winning_rung:
+                # No rung has produced an action yet - raise a question
+                try:
+                    from engines.cognition.blackboard import Question
+                    questions_raised.append(Question(
+                        question_id=f"what_works_for_{game_id}",
+                        description=f"What action works in current game state?",
+                        answerable_by=[r.name for r in self.rungs
+                                       if r.name not in self.EMERGENCY_RUNG_NAMES],
+                        priority=0.6,
+                    ))
+                except ImportError:
+                    pass  # Graceful degradation
+
+            # (D) Question injection for KK regression: When a previously-
+            # successful rung contradicts, raise a high-priority question.
+            # This enables KK->KU transition (mild contradiction path).
+            if contradiction_detected and rung_name in self._cognitive_previously_successful_rungs:
+                try:
+                    from engines.cognition.blackboard import Question
+                    questions_raised.append(Question(
+                        question_id=f"why_failed_{rung_name}_{game_id}",
+                        description=f"Why did {rung_name} stop working?",
+                        answerable_by=[r.name for r in self.rungs
+                                       if r.name != rung_name
+                                       and r.name not in self.EMERGENCY_RUNG_NAMES],
+                        priority=0.8,  # High priority - regression is urgent
+                    ))
+                except ImportError:
+                    pass  # Graceful degradation
+
+            # (C) Answer generation: When a rung produces a confident action,
+            # it answers the "what works" question.
+            if result.action and result.confidence > 0.3:
+                answers.append(f"what_works_for_{game_id}")
 
             if _RungResult_Cognitive:
                 return _RungResult_Cognitive(
                     rung_name=rung_name,
-                    slot_name=metadata.get('slot_name'),
+                    slot_name=slot_name,
                     value=result.action,  # Actual ACTION string (e.g., 'ACTION3')
                     confidence=result.confidence,
-                    raises_questions=[],  # Legacy rungs don't produce these yet
-                    answers_questions=[],
+                    raises_questions=questions_raised,
+                    answers_questions=answers,
                     surprise_level=surprise_level,
                     contradiction_detected=contradiction_detected,
                     contradiction_with=metadata.get('contradiction_with'),
@@ -7450,6 +7540,20 @@ class DecisionRungSystem:
             # RECORD DECISION TRACE (full architecture compliance)
             if self._routing_trace_store is not None:
                 try:
+                    # Use REAL data from DecisionResult instead of hardcoded values
+                    # Previous bug: initial_quadrant was hardcoded "UU", transitions/backtracks hardcoded 0
+                    real_transitions = []
+                    real_backtrack_count = 0
+                    real_algo_history = []
+
+                    # Extract transitions list from path (each algorithm switch)
+                    if hasattr(decision_result, 'transitions_count'):
+                        # Build transition summary from count
+                        real_backtrack_count = max(0, decision_result.transitions_count - decision_result.algorithm_switches)
+
+                    if hasattr(decision_result, 'algorithm_switches') and decision_result.algorithm_switches > 0:
+                        real_algo_history = [decision_result.final_quadrant]
+
                     trace_id = self._routing_trace_store.record_trace(
                         game_id=game_id,
                         agent_id=context.get('agent_id', 'unknown'),
@@ -7457,11 +7561,11 @@ class DecisionRungSystem:
                         algorithm_used=decision_result.final_quadrant,
                         final_action=action,
                         final_confidence=confidence,
-                        initial_quadrant="UU",
+                        initial_quadrant=getattr(decision_result, 'initial_quadrant', decision_result.final_quadrant),
                         final_quadrant=decision_result.final_quadrant,
-                        quadrant_transitions=[],
-                        algorithms_history=[],
-                        backtrack_count=0,
+                        quadrant_transitions=real_transitions,
+                        algorithms_history=real_algo_history,
+                        backtrack_count=real_backtrack_count,
                         iterations=decision_result.iterations,
                         decision_latency_ms=decision_result.time_elapsed * 1000
                     )

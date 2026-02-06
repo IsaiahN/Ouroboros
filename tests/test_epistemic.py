@@ -48,7 +48,7 @@ class TestEpistemicState:
         assert state.kk_confidence == 0.0
         assert state.ku_urgency == 0.0
         assert state.uk_potential == 0.0
-        assert state.uu_estimate == 0.5
+        assert state.uu_estimate == 0.8  # Start high: agents begin in unknown territory
         assert len(state.known_knowns) == 0
         assert len(state.known_unknowns) == 0
         assert len(state.unknown_knowns) == 0

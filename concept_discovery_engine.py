@@ -160,7 +160,7 @@ class ConceptDiscoveryEngine:
             logger.info("[CONCEPT] PrimitiveUnlockManager integrated for unlock pressure")
         else:
             self.unlock_manager = None
-            logger.warning("[CONCEPT] PrimitiveUnlockManager not available - no unlock pressure")
+            logger.debug("[CONCEPT] PrimitiveUnlockManager not available - no unlock pressure (not yet implemented)")
 
         # Ensure database tables exist
         self._ensure_schema()

@@ -24,7 +24,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum, auto
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -189,7 +189,7 @@ class SearchContext:
     time_budget: float = 1.0
 
     # Confidence threshold for committing
-    commit_threshold: float = 0.85
+    commit_threshold: float = 0.55
 
     # -------------------------------------------------------------------------
     # MUTATION REQUESTS (algorithms write, router processes)

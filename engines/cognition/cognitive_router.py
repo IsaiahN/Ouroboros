@@ -35,7 +35,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from engines.cognition.algorithms import SearchAlgorithm, get_algorithm
+from engines.cognition.algorithms import (
+    QUADRANT_ALGORITHMS,
+    SearchAlgorithm,
+    get_algorithm,
+)
 from engines.cognition.blackboard import Blackboard, RumsfeldQuadrant
 from engines.cognition.catastrophic_fallback import CatastrophicFallback, FailureType
 from engines.cognition.eisenhower_layer import EisenhowerLayer, EisenhowerQuadrant
@@ -260,6 +264,40 @@ _HARDCODED_TRANSITION_RESPONSES: Dict[Tuple[RumsfeldQuadrant, RumsfeldQuadrant],
         description="Network might answer our question - query it",
         params={"filter_by_question": True}
     ),
+
+    # === Forward Progress (UU->KK) ===
+    (RumsfeldQuadrant.UU, RumsfeldQuadrant.KK): TransitionResponse(
+        algorithm="greedy_best_first",
+        action="exploit",
+        description="Exploration yielded knowledge - exploit it",
+        params={"commit_threshold": 0.55}
+    ),
+
+    # === Contradiction Recovery (KU->UU, UK->KU, UK->UU) ===
+    (RumsfeldQuadrant.KU, RumsfeldQuadrant.UU): TransitionResponse(
+        algorithm="information_maximizing",
+        action="broaden",
+        description="Question led to contradiction - broaden search",
+        params={"exploration_bonus": 1.5, "exclude_answered": True}
+    ),
+    (RumsfeldQuadrant.UK, RumsfeldQuadrant.KU): TransitionResponse(
+        algorithm="targeted_question",
+        action="focus",
+        description="Retrieved knowledge raised new questions",
+        params={"use_answerer_heuristic": True}
+    ),
+    (RumsfeldQuadrant.UK, RumsfeldQuadrant.UU): TransitionResponse(
+        algorithm="exploration_exclusions",
+        action="reset",
+        description="Cached knowledge contradicted - explore afresh",
+        params={"exclude_failed_path": True}
+    ),
+    (RumsfeldQuadrant.KK, RumsfeldQuadrant.UK): TransitionResponse(
+        algorithm="retrieval",
+        action="retrieve",
+        description="Exploiting but untapped knowledge available",
+        params={"query_network_first": True}
+    ),
 }
 
 # Load from JSON at module level (falls back to hardcoded)
@@ -286,7 +324,8 @@ class RouterConfig:
     max_rungs_per_call: int = 5
 
     # Confidence threshold for committing
-    commit_threshold: float = 0.85
+    # NOTE: Most rungs output confidence=0.6, so threshold must be below that
+    commit_threshold: float = 0.55
 
     # Time budget per decision (seconds)
     time_budget_seconds: float = 5.0
@@ -393,6 +432,9 @@ class DecisionResult:
 
     # Final quadrant
     final_quadrant: str = "UU"
+
+    # Initial quadrant (at start of decision, for tracking transitions)
+    initial_quadrant: str = "UU"
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
@@ -561,7 +603,7 @@ class CognitiveRouter:
         )
         self.eisenhower = EisenhowerLayer(self.blackboard)  # Recreate with new blackboard
         self.phenomenology = PhenomenologyLayer(self.blackboard)  # Recreate with new blackboard
-        self.epistemic_tracker.reset()
+        self.epistemic_tracker.hard_reset()  # Full reset between games (different rules)
         if self.hysteresis:
             self.hysteresis.reset()
         if self.question_manager:
@@ -647,6 +689,7 @@ class CognitiveRouter:
         # Initial algorithm selection happens inside _decision_loop
         # after phenomenology modulation is computed (Phase 9)
         quadrant = self.epistemic_tracker.current_state.primary_quadrant
+        self._initial_quadrant = quadrant  # Save for DecisionResult
         self._switch_algorithm(quadrant.name, context)
 
         try:
@@ -836,11 +879,41 @@ class CognitiveRouter:
                 self._state.max_confidence = result.confidence
                 self._state.best_result = result
 
-            # Check for commitment
-            if result.confidence >= self.config.commit_threshold:
-                return self._commit_decision(result)
+            # Confidence boost: when consecutive rungs agree on the same action,
+            # boost confidence above the individual rung ceiling (typically 0.6).
+            # This makes agreement between independent cognitive units meaningful.
+            effective_confidence = result.confidence
+            if (result.value and self._state.best_result
+                    and isinstance(result.value, str)
+                    and result.value.startswith('ACTION')
+                    and isinstance(self._state.best_result.value, str)
+                    and result.value == self._state.best_result.value
+                    and result.rung_name != self._state.best_result.rung_name):
+                # Two different rungs agree on the same action - boost confidence
+                agreement_boost = 0.15
+                effective_confidence = min(1.0, result.confidence + agreement_boost)
+                # Update the result so commitment uses boosted value
+                result = RungResult(
+                    rung_name=result.rung_name,
+                    slot_name=result.slot_name,
+                    value=result.value,
+                    confidence=effective_confidence,
+                    raises_questions=getattr(result, 'raises_questions', []),
+                    answers_questions=getattr(result, 'answers_questions', []),
+                    surprise_level=getattr(result, 'surprise_level', 0.0),
+                    contradiction_detected=getattr(result, 'contradiction_detected', False),
+                    contradiction_with=getattr(result, 'contradiction_with', None),
+                )
+                if effective_confidence > self._state.max_confidence:
+                    self._state.max_confidence = effective_confidence
+                    self._state.best_result = result
 
-            # Update epistemic state
+            # ================================================================
+            # EPISTEMIC UPDATE (MUST happen BEFORE commit check)
+            # The tracker needs data from every rung to detect transitions
+            # and drive learning. Previously, commit fired first and the
+            # tracker was NEVER updated (root cause of permanent UU).
+            # ================================================================
             transitions = self.epistemic_tracker.update_from_rung_result(
                 rung_name=rung_name,
                 result=result,
@@ -848,6 +921,24 @@ class CognitiveRouter:
                 all_rungs=self._all_rungs,
                 visited_rungs=self._state.visited_rungs
             )
+
+            # ================================================================
+            # ADAPTIVE COMMIT THRESHOLD (based on epistemic quadrant)
+            # UU: Higher threshold forces broader exploration - needs rung
+            #     agreement (0.6 + 0.15 boost = 0.75) to commit.
+            # KU: Moderate threshold for targeted search.
+            # KK/UK: Low threshold for quick exploitation/retrieval.
+            # ================================================================
+            quadrant = self.epistemic_tracker.current_state.primary_quadrant
+            if quadrant == RumsfeldQuadrant.UU:
+                effective_threshold = max(self.config.commit_threshold, 0.75)
+            elif quadrant == RumsfeldQuadrant.KU:
+                effective_threshold = max(self.config.commit_threshold, 0.65)
+            else:
+                effective_threshold = self.config.commit_threshold
+
+            if effective_confidence >= effective_threshold:
+                return self._commit_decision(result)
 
             # Handle transitions
             for transition in transitions:
@@ -1004,6 +1095,9 @@ class CognitiveRouter:
 
         # Get algorithm instance
         try:
+            # Translate quadrant names (KK, KU, UK, UU) to algorithm names
+            if algorithm_name in QUADRANT_ALGORITHMS:
+                algorithm_name = QUADRANT_ALGORITHMS[algorithm_name]
             algorithm = get_algorithm(algorithm_name, **params)
 
             # Phase 9: Apply beam width modulation
@@ -1148,6 +1242,7 @@ class CognitiveRouter:
             used_fallback=True,
             fallback_reason=failure_type.value,
             final_quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
+            initial_quadrant=getattr(self, '_initial_quadrant', self.epistemic_tracker.current_state.primary_quadrant).name,
         )
 
     # -------------------------------------------------------------------------
@@ -1287,6 +1382,7 @@ class CognitiveRouter:
             time_elapsed=elapsed,
             path=self._state.path,
             final_quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
+            initial_quadrant=getattr(self, '_initial_quadrant', self.epistemic_tracker.current_state.primary_quadrant).name,
         )
 
     def _finalize_decision(self, algorithm_switches: int) -> DecisionResult:
@@ -1340,6 +1436,7 @@ class CognitiveRouter:
             time_elapsed=elapsed,
             path=self._state.path,
             final_quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
+            initial_quadrant=getattr(self, '_initial_quadrant', self.epistemic_tracker.current_state.primary_quadrant).name,
         )
 
     # -------------------------------------------------------------------------
@@ -1480,7 +1577,18 @@ class CognitiveRouter:
     # -------------------------------------------------------------------------
 
     def _build_graph_info(self) -> Dict[str, Any]:
-        """Build graph info for algorithm."""
+        """Build graph info for algorithm.
+
+        Includes visit_counts from current decision so the algorithm's
+        exploration bonus (UCB) can differentiate between visited and
+        unvisited rungs. Without this, every rung has visit_count=0 and
+        the exploration term is identical for all candidates.
+        """
+        # Build visit counts from current decision's visited rungs
+        visit_counts = {}
+        for rung_name in self._state.path:
+            visit_counts[rung_name] = visit_counts.get(rung_name, 0) + 1
+
         if self._precomputed_data:
             return {
                 'nodes': self._nodes,
@@ -1488,6 +1596,7 @@ class CognitiveRouter:
                 'reverse_edges': self._precomputed_data.reverse_edges,
                 'is_dag': self._precomputed_data.is_dag,
                 'topological_order': self._precomputed_data.topological_order,
+                'visit_counts': visit_counts,
             }
         return {
             'nodes': self._nodes,
@@ -1495,6 +1604,7 @@ class CognitiveRouter:
             'reverse_edges': {},
             'is_dag': False,
             'topological_order': [],
+            'visit_counts': visit_counts,
         }
 
     def _get_edge_trust(self, rung_name: str) -> float:

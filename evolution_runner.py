@@ -138,6 +138,13 @@ try:
 except ImportError:
     SYMBOLIC_REASONING_AVAILABLE = False
 
+# Agent Operating Mode System - assigns pioneer/optimizer/generalist/exploiter roles
+try:
+    from agent_operating_mode_system import AgentOperatingModeSystem
+    OPERATING_MODE_AVAILABLE = True
+except ImportError:
+    OPERATING_MODE_AVAILABLE = False
+
 
 @dataclass
 class AgentState:
@@ -230,7 +237,7 @@ class EvolutionRunner:
                 router_config = RouterConfig(
                     max_iterations=50,
                     max_rungs_per_call=5,
-                    commit_threshold=0.85,
+                    commit_threshold=0.55,
                     time_budget_seconds=5.0,
                     use_hysteresis=True,
                     use_meta_planner_cache=True,
@@ -267,7 +274,8 @@ class EvolutionRunner:
 
         # State
         self.agents: List[AgentState] = []
-        self.current_generation = 0
+        self.current_generation = self._load_generation_from_db()
+        self._start_generation = self.current_generation  # Track where this session began
         self.running = True
 
         # Session tracking for action traces
@@ -376,6 +384,39 @@ class EvolutionRunner:
                     print("[INIT] Games-as-teachers engine initialized")
             except Exception as e:
                 print(f"[WARN] Could not initialize games-as-teachers engine: {e}")
+
+        # Agent Operating Mode System - assigns roles per Unified Theory
+        # Per Unified Theory: "Roles emerge from agent's wA/wB ratios"
+        self.operating_mode_system = None
+        if OPERATING_MODE_AVAILABLE:
+            try:
+                self.operating_mode_system = AgentOperatingModeSystem(self.db)
+                if self.verbose:
+                    print("[INIT] Agent operating mode system initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize operating mode system: {e}")
+
+    def _load_generation_from_db(self) -> int:
+        """Load the next generation number from database.
+
+        Queries the max generation from game_results and agents tables
+        so we continue counting from where the last run left off.
+        """
+        try:
+            result = self.db.execute_query("""
+                SELECT MAX(gen) as max_gen FROM (
+                    SELECT MAX(generation) as gen FROM game_results
+                    UNION ALL
+                    SELECT MAX(generation) as gen FROM agents WHERE is_active = TRUE
+                )
+            """)
+            if result and result[0]['max_gen'] is not None:
+                next_gen = result[0]['max_gen'] + 1
+                print(f"[INIT] Resuming from generation {next_gen} (last completed: {next_gen - 1})")
+                return next_gen
+        except Exception as e:
+            print(f"[WARN] Could not load generation from DB: {e}")
+        return 0
 
     def _compute_frame_hash(self, obs: Any) -> str:
         """Compute hash of frame state for topology matching."""
@@ -1166,10 +1207,34 @@ class EvolutionRunner:
             frame_hash_after = self._compute_frame_hash(obs)
             last_frame_changed = frame_hash_before != frame_hash_after
 
+            # CRITICAL FIX: Feed ACTION6 click feedback to visual_analyzer
+            # Without this, the visual_analyzer never learns which coordinates
+            # were tried or which produced frame changes. It generates the same
+            # rigid grid every time, never filtering already-clicked positions.
+            if action.name == 'ACTION6' and action_data:
+                try:
+                    va = None
+                    if hasattr(self, 'decision_system') and hasattr(self.decision_system, '_engine_registry'):
+                        registry = self.decision_system._engine_registry
+                        if registry:
+                            va = getattr(registry, 'visual_analyzer', None)
+                    if va and hasattr(va, 'mark_coordinate_clicked'):
+                        click_x = action_data.get('x', 32)
+                        click_y = action_data.get('y', 32)
+                        va.mark_coordinate_clicked(click_x, click_y, frame_changed=last_frame_changed)
+                except Exception:
+                    pass  # Non-critical - don't break game loop
+
             # Track failed actions (no change = potential collision/invalid)
+            # EXCEPTION: For ACTION6-only games (click-based like vc33), frame hash
+            # comparison is unreliable - clicks may change game state without visible
+            # frame difference. Don't increment stuck_count for these games to prevent
+            # the InfiniteLoopBreakerRung from firing deterministically at action #18/#34.
+            is_action6_only = current_available == [6]
             if not last_frame_changed and action.name.startswith('ACTION'):
                 failed_actions.add(action.name)
-                stuck_count += 1  # Increment stuck counter
+                if not is_action6_only:
+                    stuck_count += 1  # Increment stuck counter (movement games only)
             else:
                 stuck_count = 0  # Reset on successful action
 
@@ -1350,74 +1415,111 @@ class EvolutionRunner:
 
         print(f"[GAMES] {len(games)} available: {games}")
 
+        # ASSIGN OPERATING MODES: Pioneer/Optimizer/Generalist/Exploiter
+        # Per Unified Theory: Roles emerge from agent performance + wA/wB weights
+        mode_assignments = {}
+        if self.operating_mode_system:
+            try:
+                agent_ids = [a.agent_id for a in self.agents]
+                mode_assignments = self.operating_mode_system.assign_population_modes(
+                    generation=self.current_generation,
+                    active_agents=agent_ids,
+                    game_id=games[0] if len(games) == 1 else None  # Only pass game_id if single game
+                )
+                # Update specialization in agents table so _create_scorecard_tags reads correct mode
+                for agent_id, mode in mode_assignments.items():
+                    self.db.execute_query(
+                        "UPDATE agents SET specialization = ? WHERE agent_id = ?",
+                        (mode, agent_id)
+                    )
+                if self.verbose:
+                    mode_counts = {}
+                    for m in mode_assignments.values():
+                        mode_counts[m] = mode_counts.get(m, 0) + 1
+                    print(f"[MODES] Assigned: {mode_counts}")
+            except Exception as e:
+                print(f"[WARN] Mode assignment failed, defaulting to generalist: {e}")
+
         results = []
         total_wins = 0
         total_score = 0.0
 
         # Each agent plays games
+        agents_played = 0
+        agents_skipped = 0
         for agent in self.agents:
             if not self.running:
                 break
 
-            # Select games for this agent using MetaLearningCurriculum if available
-            # Per Unified Theory: 4-stage curriculum for generalization
-            if self.meta_learning_curriculum:
-                try:
-                    agent_games = self.meta_learning_curriculum.select_games_for_agent(
-                        agent_id=agent.agent_id,
-                        available_games=games,
-                        num_games=self.games_per_generation
-                    )
-                    if not agent_games:
-                        # Fallback if curriculum returns empty
+            try:
+                # Select games for this agent using MetaLearningCurriculum if available
+                # Per Unified Theory: 4-stage curriculum for generalization
+                if self.meta_learning_curriculum:
+                    try:
+                        agent_games = self.meta_learning_curriculum.select_games_for_agent(
+                            agent_id=agent.agent_id,
+                            available_games=games,
+                            num_games=self.games_per_generation
+                        )
+                        if not agent_games:
+                            # Fallback if curriculum returns empty
+                            agent_games = random.sample(games, min(self.games_per_generation, len(games)))
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"    [CURRICULUM] Fallback to random: {e}")
                         agent_games = random.sample(games, min(self.games_per_generation, len(games)))
-                except Exception as e:
-                    if self.verbose:
-                        print(f"    [CURRICULUM] Fallback to random: {e}")
+                else:
+                    # No curriculum - random selection
                     agent_games = random.sample(games, min(self.games_per_generation, len(games)))
-            else:
-                # No curriculum - random selection
-                agent_games = random.sample(games, min(self.games_per_generation, len(games)))
 
-            print(f"\n[AGENT] {agent.agent_id[:12]}... playing {len(agent_games)} games")
+                print(f"\n[AGENT] {agent.agent_id[:12]}... playing {len(agent_games)} games")
 
-            for game_id in agent_games:
-                if not self.running:
-                    break
+                for game_id in agent_games:
+                    if not self.running:
+                        break
 
-                result = self.play_game(agent, game_id)
-                results.append(result)
+                    result = self.play_game(agent, game_id)
+                    results.append(result)
 
-                # Update agent state
-                agent.games_played += 1
-                agent.total_score += result.score
-                if result.is_win:
-                    agent.wins += 1
-                    total_wins += 1
+                    # Update agent state
+                    agent.games_played += 1
+                    agent.total_score += result.score
+                    if result.is_win:
+                        agent.wins += 1
+                        total_wins += 1
 
-                total_score += result.score
+                    total_score += result.score
 
-                # Log result
-                status = "[WIN]" if result.is_win else f"[{result.levels_completed}/{result.total_levels}]"
-                print(f"  {game_id}: {status} score={result.score:.1f} actions={result.actions_taken}")
+                    # Log result
+                    status = "[WIN]" if result.is_win else f"[{result.levels_completed}/{result.total_levels}]"
+                    print(f"  {game_id}: {status} score={result.score:.1f} actions={result.actions_taken}")
 
-                # Store in database
-                self._store_game_result(result)
+                    # Store in database
+                    self._store_game_result(result)
 
-            # Update curriculum progress for this agent after all games
-            # Per Unified Theory: Track stage progression for generalization
-            if self.meta_learning_curriculum:
-                try:
-                    self.meta_learning_curriculum.update_stage_progress(agent.agent_id)
-                except Exception as e:
-                    if self.verbose:
-                        print(f"    [CURRICULUM] Progress update failed: {e}")
+                # Update curriculum progress for this agent after all games
+                # Per Unified Theory: Track stage progression for generalization
+                if self.meta_learning_curriculum:
+                    try:
+                        self.meta_learning_curriculum.update_stage_progress(agent.agent_id)
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"    [CURRICULUM] Progress update failed: {e}")
+
+                agents_played += 1
+
+            except Exception as e:
+                agents_skipped += 1
+                print(f"[ERROR] Agent {agent.agent_id[:12]}... failed: {type(e).__name__}: {e}")
+
+        if agents_skipped > 0:
+            print(f"\n[WARN] {agents_skipped}/{len(self.agents)} agents skipped due to errors")
 
         games_played = len(results)
         avg_score = total_score / max(1, games_played)
         win_rate = total_wins / max(1, games_played)
 
-        print(f"\n[SUMMARY] Gen {self.current_generation}: {games_played} games, {total_wins} wins ({win_rate*100:.1f}%), avg score: {avg_score:.2f}")
+        print(f"\n[SUMMARY] Gen {self.current_generation}: {agents_played} agents, {games_played} games, {total_wins} wins ({win_rate*100:.1f}%), avg score: {avg_score:.2f}")
 
         # COLLECTIVE REASONING: Try collective approach on stuck games
         # Per Unified Theory: "Top performers collaborate on challenging games"
@@ -1756,8 +1858,9 @@ class EvolutionRunner:
         # Initialize
         self.agents = self.initialize_population()
 
-        # Main loop
-        while self.running and self.current_generation < self.max_generations:
+        # Main loop - max_generations is relative to session start
+        target_generation = self._start_generation + self.max_generations
+        while self.running and self.current_generation < target_generation:
             # Run generation
             stats = self.run_generation()
 
@@ -1804,6 +1907,8 @@ def main():
                                 'human_brain', 'frontier_exploration', 'phased_orientation',
                                 'phased_hypothesis', 'phased_exploitation'],
                        help='Rung ordering preset (default: comprehensive)')
+    parser.add_argument('--log-file', type=str, default=None,
+                       help='Write all output to this file (unbuffered)')
 
     args = parser.parse_args()
 
@@ -1822,6 +1927,18 @@ def main():
         args.max_generations = 1
         args.max_actions = 300  # Boosted for meaningful test (was 100)
 
+    # Log file redirect - file only (no Tee, avoids KeyboardInterrupt on console writes)
+    log_file_handle = None
+    if args.log_file:
+        log_file_handle = open(args.log_file, 'w', encoding='utf-8', buffering=1)  # Line-buffered
+        sys.stdout = log_file_handle
+        sys.stderr = log_file_handle
+        # Also redirect logging to file
+        import logging
+        file_handler = logging.StreamHandler(log_file_handle)
+        file_handler.setLevel(logging.DEBUG)
+        logging.getLogger().addHandler(file_handler)
+
     runner = EvolutionRunner(
         mode=args.mode,
         population_size=args.population,
@@ -1834,6 +1951,13 @@ def main():
     )
 
     runner.run()
+
+    # Clean up log file
+    if log_file_handle:
+        log_file_handle.flush()
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+        log_file_handle.close()
 
 
 if __name__ == "__main__":
