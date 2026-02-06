@@ -294,6 +294,13 @@ class EisenhowerLayer:
             # Boost cascade_risk when threat slots are highly urgent
             cascade_risk = max(cascade_risk, aggregate_urgency * 0.8)
 
+        # Phase 9: Incorporate phenomenology felt urgency bias
+        # Phenomenology compresses high-D state to a felt urgency signal
+        felt_urgency = self.blackboard.get('felt_urgency_bias', 0.0)
+        if felt_urgency > 0:
+            # Blend felt urgency into cascade_risk (capped at 1.0)
+            cascade_risk = min(1.0, cascade_risk + felt_urgency * 0.3)
+
         return UrgencyScore(
             budget_pressure=budget_pressure,
             volatility=volatility,
@@ -349,6 +356,15 @@ class EisenhowerLayer:
                 aggregate_importance * 0.5
             )
 
+        # Phase 9: Incorporate phenomenology felt importance bias
+        # Phenomenology compresses high-D state to a felt importance signal
+        felt_importance = self.blackboard.get('felt_importance_bias', 0.0)
+        if felt_importance > 0:
+            # Blend felt importance into win_probability_delta (capped at 1.0)
+            rung_win_contribution = min(
+                1.0, rung_win_contribution + felt_importance * 0.3
+            )
+
         return ImportanceScore(
             win_probability_delta=rung_win_contribution,
             theory_validation=theory_validation,
@@ -386,8 +402,17 @@ class EisenhowerLayer:
             urgency = self.compute_urgency(rung_name)
             importance = self.compute_importance(rung_name, edge_trust)
 
-            # Apply cross-matrix bias
-            # (We can't modify the dataclass, so we track bias separately)
+            # Apply Rumsfeld cross-matrix bias to shift urgency/importance
+            # e.g. KK boosts urgency (+0.2), KU boosts importance (+0.2)
+            urgency_boost = bias.get('urgency_boost', 0.0)
+            importance_boost = bias.get('importance_boost', 0.0)
+            if urgency_boost != 0.0:
+                urgency.cascade_risk = max(0.0, min(1.0, urgency.cascade_risk + urgency_boost))
+            if importance_boost != 0.0:
+                importance.win_probability_delta = max(
+                    0.0, min(1.0, importance.win_probability_delta + importance_boost)
+                )
+
             task = PrioritizedTask.classify(
                 rung_name, urgency, importance, epistemic_quadrant
             )

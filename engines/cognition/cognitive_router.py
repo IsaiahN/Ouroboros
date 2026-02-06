@@ -54,6 +54,7 @@ from engines.cognition.search_context import (
     SearchContext,
     create_search_context,
 )
+from engines.cognition.valence_tagged_slot import CRITICAL_SLOT_VALENCE_RULES
 
 # Graph evolution for edge trust tracking (Phase 7+11)
 try:
@@ -63,15 +64,142 @@ except ImportError:
     _GraphEvolution = None
     _GRAPH_EVOLUTION_AVAILABLE = False
 
+# GameFeelTrajectory store for anomaly detection (Phase 7+11)
+try:
+    from engines.reasoning.graph_evolution import FeelTrajectoryStore
+    _FEEL_TRAJECTORY_AVAILABLE = True
+except ImportError:
+    FeelTrajectoryStore = None  # type: ignore[assignment,misc]
+    _FEEL_TRAJECTORY_AVAILABLE = False
+
+# Slot registry for typed blackboard initialisation (Phase 1)
+try:
+    from engines.cognition.slot_registry import SLOT_DEFINITIONS
+    _SLOT_REGISTRY_AVAILABLE = True
+except ImportError:
+    SLOT_DEFINITIONS = None  # type: ignore[assignment]
+    _SLOT_REGISTRY_AVAILABLE = False
+
+# Question manager for KU lifecycle (Phase 6)
+try:
+    from engines.cognition.question_manager import QuestionManager
+    _QUESTION_MANAGER_AVAILABLE = True
+except ImportError:
+    QuestionManager = None  # type: ignore[assignment,misc]
+    _QUESTION_MANAGER_AVAILABLE = False
+
+# Routing metrics tracker (Phase 5)
+try:
+    from engines.cognition.routing_metrics import RoutingMetricsTracker
+    _ROUTING_METRICS_AVAILABLE = True
+except ImportError:
+    RoutingMetricsTracker = None  # type: ignore[assignment,misc]
+    _ROUTING_METRICS_AVAILABLE = False
+
+# Epistemic logger for trace buffering (Phase 6)
+try:
+    from engines.cognition.epistemic_logging import EpistemicLogger
+    _EPISTEMIC_LOGGER_AVAILABLE = True
+except ImportError:
+    EpistemicLogger = None  # type: ignore[assignment,misc]
+    _EPISTEMIC_LOGGER_AVAILABLE = False
+
+# UK Potential Index for bloom-filter knowledge checks (Phase 6)
+try:
+    from engines.cognition.uk_potential_index import UKPotentialIndex
+    _UK_INDEX_AVAILABLE = True
+except ImportError:
+    UKPotentialIndex = None  # type: ignore[assignment,misc]
+    _UK_INDEX_AVAILABLE = False
+
+# Process knowledge extractor for transfer learning (Phase 7.4)
+try:
+    from engines.cognition.process_knowledge import ProcessKnowledgeExtractor
+    _PROCESS_KNOWLEDGE_AVAILABLE = True
+except ImportError:
+    ProcessKnowledgeExtractor = None  # type: ignore[assignment,misc]
+    _PROCESS_KNOWLEDGE_AVAILABLE = False
+
+# Cognitive parameter history for debugging (global singleton)
+try:
+    from config.cognitive_parameters import PARAMETER_HISTORY, CognitiveParameters
+    _PARAM_HISTORY_AVAILABLE = True
+except ImportError:
+    PARAMETER_HISTORY = None  # type: ignore[assignment]
+    CognitiveParameters = None  # type: ignore[assignment,misc]
+    _PARAM_HISTORY_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# TRANSITION RESPONSE MAP
+# TRANSITION RESPONSE MAP - loaded from config/transition_responses.json
 # =============================================================================
 
-# The heart of Part 3: Transitions drive algorithm selection
-TRANSITION_RESPONSES: Dict[Tuple[RumsfeldQuadrant, RumsfeldQuadrant], TransitionResponse] = {
+# Map JSON algorithm names -> internal algorithm registry names
+_ALGORITHM_NAME_MAP: Dict[str, str] = {
+    "TargetedQuestionSearch": "targeted_question",
+    "GreedyExploitation": "greedy_best_first",
+    "BacktrackingTargetedSearch": "backtracking_astar",
+    "ExplorationWithExclusions": "exploration_exclusions",
+    "InformationMaximizingSearch": "information_maximizing",
+    "AlternateQuestionSearch": "targeted_question",  # Variant of targeted
+    "RetrievalSearch": "retrieval",
+    "LandmarkAStar": "landmark_astar",
+}
+
+
+def _load_transition_responses() -> Dict[Tuple[RumsfeldQuadrant, RumsfeldQuadrant], TransitionResponse]:
+    """Load transition responses from JSON config, falling back to hardcoded defaults."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    config_path = _Path(__file__).resolve().parents[2] / "config" / "transition_responses.json"
+    if not config_path.exists():
+        logger.warning("[ROUTER] transition_responses.json not found, using hardcoded defaults")
+        return _HARDCODED_TRANSITION_RESPONSES
+
+    try:
+        with open(config_path, 'r') as f:
+            data = _json.load(f)
+
+        quadrant_map = {
+            'KK': RumsfeldQuadrant.KK,
+            'KU': RumsfeldQuadrant.KU,
+            'UK': RumsfeldQuadrant.UK,
+            'UU': RumsfeldQuadrant.UU,
+        }
+
+        result: Dict[Tuple[RumsfeldQuadrant, RumsfeldQuadrant], TransitionResponse] = {}
+        for key_str, cfg in data.get('transitions', {}).items():
+            parts = key_str.split('->')
+            if len(parts) != 2:
+                continue
+            from_q = quadrant_map.get(parts[0].strip())
+            to_q = quadrant_map.get(parts[1].strip())
+            if from_q is None or to_q is None:
+                continue
+
+            # Resolve algorithm name to internal registry name
+            algo = _ALGORITHM_NAME_MAP.get(cfg['algorithm'], cfg['algorithm'].lower())
+
+            result[(from_q, to_q)] = TransitionResponse(
+                algorithm=algo,
+                action=cfg.get('action', 'continue'),
+                description=cfg.get('description', ''),
+                params=cfg.get('params', {}),
+            )
+
+        logger.info(f"[ROUTER] Loaded {len(result)} transition responses from JSON config")
+        return result
+
+    except Exception as e:
+        logger.warning(f"[ROUTER] Failed to load transition_responses.json: {e}, using defaults")
+        return _HARDCODED_TRANSITION_RESPONSES
+
+
+# Hardcoded fallback (original map, kept for resilience)
+_HARDCODED_TRANSITION_RESPONSES: Dict[Tuple[RumsfeldQuadrant, RumsfeldQuadrant], TransitionResponse] = {
     # === Discovery Transitions ===
     (RumsfeldQuadrant.UU, RumsfeldQuadrant.KU): TransitionResponse(
         algorithm="targeted_question",
@@ -134,6 +262,9 @@ TRANSITION_RESPONSES: Dict[Tuple[RumsfeldQuadrant, RumsfeldQuadrant], Transition
         params={"filter_by_question": True}
     ),
 }
+
+# Load from JSON at module level (falls back to hardcoded)
+TRANSITION_RESPONSES = _load_transition_responses()
 
 
 def get_algorithm_for_transition(transition: EpistemicTransition) -> TransitionResponse:
@@ -320,7 +451,9 @@ class CognitiveRouter:
         self.config = config or DEFAULT_CONFIG
 
         # Core components
-        self.blackboard = blackboard or Blackboard()
+        self.blackboard = blackboard or Blackboard(
+            slot_registry=SLOT_DEFINITIONS if _SLOT_REGISTRY_AVAILABLE else None
+        )
         self.epistemic_tracker = EpistemicTracker()
         self.hysteresis = HysteresisManager() if self.config.use_hysteresis else None
 
@@ -343,6 +476,36 @@ class CognitiveRouter:
         # Phase 7+11: Graph Evolution for edge trust and crystallization
         # Tracks traversals with FeltState context for intelligent path learning
         self.graph_evolution = _GraphEvolution() if _GRAPH_EVOLUTION_AVAILABLE else None
+
+        # Phase 12: Path Crystallization for shortcutting known-good paths
+        self.path_crystallizer: Optional[Any] = None
+        try:
+            from engines.cognition.path_crystallization import PathCrystallizer
+            self.path_crystallizer = PathCrystallizer()
+        except ImportError:
+            pass
+
+        # Phase 6: Question Manager for KU question lifecycle
+        self.question_manager = QuestionManager() if _QUESTION_MANAGER_AVAILABLE else None
+
+        # Phase 5: Routing Metrics for decision-level telemetry
+        self.metrics_tracker = RoutingMetricsTracker() if _ROUTING_METRICS_AVAILABLE else None
+
+        # Phase 6: Epistemic Logger (created per-game in initialize())
+        self.epistemic_logger: Optional[Any] = None
+
+        # Phase 6: UK Potential Index for bloom-filter knowledge checks
+        self.uk_index = UKPotentialIndex() if _UK_INDEX_AVAILABLE else None
+
+        # Phase 7.4: Process Knowledge Extractor for transfer learning
+        self.process_knowledge = ProcessKnowledgeExtractor() if _PROCESS_KNOWLEDGE_AVAILABLE else None
+
+        # Phase 7+11: FeelTrajectoryStore for game-level anomaly detection
+        self.feel_trajectory_store = FeelTrajectoryStore() if _FEEL_TRAJECTORY_AVAILABLE else None
+
+        # Parameter history snapshot at init
+        if _PARAM_HISTORY_AVAILABLE and PARAMETER_HISTORY is not None:
+            PARAMETER_HISTORY.snapshot("router_init", CognitiveParameters())
 
         # Graph structure
         self._nodes: Dict[str, Dict[str, Any]] = {}
@@ -394,12 +557,27 @@ class CognitiveRouter:
             )
 
         # Reset components
-        self.blackboard = Blackboard()
+        self.blackboard = Blackboard(
+            slot_registry=SLOT_DEFINITIONS if _SLOT_REGISTRY_AVAILABLE else None
+        )
         self.eisenhower = EisenhowerLayer(self.blackboard)  # Recreate with new blackboard
         self.phenomenology = PhenomenologyLayer(self.blackboard)  # Recreate with new blackboard
         self.epistemic_tracker.reset()
         if self.hysteresis:
             self.hysteresis.reset()
+        if self.question_manager:
+            self.question_manager.reset()
+        if self.uk_index:
+            self.uk_index.reset()
+
+        # Phase 6: Create per-game epistemic logger
+        if _EPISTEMIC_LOGGER_AVAILABLE:
+            self.epistemic_logger = EpistemicLogger(game_id=game_id)
+
+        # Phase 6: Populate UK index for this game
+        if self.uk_index:
+            game_type = ""  # Will be set from context later
+            self.uk_index.populate_for_game(game_id, game_type)
 
         logger.info(f"[ROUTER] Initialized for game {game_id} with {len(nodes)} rungs")
 
@@ -467,7 +645,8 @@ class CognitiveRouter:
         # Create initial search context
         context = self._create_search_context()
 
-        # Select initial algorithm based on quadrant
+        # Initial algorithm selection happens inside _decision_loop
+        # after phenomenology modulation is computed (Phase 9)
         quadrant = self.epistemic_tracker.current_state.primary_quadrant
         self._switch_algorithm(quadrant.name, context)
 
@@ -516,6 +695,14 @@ class CognitiveRouter:
         # This is where 'feeling' becomes actionable
         modulation = self.phenomenology.get_algorithm_modulation(felt)
 
+        # Phase 9: Re-apply modulation to initial algorithm selection
+        # (Initial switch happened in decide() before modulation was available)
+        if modulation and (modulation.algorithm_override or modulation.exploration_boost > 0
+                           or modulation.exclusion_set or modulation.beam_width_multiplier != 1.0):
+            self._switch_algorithm(
+                self._state.current_algorithm_name, context, modulation=modulation
+            )
+
         # Phase 8: Age scheduled queue at start of cycle
         # This can promote Q2 tasks to Q1 through urgency increase
         self.eisenhower.age_scheduled_queue()
@@ -526,6 +713,28 @@ class CognitiveRouter:
             logger.debug(f"[ROUTER] Executing promoted task from aging: {promoted}")
             result = self._execute_rung(promoted, game_state, rung_executor)
             # Process the result normally below
+
+        # Phase 12: Check for crystallized path shortcut
+        # If a reliable path exists for this domain, execute it directly
+        # instead of running the full search loop
+        if self.path_crystallizer and rung_executor:
+            domain = game_state.get('domain', game_state.get('game_type', ''))
+            if domain:
+                crystallized = self.path_crystallizer.get_crystallized_path(domain)
+                if crystallized:
+                    logger.info(
+                        f"[ROUTER] Using crystallized path for {domain}: "
+                        f"{len(crystallized)} rungs"
+                    )
+                    last_result = None
+                    for rung_name in crystallized:
+                        last_result = self._execute_rung(
+                            rung_name, game_state, rung_executor
+                        )
+                        self._state.path.append(rung_name)
+                        if last_result and last_result.confidence >= self.config.commit_threshold:
+                            return self._commit_decision(last_result)
+                    # If crystallized path didn't commit, fall through to search
 
         while self._state.iteration < self.config.max_iterations:
             self._state.iteration += 1
@@ -669,7 +878,7 @@ class CognitiveRouter:
 
                 # Switch algorithm
                 if response.algorithm != self._state.current_algorithm_name:
-                    self._switch_algorithm(response.algorithm, context, response.params)
+                    self._switch_algorithm(response.algorithm, context, response.params, modulation=modulation)
                     algorithm_switches += 1
                     self._state.iterations_since_switch = 0
 
@@ -683,6 +892,59 @@ class CognitiveRouter:
                     # Check for contradiction
                     if transition.is_regression:
                         self.fallback.record_contradiction()
+
+            # Phase 6: Log epistemic state after transitions
+            if self.epistemic_logger:
+                active_q_count = (
+                    len(self.question_manager.get_active_questions())
+                    if self.question_manager else 0
+                )
+                uk_pot = (
+                    self.uk_index.get_potential_score()
+                    if self.uk_index and hasattr(self.uk_index, 'get_potential_score')
+                    else 0.0
+                )
+                last_transition = transitions[-1] if transitions else None
+                self.epistemic_logger.log_from_state(
+                    tick=self._state.iteration,
+                    state=self.epistemic_tracker.current_state,
+                    transition=last_transition,
+                    algorithm=self._state.current_algorithm_name,
+                    thrashing_score=self.epistemic_tracker.get_thrashing_score()
+                        if hasattr(self.epistemic_tracker, 'get_thrashing_score') else 0.0,
+                    active_questions=active_q_count,
+                    uk_potential=uk_pot,
+                )
+
+            # Phase 6: Raise questions from low-confidence results
+            if self.question_manager and result.confidence < 0.4:
+                # Low confidence -> raise a question for KU tracking
+                self.question_manager.raise_question(
+                    question_id=f"low_conf_{rung_name}_{self._state.iteration}",
+                    text=f"Why did {rung_name} score only {result.confidence:.2f}?",
+                    answerable_by=[rung_name],
+                    raised_by=rung_name,
+                    current_tick=self._state.iteration,
+                    priority=0.3 + (0.4 - result.confidence),
+                )
+
+            # Phase 7+11: Detect game-feel anomaly
+            if self.feel_trajectory_store and _FEEL_TRAJECTORY_AVAILABLE and felt:
+                # Determine game phase from iteration progress
+                progress = self._state.iteration / max(1, self.config.max_iterations)
+                if progress < 0.3:
+                    phase = 'opening'
+                elif progress < 0.7:
+                    phase = 'midgame'
+                else:
+                    phase = 'resolution'
+                anomaly = self.feel_trajectory_store.detect_anomaly(
+                    self._game_id, felt, phase
+                )
+                if anomaly:
+                    logger.debug(
+                        f"[ROUTER] Feel anomaly in {phase}: {anomaly.description}"
+                    )
 
             # Update context
             context = self._update_search_context(context)
@@ -922,6 +1184,57 @@ class CognitiveRouter:
         produced by the rung. This is set by the rung_executor closure in
         _decide_cognitive, which evaluates the legacy rung and captures its output.
         """
+        domain = self.blackboard.get('domain', self.blackboard.get('game_type', ''))
+
+        # Phase 12: Record successful path for crystallization
+        if self.path_crystallizer and self._state.path:
+            if domain:
+                self.path_crystallizer.record_successful_path(
+                    domain=domain,
+                    path=list(self._state.path),
+                    confidence=result.confidence,
+                    ticks=self._state.iteration,
+                )
+
+        # Phase 7.4: Record successful path for process knowledge extraction
+        if self.process_knowledge and self._state.path and domain:
+            try:
+                self.process_knowledge.record_success(domain, list(self._state.path))
+            except Exception as pk_err:
+                logger.debug(f"[ROUTER] Process knowledge record failed: {pk_err}")
+
+        # Phase 5: Record decision metrics
+        elapsed = time.perf_counter() - self._state.start_time
+        if self.metrics_tracker:
+            has_backtrack = any(
+                t.is_regression for t in self._state.transitions
+            ) if self._state.transitions else False
+            contradictions = sum(
+                1 for t in self._state.transitions if t.is_regression
+            )
+            self.metrics_tracker.record_decision(
+                rungs_evaluated=len(self._state.visited_rungs),
+                latency_ms=elapsed * 1000,
+                first_win=(self._state.iteration == 1),
+                backtracked=has_backtrack,
+                contradictions_detected=contradictions,
+                game_id=self._game_id,
+                algorithm_used=self._state.current_algorithm_name or "unknown",
+                quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
+                used_fallback=False,
+            )
+
+        # Phase 6: Record question lifecycle — answered by committed rung
+        if self.question_manager:
+            for q in self.question_manager.get_questions_for_rung(result.rung_name):
+                self.question_manager.record_attempt(
+                    question_id=q.question_id,
+                    succeeded=(result.confidence >= 0.6),
+                    confidence=result.confidence,
+                    answer_source=result.rung_name,
+                    current_tick=self._state.iteration,
+                )
+
         # Extract actual ACTION string from the rung result's value field
         action_value = None
         if isinstance(result.value, str) and result.value.startswith('ACTION'):
@@ -935,7 +1248,7 @@ class CognitiveRouter:
             iterations=self._state.iteration,
             rungs_evaluated=len(self._state.visited_rungs),
             transitions_count=len(self._state.transitions),
-            time_elapsed=time.perf_counter() - self._state.start_time,
+            time_elapsed=elapsed,
             path=self._state.path,
             final_quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
         )
@@ -955,6 +1268,30 @@ class CognitiveRouter:
             confidence = self._state.max_confidence
             reasoning = "Loop ended without high-confidence result"
 
+        # Phase 5: Record decision metrics (non-committed path)
+        elapsed = time.perf_counter() - self._state.start_time
+        if self.metrics_tracker:
+            has_backtrack = any(
+                t.is_regression for t in self._state.transitions
+            ) if self._state.transitions else False
+            self.metrics_tracker.record_decision(
+                rungs_evaluated=len(self._state.visited_rungs),
+                latency_ms=elapsed * 1000,
+                first_win=False,
+                backtracked=has_backtrack,
+                game_id=self._game_id,
+                algorithm_used=self._state.current_algorithm_name or "unknown",
+                quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
+                used_fallback=False,
+            )
+
+        # Phase 6: Flush epistemic logger at decision end
+        if self.epistemic_logger:
+            try:
+                self.epistemic_logger.flush()
+            except Exception:
+                pass  # Best-effort flush
+
         return DecisionResult(
             action=action,
             reasoning=reasoning,
@@ -964,7 +1301,7 @@ class CognitiveRouter:
             rungs_evaluated=len(self._state.visited_rungs),
             transitions_count=len(self._state.transitions),
             algorithm_switches=algorithm_switches,
-            time_elapsed=time.perf_counter() - self._state.start_time,
+            time_elapsed=elapsed,
             path=self._state.path,
             final_quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
         )
@@ -1012,9 +1349,14 @@ class CognitiveRouter:
         3. Computing derived slots that cognitive components need
         """
         # Pass through all context keys (skip large data)
+        # Use write_with_valence for critical slots so the valence store
+        # populates aggregate urgency/importance for Eisenhower (Phase 10)
         for key, value in game_state.items():
             if key not in ('frame', 'raw_frame'):
-                self.blackboard.slot(key, value)
+                if key in CRITICAL_SLOT_VALENCE_RULES:
+                    self.blackboard.write_with_valence(key, value)
+                else:
+                    self.blackboard.slot(key, value)
 
         # =====================================================================
         # ALIASING: Context keys -> Cognitive slot names
@@ -1037,7 +1379,7 @@ class CognitiveRouter:
             self.blackboard.slot('budget_pressure', budget_pressure)
             # Flag critical budget for phenomenology THREAT detection
             if budget_pressure > 0.85:
-                self.blackboard.slot('action_budget_critical', True)
+                self.blackboard.write_with_valence('action_budget_critical', True)
 
         # Level progress for phenomenology external validation
         levels_completed = game_state.get('levels_completed', 0)
@@ -1158,7 +1500,7 @@ class CognitiveRouter:
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get router statistics."""
-        return {
+        stats: Dict[str, Any] = {
             'total_decisions': self._total_decisions,
             'total_fallbacks': self._total_fallbacks,
             'fallback_rate': self._total_fallbacks / max(1, self._total_decisions),
@@ -1179,6 +1521,50 @@ class CognitiveRouter:
                 'crystallized_edges': len(self.graph_evolution._crystallized_paths) if self.graph_evolution else 0,
             },
         }
+
+        # Phase 5: Routing metrics summary
+        if self.metrics_tracker:
+            try:
+                stats['routing_metrics'] = self.metrics_tracker.get_metrics()
+            except Exception:
+                stats['routing_metrics'] = {}
+
+        # Phase 6: Question manager summary
+        if self.question_manager:
+            active = self.question_manager.get_active_questions()
+            stats['question_manager'] = {
+                'total_raised': self.question_manager._total_raised,
+                'total_answered': self.question_manager._total_answered,
+                'active_questions': len(active),
+            }
+
+        # Phase 6: Epistemic logger summary
+        if self.epistemic_logger:
+            try:
+                stats['epistemic_logger'] = self.epistemic_logger.get_summary()
+            except Exception:
+                stats['epistemic_logger'] = {}
+
+        # Phase 6: UK potential index
+        if self.uk_index:
+            stats['uk_index'] = {
+                'game_id': self.uk_index._game_id,
+                'entries': len(self.uk_index.index),
+                'cold_start': self.uk_index._is_cold_start,
+            }
+
+        # Phase 7.4: Process knowledge
+        if self.process_knowledge:
+            stats['process_knowledge'] = {
+                'total_paths_recorded': self.process_knowledge._total_paths_recorded,
+                'unique_patterns': self.process_knowledge._unique_patterns_found,
+            }
+
+        # Phase 7+11: Feel trajectory store
+        if self.feel_trajectory_store:
+            stats['feel_trajectories'] = self.feel_trajectory_store.get_statistics()
+
+        return stats
 
     # -------------------------------------------------------------------------
     # LEGACY COMPATIBILITY

@@ -7294,7 +7294,25 @@ class DecisionRungSystem:
                 for rung in self.rungs
                 if rung.name not in self.EMERGENCY_RUNG_NAMES
             }
-            edges: Dict[str, List[str]] = {}  # Populated by edge inference in future
+
+            # Use EdgeInferenceEngine to populate edges from slot dataflow
+            edges: Dict[str, List[str]] = {}
+            try:
+                from engines.cognition.edge_inference import EdgeInferenceEngine
+                edge_engine = EdgeInferenceEngine()
+                rung_classes = [type(r) for r in self.rungs if r.name not in self.EMERGENCY_RUNG_NAMES]
+                edge_engine.analyze_rungs(rung_classes)
+                inferred = edge_engine.infer_all_edges()
+                # Convert InferredEdge list to adjacency dict
+                for ie in inferred:
+                    if ie.source_rung not in edges:
+                        edges[ie.source_rung] = []
+                    if ie.target_rung not in edges[ie.source_rung]:
+                        edges[ie.source_rung].append(ie.target_rung)
+                logger.info(f"[RUNG-SYSTEM] Edge inference: {len(inferred)} edges for {len(nodes)} rungs")
+            except Exception as edge_err:
+                logger.warning(f"[RUNG-SYSTEM] Edge inference failed, using empty edges: {edge_err}")
+
             router.initialize(nodes, edges, game_id)
             self._cognitive_game_id = game_id
 
@@ -7540,6 +7558,9 @@ class CoreGameplayAdapter:
         self.divergence_count = 0
         self.agreement_count = 0
 
+        # Phase 11: Advanced shadow tester (lazy-loaded)
+        self._shadow_tester: Any = None
+
         # Category takeover state
         self.category_enabled: Dict[str, bool] = {
             'emergency': False,
@@ -7556,6 +7577,17 @@ class CoreGameplayAdapter:
         self.shadow_log = []
         self._shadow_log_limit = log_limit
         logger.info("[RUNG-ADAPTER] Shadow mode ENABLED - comparing decisions")
+
+    def get_shadow_tester(self) -> Any:
+        """Lazy-load the advanced ShadowTester from shadow_testing.py."""
+        if self._shadow_tester is None:
+            try:
+                from engines.cognition.shadow_testing import ShadowTester
+                self._shadow_tester = ShadowTester()
+                logger.info("[RUNG-ADAPTER] Advanced ShadowTester loaded")
+            except ImportError:
+                logger.warning("[RUNG-ADAPTER] ShadowTester not available")
+        return self._shadow_tester
 
     def disable_shadow_mode(self) -> Dict[str, Any]:
         """Disable shadow mode and return comparison stats."""
