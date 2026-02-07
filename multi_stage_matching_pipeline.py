@@ -551,11 +551,38 @@ class MultiStageMatchingPipeline:
 
         return None
 
-    def _parse_actions(self, action_string: str) -> List[int]:
-        """Parse action string into list of action numbers."""
+    def _parse_actions(self, action_string: str) -> List[str]:
+        """Parse action string into list of action strings.
+
+        Handles JSON array format: '["ACTION1", "ACTION2", ...]'
+        Also handles legacy comma-separated format: '1,2,3'
+        """
         if not action_string:
             return []
-        return [int(a) for a in action_string.split(',') if a.strip().isdigit()]
+        # Primary format: JSON array of strings
+        if action_string.strip().startswith('['):
+            try:
+                import json
+                parsed = json.loads(action_string)
+                # Ensure all items are ACTION strings
+                result = []
+                for item in parsed:
+                    if isinstance(item, str) and item.startswith('ACTION'):
+                        result.append(item)
+                    elif isinstance(item, int):
+                        result.append(f'ACTION{item}')
+                return result
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # Legacy format: comma-separated integers
+        result = []
+        for a in action_string.split(','):
+            a = a.strip()
+            if a.isdigit():
+                result.append(f'ACTION{a}')
+            elif a.startswith('ACTION'):
+                result.append(a)
+        return result
 
     def get_stage_statistics(self) -> Dict[str, Any]:
         """Return performance statistics for each matching stage."""

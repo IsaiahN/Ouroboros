@@ -318,10 +318,10 @@ def get_algorithm_for_transition(transition: EpistemicTransition) -> TransitionR
 class RouterConfig:
     """Configuration for the CognitiveRouter."""
     # Maximum iterations per decision (each evaluates up to max_rungs_per_call)
-    # With batch evaluation: 3 iterations x 5 rungs = 15 rung evals max.
-    # Architecture target: O(26) typical. Previously 50 iterations x 1 rung
-    # = O(50) brute-force scan of all rungs.
-    max_iterations: int = 3
+    # With batch evaluation: 12 iterations x 5 rungs = 60 rung evals max.
+    # Architecture target: O(26) typical. With agreement boost, the router
+    # usually commits in 2-4 iterations when rungs agree.
+    max_iterations: int = 12
 
     # Maximum rungs to evaluate per algorithm call (batch size)
     # Algorithms return their top-K candidates ranked by expected value.
@@ -329,8 +329,11 @@ class RouterConfig:
     max_rungs_per_call: int = 5
 
     # Confidence threshold for committing
-    # NOTE: Most rungs output confidence=0.6, so threshold must be below that
-    commit_threshold: float = 0.65
+    # Most rungs output confidence ~0.6. At 0.50, a single confident rung
+    # can commit. With agreement boost (+0.15), two agreeing rungs reach
+    # 0.75, well above threshold. Previous 0.65 was unreachable for single
+    # rungs, causing 100% fallback.
+    commit_threshold: float = 0.50
 
     # Time budget per decision (seconds)
     time_budget_seconds: float = 5.0
@@ -969,11 +972,11 @@ class CognitiveRouter:
                 # Check commit threshold
                 quadrant = self.epistemic_tracker.current_state.primary_quadrant
                 if quadrant == RumsfeldQuadrant.UU:
-                    effective_threshold = max(self.config.commit_threshold, 0.70)
-                elif quadrant == RumsfeldQuadrant.KU:
-                    effective_threshold = max(self.config.commit_threshold, 0.65)
+                    # UU: Agreement provides enough confidence (0.6+0.15=0.75)
+                    effective_threshold = max(self.config.commit_threshold, 0.60)
                 else:
-                    effective_threshold = max(self.config.commit_threshold, 0.65)
+                    # KK/KU/UK: Agreement easily clears base threshold
+                    effective_threshold = self.config.commit_threshold
 
                 if best_agreement_conf >= effective_threshold:
                     return self._commit_decision(boosted_result)
@@ -983,11 +986,11 @@ class CognitiveRouter:
             if self._state.best_result:
                 quadrant = self.epistemic_tracker.current_state.primary_quadrant
                 if quadrant == RumsfeldQuadrant.UU:
-                    effective_threshold = max(self.config.commit_threshold, 0.70)
-                elif quadrant == RumsfeldQuadrant.KU:
-                    effective_threshold = max(self.config.commit_threshold, 0.65)
+                    # UU: Slightly higher bar for single rung (no agreement)
+                    effective_threshold = max(self.config.commit_threshold, 0.60)
                 else:
-                    effective_threshold = max(self.config.commit_threshold, 0.65)
+                    # KK/KU/UK: Single confident rung (0.6) can commit
+                    effective_threshold = self.config.commit_threshold
 
                 if self._state.max_confidence >= effective_threshold:
                     return self._commit_decision(self._state.best_result)

@@ -89,7 +89,10 @@ class EpistemicState:
             return RumsfeldQuadrant.KK
 
         # UK: Retrieve untapped cached/network knowledge
-        if self.uk_potential > 0.03 and len(self.unknown_knowns) >= 2:
+        # Thresholds raised from 0.03/2 to 0.15/5 because ~12 retrieval-
+        # prefixed rungs always exceeded the old thresholds, locking every
+        # decision into UK and making KK unreachable.
+        if self.uk_potential > 0.15 and len(self.unknown_knowns) >= 5:
             return RumsfeldQuadrant.UK
         # KU: Even ONE open question with moderate urgency triggers targeted search
         if len(self.known_unknowns) >= 1 and self.ku_urgency > 0.2:

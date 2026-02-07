@@ -417,24 +417,22 @@ class EpistemicTracker:
         if network_cache and rung_name in network_cache:
             return True
 
-        # Check if it's a network/retrieval/knowledge rung.
-        # These rungs pull from external knowledge (database, network,
-        # cached patterns) rather than analyzing the current frame.
-        # Broadened from just network_/cached_/winning_sequence to include
-        # all rungs that represent "knowledge the agent hasn't accessed yet".
+        # Check if it's a rung that ACTUALLY has data in the database.
+        # Previously, any rung with a retrieval-sounding prefix was assumed
+        # to have cached knowledge, inflating unknown_knowns to ~12 rungs
+        # and uk_potential to ~0.24. This caused permanent UK quadrant lock
+        # (UK always exceeded threshold 0.03/2 unknowns).
+        # Now only return True for rungs with ACTUAL blackboard data.
         retrieval_prefixes = (
             'network_',           # network_wisdom, network_sharing, etc.
             'cached_',            # cached sequences
             'winning_sequence',   # winning sequence replay
-            'prior_lessons',      # lessons from past games
-            'embedding_',         # embedding_suggestion, embedding_matcher
-            'replay_',            # replay_learning
-            'rule_transfer',      # cross-game rule transfer
-            'few_shot_',          # few_shot_invariants, few_shot_relations
-            'resonance_',         # resonance_detector (cross-domain patterns)
         )
         if any(rung_name.startswith(p) for p in retrieval_prefixes):
-            return True
+            # Only count if the blackboard actually has relevant data
+            slot = blackboard.slot(rung_name)
+            if slot is not None:
+                return True
 
         return False
 
