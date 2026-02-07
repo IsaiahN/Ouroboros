@@ -29,12 +29,10 @@ import logging
 import math
 import random
 from abc import ABC, abstractmethod
-from collections import defaultdict
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from engines.cognition.search_context import SearchContext, SearchPhase
+from engines.cognition.search_context import SearchContext
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +62,10 @@ class SearchAlgorithm(ABC):
     # Applicability
     requires_dag: bool = False  # Only works on DAGs
     requires_goal: bool = False  # Needs explicit goal state
+
+    def __init__(self, **kwargs):
+        """Accept extra kwargs for compatibility with get_algorithm()."""
+        pass
 
     @abstractmethod
     def get_next_rungs(
@@ -354,7 +356,13 @@ class GreedyBestFirst(SearchAlgorithm):
             scored.append((score, rung))
 
         scored.sort(reverse=True)  # Highest first
-        return [scored[0][1]]
+        # Return top-K candidates for batch evaluation and agreement
+        # checking. The router evaluates this batch in one pass and
+        # looks for action agreement between rungs. Returning only 1
+        # rung forces the router into a brute-force O(V) linear scan
+        # of all rungs across iterations, defeating focused search.
+        max_k = graph_info.get('max_rungs_per_call', 5)
+        return [r for _, r in scored[:max_k]]
 
     def _expected_confidence(
         self,
@@ -362,7 +370,19 @@ class GreedyBestFirst(SearchAlgorithm):
         context: SearchContext,
         graph_info: Dict[str, Any]
     ) -> float:
-        """Estimate confidence gain from executing this rung."""
+        """Estimate confidence gain from executing this rung.
+
+        Prioritizes rungs proven to produce high-confidence results
+        (tracked as known_knowns by the epistemic tracker). Without
+        this, KK decisions waste 35+ iterations scoring all rungs at
+        ~0.3 default instead of jumping to the proven rung first.
+        """
+        # Priority 1: If this rung is a proven known_known source,
+        # score it above all unknown rungs so KK exploits immediately
+        known_rungs = graph_info.get('known_rungs', {})
+        if rung in known_rungs:
+            return known_rungs[rung] + 1.0  # e.g. 0.6 + 1.0 = 1.6
+
         rung_info = graph_info.get('nodes', {}).get(rung, {})
 
         # Base confidence from rung's historical performance
@@ -469,7 +489,8 @@ class InformationMaximizingSearch(SearchAlgorithm):
             scored.append((acquisition, rung))
 
         scored.sort(reverse=True)
-        return [scored[0][1]]
+        max_k = graph_info.get('max_rungs_per_call', 5)
+        return [r for _, r in scored[:max_k]]
 
     def _expected_info_gain(
         self,
@@ -693,6 +714,7 @@ class TargetedQuestionSearch(SearchAlgorithm):
             answerer_rungs.update(answerers)
 
         # Prefer rungs that can answer questions
+        max_k = graph_info.get('max_rungs_per_call', 5)
         answerers_in_frontier = frontier & answerer_rungs
         if answerers_in_frontier:
             # Score by question priority
@@ -701,7 +723,7 @@ class TargetedQuestionSearch(SearchAlgorithm):
                 priority = self._question_priority(rung, questions)
                 scored.append((priority, rung))
             scored.sort(reverse=True)
-            return [scored[0][1]]
+            return [r for _, r in scored[:max_k]]
 
         # No direct answerers - find path to answerers
         scored = []
@@ -714,7 +736,7 @@ class TargetedQuestionSearch(SearchAlgorithm):
             scored.append((min_dist, rung))
 
         scored.sort()  # Lowest distance first
-        return [scored[0][1]]
+        return [r for _, r in scored[:max_k]]
 
     def _question_priority(self, rung: str, questions: Dict[str, Any]) -> float:
         """Get priority of questions this rung can answer."""
@@ -770,6 +792,8 @@ class RetrievalSearch(SearchAlgorithm):
         if not frontier:
             return []
 
+        max_k = graph_info.get('max_rungs_per_call', 5)
+
         # Prefer retrieval rungs
         retrieval_in_frontier = frontier & self.RETRIEVAL_RUNGS
         if retrieval_in_frontier:
@@ -783,7 +807,8 @@ class RetrievalSearch(SearchAlgorithm):
                 scored.append((score, rung))
 
             scored.sort(reverse=True)
-            return [scored[0][1]]
+            max_k = graph_info.get('max_rungs_per_call', 5)
+            return [r for _, r in scored[:max_k]]
 
         # Navigate toward retrieval rungs
         scored = []
@@ -796,7 +821,7 @@ class RetrievalSearch(SearchAlgorithm):
             scored.append((min_dist, rung))
 
         scored.sort()
-        return [scored[0][1]]
+        return [r for _, r in scored[:max_k]]
 
 
 # =============================================================================
@@ -845,7 +870,8 @@ class ExplorationWithExclusions(SearchAlgorithm):
             scored.append((score, rung))
 
         scored.sort(reverse=True)
-        return [scored[0][1]]
+        max_k = graph_info.get('max_rungs_per_call', 5)
+        return [r for _, r in scored[:max_k]]
 
 
 # =============================================================================

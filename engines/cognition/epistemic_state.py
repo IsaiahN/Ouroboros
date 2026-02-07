@@ -60,22 +60,35 @@ class EpistemicState:
         """
         Determine which quadrant dominates current state.
 
-        Priority order: UK (quick wins) > KU (targeted) > UU (explore) > KK (exploit)
+        Priority order:
+        - KK first when strong (exploit established high-confidence knowledge)
+        - UK (retrieve untapped cached knowledge when KK not established)
+        - KU (targeted search for specific questions)
+        - UU (explore when nothing specific known)
+        - KK fallback (any accumulated knowledge)
 
-        This ordering reflects:
-        - UK first: If we have cached knowledge, use it (cheap)
-        - KU second: If we have specific questions, answer them (focused)
-        - UU third: If nothing specific, explore (learn)
-        - KK last: Only exploit when we have high confidence (careful)
+        Previous bug: UK had highest priority with trivially low thresholds
+        (uk_potential > 0.03, 2+ unknown_knowns). Since ~61 rungs exist and
+        many have retrieval prefixes, UK ALWAYS triggered, making KK
+        unreachable. Agents would go KK→UK on every decision.
 
-        Thresholds are set to allow transitions from auto-generated
-        epistemic signals (slot_name from rung names, questions from
-        failed rungs). Without these low thresholds, the system stays
-        permanently locked in UU.
+        Fix: KK takes priority when confidence is strong (> 0.5) or when
+        substantial knowledge has accumulated (3+ known facts). This lets
+        the greedy_best_first algorithm exploit proven knowledge instead of
+        always falling back to retrieval search.
 
         Returns:
             The dominant quadrant that should drive algorithm selection
         """
+        # KK: Exploit established knowledge with strong confidence.
+        # When we KNOW things confidently, use greedy_best_first to commit
+        # quickly rather than retrieving more knowledge (UK) or exploring (UU).
+        if self.kk_confidence > 0.5:
+            return RumsfeldQuadrant.KK
+        if self.known_knowns and len(self.known_knowns) >= 3:
+            return RumsfeldQuadrant.KK
+
+        # UK: Retrieve untapped cached/network knowledge
         if self.uk_potential > 0.03 and len(self.unknown_knowns) >= 2:
             return RumsfeldQuadrant.UK
         # KU: Even ONE open question with moderate urgency triggers targeted search
@@ -83,8 +96,6 @@ class EpistemicState:
             return RumsfeldQuadrant.KU
         if self.uu_estimate > 0.6:
             return RumsfeldQuadrant.UU
-        if self.kk_confidence > 0.5:
-            return RumsfeldQuadrant.KK
         # If we have ANY accumulated knowledge, exploit it rather than
         # defaulting back to UU exploration (breaks the UU→UU loop)
         if self.known_knowns:

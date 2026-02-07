@@ -325,14 +325,18 @@ class TestGreedyBestFirst:
     """Tests for GreedyBestFirst algorithm."""
 
     def test_get_next_rungs(self, sample_context, sample_graph_info):
-        """Test greedy selection by confidence."""
+        """Test greedy selection returns top-K candidates ranked by confidence."""
         algo = GreedyBestFirst()
 
         frontier = {'survey', 'hypothesis_testing'}
         result = algo.get_next_rungs(frontier, sample_context, sample_graph_info)
 
-        assert len(result) == 1
-        assert result[0] in frontier
+        # Should return up to max_rungs_per_call candidates (default 5)
+        # With only 2 in frontier, returns both ranked by score
+        assert len(result) <= len(frontier)
+        assert len(result) >= 1
+        for r in result:
+            assert r in frontier
 
 
 class TestBeamSearch:

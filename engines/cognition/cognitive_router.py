@@ -317,15 +317,20 @@ def get_algorithm_for_transition(transition: EpistemicTransition) -> TransitionR
 @dataclass
 class RouterConfig:
     """Configuration for the CognitiveRouter."""
-    # Maximum iterations per decision
-    max_iterations: int = 50
+    # Maximum iterations per decision (each evaluates up to max_rungs_per_call)
+    # With batch evaluation: 3 iterations x 5 rungs = 15 rung evals max.
+    # Architecture target: O(26) typical. Previously 50 iterations x 1 rung
+    # = O(50) brute-force scan of all rungs.
+    max_iterations: int = 3
 
-    # Maximum rungs to evaluate per algorithm call
+    # Maximum rungs to evaluate per algorithm call (batch size)
+    # Algorithms return their top-K candidates ranked by expected value.
+    # The router evaluates all K in one pass and checks for agreement.
     max_rungs_per_call: int = 5
 
     # Confidence threshold for committing
     # NOTE: Most rungs output confidence=0.6, so threshold must be below that
-    commit_threshold: float = 0.55
+    commit_threshold: float = 0.65
 
     # Time budget per decision (seconds)
     time_budget_seconds: float = 5.0
@@ -436,6 +441,12 @@ class DecisionResult:
     # Initial quadrant (at start of decision, for tracking transitions)
     initial_quadrant: str = "UU"
 
+    # Algorithm tracking
+    algorithm_name: str = "unknown"
+    algorithms_history: List[str] = field(default_factory=list)
+    quadrant_transitions: List[tuple] = field(default_factory=list)
+    backtrack_count: int = 0
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
@@ -453,6 +464,11 @@ class DecisionResult:
             'used_fallback': self.used_fallback,
             'fallback_reason': self.fallback_reason,
             'final_quadrant': self.final_quadrant,
+            'initial_quadrant': self.initial_quadrant,
+            'algorithm_name': self.algorithm_name,
+            'algorithms_history': self.algorithms_history,
+            'quadrant_transitions': self.quadrant_transitions,
+            'backtrack_count': self.backtrack_count,
         }
 
 
@@ -804,7 +820,7 @@ class CognitiveRouter:
                     should_fallback, failure_type = self.fallback.should_fallback()
                     if should_fallback:
                         return self._handle_fallback(failure_type, context)
-                continue
+                break  # No more rungs - exit loop, use best so far
 
             # Get next rungs from current algorithm
             if self._state.current_algorithm is None:
@@ -818,172 +834,165 @@ class CognitiveRouter:
             if not next_rungs:
                 if self.fallback:
                     self.fallback.record_empty_frontier()
-                continue
+                break  # Algorithm returned nothing - exit loop
 
-            # Phase 8: Eisenhower gate - evaluate urgency x importance
-            # Get edge trust for each candidate (from graph evolution if available)
-            rung_name = None
+            # =================================================================
+            # BATCH EVALUATION: Evaluate top-K candidates in one pass
+            # Architecture target: O(26) typical via focused search.
+            # Each iteration evaluates a batch of K candidates (default 5),
+            # checks for action agreement within the batch, and commits
+            # if agreement found. This replaces the old 1-rung-per-iter
+            # approach that brute-forced all 50 rungs in O(V) linear scan.
+            # =================================================================
+            batch_results = []  # (rung_name, result) pairs for this iteration
+
             for candidate in next_rungs:
+                # Phase 8: Eisenhower gate - evaluate urgency x importance
                 edge_trust = self._get_edge_trust(candidate)
                 quadrant, action = self.eisenhower.gate_single_rung(candidate, edge_trust)
 
-                if quadrant == EisenhowerQuadrant.Q1_DO:
-                    # Urgent + Important: Execute now
-                    rung_name = action
-                    break
-                elif quadrant == EisenhowerQuadrant.Q3_DELEGATE:
-                    # Urgent + Not Important: Use cached path or execute
-                    rung_name = action
-                    break
+                if quadrant == EisenhowerQuadrant.Q4_ELIMINATE:
+                    continue  # Skip useless rungs
                 elif quadrant == EisenhowerQuadrant.Q2_SCHEDULE:
-                    # Not Urgent + Important: Added to queue, try next candidate
-                    continue
-                else:  # Q4_ELIMINATE
-                    # Not Urgent + Not Important: Skip entirely
-                    continue
+                    continue  # Queue for later, try next in batch
 
-            # If all candidates were eliminated or scheduled, check for fallback
-            if rung_name is None:
-                # Check if any scheduled tasks have been promoted
-                promoted = self.eisenhower.pop_promoted_task()
-                if promoted:
-                    rung_name = promoted
-                else:
-                    # All eliminated - trigger fallback
-                    rung_name = self.eisenhower.handle_all_eliminate()
+                # Q1_DO or Q3_DELEGATE: execute this rung
+                rung_name = action
+                result = self._execute_rung(rung_name, game_state, rung_executor)
 
-            # Execute the selected rung
-            result = self._execute_rung(rung_name, game_state, rung_executor)
+                # Record traversal for graph evolution
+                if self.graph_evolution and len(self._state.path) > 0:
+                    prev_rung = self._state.path[-1]
+                    self.graph_evolution.record_traversal(
+                        from_rung=prev_rung,
+                        to_rung=rung_name,
+                        success=result.confidence > 0.5,
+                        felt_state=felt
+                    )
 
-            # Phase 7+11: Record traversal with FeltState context for graph evolution
-            if self.graph_evolution and len(self._state.path) > 0:
-                prev_rung = self._state.path[-1]
-                self.graph_evolution.record_traversal(
-                    from_rung=prev_rung,
-                    to_rung=rung_name,
-                    success=result.confidence > 0.5,
-                    felt_state=felt
-                )
+                # Update visited state
+                self._state.path.append(rung_name)
+                self._state.visited_rungs.add(rung_name)
+                context.visited_rungs.add(rung_name)
+                context.current_path.append(rung_name)
 
-            # Update state
-            self._state.path.append(rung_name)
-            self._state.visited_rungs.add(rung_name)
-            context.visited_rungs.add(rung_name)
-            context.current_path.append(rung_name)
+                if self.fallback:
+                    self.fallback.record_iteration(rung_name)
 
-            if self.fallback:
-                self.fallback.record_iteration(rung_name)
-
-            # Track best result
-            if result.confidence > self._state.max_confidence:
-                self._state.max_confidence = result.confidence
-                self._state.best_result = result
-
-            # Confidence boost: when consecutive rungs agree on the same action,
-            # boost confidence above the individual rung ceiling (typically 0.6).
-            # This makes agreement between independent cognitive units meaningful.
-            effective_confidence = result.confidence
-            if (result.value and self._state.best_result
-                    and isinstance(result.value, str)
-                    and result.value.startswith('ACTION')
-                    and isinstance(self._state.best_result.value, str)
-                    and result.value == self._state.best_result.value
-                    and result.rung_name != self._state.best_result.rung_name):
-                # Two different rungs agree on the same action - boost confidence
-                agreement_boost = 0.15
-                effective_confidence = min(1.0, result.confidence + agreement_boost)
-                # Update the result so commitment uses boosted value
-                result = RungResult(
-                    rung_name=result.rung_name,
-                    slot_name=result.slot_name,
-                    value=result.value,
-                    confidence=effective_confidence,
-                    raises_questions=getattr(result, 'raises_questions', []),
-                    answers_questions=getattr(result, 'answers_questions', []),
-                    surprise_level=getattr(result, 'surprise_level', 0.0),
-                    contradiction_detected=getattr(result, 'contradiction_detected', False),
-                    contradiction_with=getattr(result, 'contradiction_with', None),
-                )
-                if effective_confidence > self._state.max_confidence:
-                    self._state.max_confidence = effective_confidence
+                # Track best result
+                if result.confidence > self._state.max_confidence:
+                    self._state.max_confidence = result.confidence
                     self._state.best_result = result
 
-            # ================================================================
-            # EPISTEMIC UPDATE (MUST happen BEFORE commit check)
-            # The tracker needs data from every rung to detect transitions
-            # and drive learning. Previously, commit fired first and the
-            # tracker was NEVER updated (root cause of permanent UU).
-            # ================================================================
-            transitions = self.epistemic_tracker.update_from_rung_result(
-                rung_name=rung_name,
-                result=result,
-                blackboard=self.blackboard,
-                all_rungs=self._all_rungs,
-                visited_rungs=self._state.visited_rungs
-            )
+                batch_results.append((rung_name, result))
 
-            # ================================================================
-            # ADAPTIVE COMMIT THRESHOLD (based on epistemic quadrant)
-            # UU: Higher threshold forces broader exploration - needs rung
-            #     agreement (0.6 + 0.15 boost = 0.75) to commit.
-            # KU: Moderate threshold for targeted search.
-            # KK/UK: Low threshold for quick exploitation/retrieval.
-            # ================================================================
-            quadrant = self.epistemic_tracker.current_state.primary_quadrant
-            if quadrant == RumsfeldQuadrant.UU:
-                effective_threshold = max(self.config.commit_threshold, 0.75)
-            elif quadrant == RumsfeldQuadrant.KU:
-                effective_threshold = max(self.config.commit_threshold, 0.65)
-            else:
-                effective_threshold = self.config.commit_threshold
+                # Epistemic update (MUST happen for learning)
+                transitions = self.epistemic_tracker.update_from_rung_result(
+                    rung_name=rung_name,
+                    result=result,
+                    blackboard=self.blackboard,
+                    all_rungs=self._all_rungs,
+                    visited_rungs=self._state.visited_rungs
+                )
 
-            if effective_confidence >= effective_threshold:
-                return self._commit_decision(result)
-
-            # Handle transitions
-            for transition in transitions:
-                self._state.transitions.append(transition)
-
-                # Apply hysteresis filtering
-                if self.hysteresis:
-                    should_switch = self.hysteresis.record_signal(
-                        transition.from_quadrant,
-                        transition.to_quadrant
-                    )
-                    if not should_switch:
+                # Handle transitions (algorithm switching, etc.)
+                for transition in transitions:
+                    self._state.transitions.append(transition)
+                    if self.hysteresis:
+                        should_switch = self.hysteresis.record_signal(
+                            transition.from_quadrant,
+                            transition.to_quadrant
+                        )
+                        if not should_switch:
+                            continue
+                    if self._state.iterations_since_switch < self.config.algorithm_switch_cooldown:
                         continue
+                    response = get_algorithm_for_transition(transition)
+                    if response.action == "backtrack" and self._state.checkpoints:
+                        self._handle_backtrack(context, response.params)
+                    elif response.action == "reset":
+                        self._handle_reset(context, response.params)
+                    if response.algorithm != self._state.current_algorithm_name:
+                        self._switch_algorithm(response.algorithm, context, response.params, modulation=modulation)
+                        algorithm_switches += 1
+                        self._state.iterations_since_switch = 0
+                    if self.fallback:
+                        self.fallback.record_quadrant(
+                            transition.to_quadrant.name,
+                            self._state.max_confidence
+                        )
+                        if transition.is_regression:
+                            self.fallback.record_contradiction()
 
-                # Check algorithm switch cooldown
-                if self._state.iterations_since_switch < self.config.algorithm_switch_cooldown:
-                    continue
+            # =================================================================
+            # AGREEMENT CHECK: Look for action consensus within the batch
+            # If 2+ rungs in the batch produced the same ACTION, boost
+            # confidence and commit. This is meaningful cognitive agreement
+            # between independent evaluation units, not random coincidence.
+            # =================================================================
+            action_votes = {}  # ACTION string -> list of (rung_name, result)
+            for rung_name, result in batch_results:
+                if (result.value and isinstance(result.value, str)
+                        and result.value.startswith('ACTION')):
+                    action_votes.setdefault(result.value, []).append((rung_name, result))
 
-                # Get transition response
-                response = get_algorithm_for_transition(transition)
+            # Find best agreement (most votes, then highest confidence)
+            best_agreement = None
+            best_agreement_conf = 0.0
+            for action_str, voters in action_votes.items():
+                if len(voters) >= 2:
+                    # Agreement found! Use highest-confidence voter's result
+                    best_voter = max(voters, key=lambda v: v[1].confidence)
+                    agreement_boost = 0.15
+                    boosted_conf = min(1.0, best_voter[1].confidence + agreement_boost)
+                    if boosted_conf > best_agreement_conf:
+                        best_agreement = best_voter
+                        best_agreement_conf = boosted_conf
 
-                # Handle special actions
-                if response.action == "backtrack" and self._state.checkpoints:
-                    self._handle_backtrack(context, response.params)
-                elif response.action == "reset":
-                    self._handle_reset(context, response.params)
+            if best_agreement:
+                rung_name, orig_result = best_agreement
+                # Create boosted result for commitment
+                boosted_result = RungResult(
+                    rung_name=rung_name,
+                    slot_name=orig_result.slot_name,
+                    value=orig_result.value,
+                    confidence=best_agreement_conf,
+                    raises_questions=getattr(orig_result, 'raises_questions', []),
+                    answers_questions=getattr(orig_result, 'answers_questions', []),
+                    surprise_level=getattr(orig_result, 'surprise_level', 0.0),
+                    contradiction_detected=getattr(orig_result, 'contradiction_detected', False),
+                    contradiction_with=getattr(orig_result, 'contradiction_with', None),
+                )
+                self._state.max_confidence = best_agreement_conf
+                self._state.best_result = boosted_result
 
-                # Switch algorithm
-                if response.algorithm != self._state.current_algorithm_name:
-                    self._switch_algorithm(response.algorithm, context, response.params, modulation=modulation)
-                    algorithm_switches += 1
-                    self._state.iterations_since_switch = 0
+                # Check commit threshold
+                quadrant = self.epistemic_tracker.current_state.primary_quadrant
+                if quadrant == RumsfeldQuadrant.UU:
+                    effective_threshold = max(self.config.commit_threshold, 0.70)
+                elif quadrant == RumsfeldQuadrant.KU:
+                    effective_threshold = max(self.config.commit_threshold, 0.65)
+                else:
+                    effective_threshold = max(self.config.commit_threshold, 0.65)
 
-                # Record with fallback
-                if self.fallback:
-                    self.fallback.record_quadrant(
-                        transition.to_quadrant.name,
-                        self._state.max_confidence
-                    )
+                if best_agreement_conf >= effective_threshold:
+                    return self._commit_decision(boosted_result)
 
-                    # Check for contradiction
-                    if transition.is_regression:
-                        self.fallback.record_contradiction()
+            # No agreement in batch - check if any single result crossed
+            # the threshold (e.g., from external validation like score_delta)
+            if self._state.best_result:
+                quadrant = self.epistemic_tracker.current_state.primary_quadrant
+                if quadrant == RumsfeldQuadrant.UU:
+                    effective_threshold = max(self.config.commit_threshold, 0.70)
+                elif quadrant == RumsfeldQuadrant.KU:
+                    effective_threshold = max(self.config.commit_threshold, 0.65)
+                else:
+                    effective_threshold = max(self.config.commit_threshold, 0.65)
 
-            # Phase 6: Log epistemic state after transitions
+                if self._state.max_confidence >= effective_threshold:
+                    return self._commit_decision(self._state.best_result)
+
+            # Phase 6: Log epistemic state
             if self.epistemic_logger:
                 active_q_count = (
                     len(self.question_manager.get_active_questions())
@@ -994,7 +1003,7 @@ class CognitiveRouter:
                     if self.uk_index and hasattr(self.uk_index, 'get_potential_score')
                     else 0.0
                 )
-                last_transition = transitions[-1] if transitions else None
+                last_transition = self._state.transitions[-1] if self._state.transitions else None
                 self.epistemic_logger.log_from_state(
                     tick=self._state.iteration,
                     state=self.epistemic_tracker.current_state,
@@ -1006,21 +1015,21 @@ class CognitiveRouter:
                     uk_potential=uk_pot,
                 )
 
-            # Phase 6: Raise questions from low-confidence results
-            if self.question_manager and result.confidence < 0.4:
-                # Low confidence -> raise a question for KU tracking
-                self.question_manager.raise_question(
-                    question_id=f"low_conf_{rung_name}_{self._state.iteration}",
-                    text=f"Why did {rung_name} score only {result.confidence:.2f}?",
-                    answerable_by=[rung_name],
-                    raised_by=rung_name,
-                    current_tick=self._state.iteration,
-                    priority=0.3 + (0.4 - result.confidence),
-                )
+            # Phase 6: Raise questions from low-confidence batch results
+            if self.question_manager:
+                for rung_name, result in batch_results:
+                    if result.confidence < 0.4:
+                        self.question_manager.raise_question(
+                            question_id=f"low_conf_{rung_name}_{self._state.iteration}",
+                            text=f"Why did {rung_name} score only {result.confidence:.2f}?",
+                            answerable_by=[rung_name],
+                            raised_by=rung_name,
+                            current_tick=self._state.iteration,
+                            priority=0.3 + (0.4 - result.confidence),
+                        )
 
             # Phase 7+11: Detect game-feel anomaly
             if self.feel_trajectory_store and _FEEL_TRAJECTORY_AVAILABLE and felt:
-                # Determine game phase from iteration progress
                 progress = self._state.iteration / max(1, self.config.max_iterations)
                 if progress < 0.3:
                     phase = 'opening'
@@ -1230,10 +1239,19 @@ class CognitiveRouter:
         # Return first rung from ordering as action
         action = ordering[0] if ordering else "survey"
 
+        # Extract action_value from best_result if available
+        # Without this, fallback returns rung name with no action_value,
+        # causing the caller to fall back to random action selection.
+        action_value = None
+        if self._state.best_result:
+            if isinstance(self._state.best_result.value, str) and self._state.best_result.value.startswith('ACTION'):
+                action_value = self._state.best_result.value
+
         return DecisionResult(
             action=action,
             reasoning=f"Fallback triggered: {failure_type.value}",
             confidence=self._state.max_confidence,
+            action_value=action_value,
             iterations=self._state.iteration,
             rungs_evaluated=len(self._state.visited_rungs),
             transitions_count=len(self._state.transitions),
@@ -1243,6 +1261,15 @@ class CognitiveRouter:
             fallback_reason=failure_type.value,
             final_quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
             initial_quadrant=getattr(self, '_initial_quadrant', self.epistemic_tracker.current_state.primary_quadrant).name,
+            algorithm_name=self._state.current_algorithm_name or "unknown",
+            algorithms_history=list(self._algorithm_usage.keys()),
+            quadrant_transitions=[
+                (t.from_quadrant.name, t.to_quadrant.name)
+                for t in self._state.transitions
+            ],
+            backtrack_count=sum(
+                1 for t in self._state.transitions if t.is_regression
+            ),
         )
 
     # -------------------------------------------------------------------------
@@ -1383,6 +1410,15 @@ class CognitiveRouter:
             path=self._state.path,
             final_quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
             initial_quadrant=getattr(self, '_initial_quadrant', self.epistemic_tracker.current_state.primary_quadrant).name,
+            algorithm_name=self._state.current_algorithm_name or "unknown",
+            algorithms_history=list(self._algorithm_usage.keys()),
+            quadrant_transitions=[
+                (t.from_quadrant.name, t.to_quadrant.name)
+                for t in self._state.transitions
+            ],
+            backtrack_count=sum(
+                1 for t in self._state.transitions if t.is_regression
+            ),
         )
 
     def _finalize_decision(self, algorithm_switches: int) -> DecisionResult:
@@ -1437,6 +1473,15 @@ class CognitiveRouter:
             path=self._state.path,
             final_quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
             initial_quadrant=getattr(self, '_initial_quadrant', self.epistemic_tracker.current_state.primary_quadrant).name,
+            algorithm_name=self._state.current_algorithm_name or "unknown",
+            algorithms_history=list(self._algorithm_usage.keys()),
+            quadrant_transitions=[
+                (t.from_quadrant.name, t.to_quadrant.name)
+                for t in self._state.transitions
+            ],
+            backtrack_count=sum(
+                1 for t in self._state.transitions if t.is_regression
+            ),
         )
 
     # -------------------------------------------------------------------------
@@ -1583,11 +1628,26 @@ class CognitiveRouter:
         exploration bonus (UCB) can differentiate between visited and
         unvisited rungs. Without this, every rung has visit_count=0 and
         the exploration term is identical for all candidates.
+
+        Also injects known_rungs from the epistemic tracker so that
+        algorithms (especially GreedyBestFirst in KK) can prioritize
+        rungs proven to produce high-confidence results. Without this,
+        every rung scores ~0.3 default and KK wastes 35+ iterations.
         """
         # Build visit counts from current decision's visited rungs
         visit_counts = {}
         for rung_name in self._state.path:
             visit_counts[rung_name] = visit_counts.get(rung_name, 0) + 1
+
+        # Extract proven rungs from epistemic known_knowns
+        # Maps rung_name -> max confidence from any fact it produced
+        known_rungs: Dict[str, float] = {}
+        for fact in self.epistemic_tracker.current_state.known_knowns.values():
+            rung = fact.source_rung
+            if rung:
+                known_rungs[rung] = max(
+                    known_rungs.get(rung, 0.0), fact.confidence
+                )
 
         if self._precomputed_data:
             return {
@@ -1597,6 +1657,8 @@ class CognitiveRouter:
                 'is_dag': self._precomputed_data.is_dag,
                 'topological_order': self._precomputed_data.topological_order,
                 'visit_counts': visit_counts,
+                'known_rungs': known_rungs,
+                'max_rungs_per_call': self.config.max_rungs_per_call,
             }
         return {
             'nodes': self._nodes,
@@ -1605,6 +1667,8 @@ class CognitiveRouter:
             'is_dag': False,
             'topological_order': [],
             'visit_counts': visit_counts,
+            'known_rungs': known_rungs,
+            'max_rungs_per_call': self.config.max_rungs_per_call,
         }
 
     def _get_edge_trust(self, rung_name: str) -> float:

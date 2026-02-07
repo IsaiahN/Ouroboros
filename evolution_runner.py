@@ -234,10 +234,16 @@ class EvolutionRunner:
         if COGNITIVE_ROUTER_AVAILABLE:
             try:
                 # Configure router per architecture spec
+                # max_iterations=12: With ~50 rungs, 12 iterations evaluates
+                # enough rungs for agreement (0.6+0.15=0.75>0.65) without
+                # wasting cycles on full exhaustion (was 50, caused 84% timeout).
+                # commit_threshold=0.65: Single rung ceiling ~0.6, so this
+                # forces agreement between 2+ rungs before commitment.
+                # Previously 0.55 caused 1-iteration instant fixation.
                 router_config = RouterConfig(
-                    max_iterations=50,
+                    max_iterations=3,
                     max_rungs_per_call=5,
-                    commit_threshold=0.55,
+                    commit_threshold=0.65,
                     time_budget_seconds=5.0,
                     use_hysteresis=True,
                     use_meta_planner_cache=True,

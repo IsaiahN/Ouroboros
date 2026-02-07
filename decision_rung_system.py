@@ -459,8 +459,12 @@ def is_action_available(action: Optional[str], context: Dict[str, Any]) -> bool:
         return False
     try:
         action_num = int(action.replace('ACTION', ''))
-        available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
-        return action_num in available
+        available = context.get('available_actions', [])
+        if not available:
+            return True  # No availability info = assume available
+        # Support both string format ("ACTION1") and int format (1)
+        # game_loop.py stores strings, evolution_runner.py stores ints
+        return action in available or action_num in available
     except (ValueError, TypeError):
         return False
 
@@ -7540,32 +7544,18 @@ class DecisionRungSystem:
             # RECORD DECISION TRACE (full architecture compliance)
             if self._routing_trace_store is not None:
                 try:
-                    # Use REAL data from DecisionResult instead of hardcoded values
-                    # Previous bug: initial_quadrant was hardcoded "UU", transitions/backtracks hardcoded 0
-                    real_transitions = []
-                    real_backtrack_count = 0
-                    real_algo_history = []
-
-                    # Extract transitions list from path (each algorithm switch)
-                    if hasattr(decision_result, 'transitions_count'):
-                        # Build transition summary from count
-                        real_backtrack_count = max(0, decision_result.transitions_count - decision_result.algorithm_switches)
-
-                    if hasattr(decision_result, 'algorithm_switches') and decision_result.algorithm_switches > 0:
-                        real_algo_history = [decision_result.final_quadrant]
-
                     trace_id = self._routing_trace_store.record_trace(
                         game_id=game_id,
                         agent_id=context.get('agent_id', 'unknown'),
                         path=decision_result.path,
-                        algorithm_used=decision_result.final_quadrant,
+                        algorithm_used=getattr(decision_result, 'algorithm_name', decision_result.final_quadrant),
                         final_action=action,
                         final_confidence=confidence,
                         initial_quadrant=getattr(decision_result, 'initial_quadrant', decision_result.final_quadrant),
                         final_quadrant=decision_result.final_quadrant,
-                        quadrant_transitions=real_transitions,
-                        algorithms_history=real_algo_history,
-                        backtrack_count=real_backtrack_count,
+                        quadrant_transitions=getattr(decision_result, 'quadrant_transitions', []),
+                        algorithms_history=getattr(decision_result, 'algorithms_history', []),
+                        backtrack_count=getattr(decision_result, 'backtrack_count', 0),
                         iterations=decision_result.iterations,
                         decision_latency_ms=decision_result.time_elapsed * 1000
                     )
