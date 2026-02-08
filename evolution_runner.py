@@ -234,17 +234,20 @@ class EvolutionRunner:
         if COGNITIVE_ROUTER_AVAILABLE:
             try:
                 # Configure router per architecture spec
-                # max_iterations=12: With ~50 rungs, 12 iterations x 5 per call
-                # = 60 rung evals max. With agreement boost, commits in 2-4
-                # iterations when rungs agree (0.6+0.15=0.75>0.50).
+                # max_iterations=15: With 63 rungs, 15 iterations x 5 per call
+                # = 75 rung evals max. Covers full graph in ~13 iterations.
+                # With agreement boost, commits in 2-4 iterations when rungs
+                # agree (0.6+0.15=0.75>0.50).
                 # commit_threshold=0.50: Single confident rung (0.6) can now
-                # commit. Previous 0.65 was unreachable for individual rungs,
-                # causing 100% fallback to random for 5000+ generations.
+                # commit. Previous 0.65 was unreachable for individual rungs.
+                # time_budget=30.0: First-call engine warm-up (registry init,
+                # DB schema checks) can take 3-8s. 5s budget caused every
+                # cold-start call to timeout, producing 100% fallback.
                 router_config = RouterConfig(
-                    max_iterations=12,
+                    max_iterations=15,
                     max_rungs_per_call=5,
                     commit_threshold=0.50,
-                    time_budget_seconds=5.0,
+                    time_budget_seconds=30.0,
                     use_hysteresis=True,
                     use_meta_planner_cache=True,
                     use_catastrophic_fallback=True,
