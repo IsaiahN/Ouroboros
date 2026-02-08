@@ -50,6 +50,7 @@ from engines.cognition.meta_planner import MetaPlanner
 from engines.cognition.phenomenology_layer import (
     AlgorithmModulation,
     PhenomenologyLayer,
+    Valence,
 )
 from engines.cognition.precomputation import PrecomputationManager, PrecomputedData
 from engines.cognition.search_context import (
@@ -583,6 +584,7 @@ class CognitiveRouter:
         # Game context
         self._game_id = ""
         self._decision_id = 0
+        self._last_decision_confidence = 0.0  # For confidence_delta tracking
 
     # -------------------------------------------------------------------------
     # INITIALIZATION
@@ -709,6 +711,8 @@ class CognitiveRouter:
         # after phenomenology modulation is computed (Phase 9)
         quadrant = self.epistemic_tracker.current_state.primary_quadrant
         self._initial_quadrant = quadrant  # Save for DecisionResult
+        # Bridge initial quadrant to blackboard for phenomenology/eisenhower
+        self.blackboard.slot('epistemic_quadrant', quadrant.name)
         self._switch_algorithm(quadrant.name, context)
 
         try:
@@ -898,6 +902,42 @@ class CognitiveRouter:
                     visited_rungs=self._state.visited_rungs
                 )
 
+                # Bridge live epistemic quadrant to blackboard so
+                # Phenomenology / Eisenhower see the real quadrant,
+                # not the 'UU' default.
+                current_q = self.epistemic_tracker.current_state.primary_quadrant
+                self.blackboard.slot('epistemic_quadrant', current_q.name)
+
+                # Bridge contradiction signal from rung result to blackboard
+                # so Phenomenology THREAT detection can fire.
+                if getattr(result, 'contradiction_detected', False):
+                    self.blackboard.slot('contradiction_detected', True)
+
+                # Dead-signal fix: Bridge surprise_level from rung result
+                # to 'surprise_score' for Phenomenology salience computation.
+                rung_surprise = getattr(result, 'surprise_level', 0.0)
+                if rung_surprise > 0:
+                    # Use max so the highest surprise in a batch persists
+                    prev_surprise = self.blackboard.get('surprise_score', 0.0)
+                    self.blackboard.slot(
+                        'surprise_score', max(prev_surprise, rung_surprise)
+                    )
+
+                # Dead-signal fix: Derive 'pattern_break' for Phenomenology.
+                # A pattern break = frame was static for 3+ frames then changed,
+                # OR score suddenly shifted. Signals "something new happened".
+                no_change = self.blackboard.get('no_change_frames', 0)
+                frame_just_changed = self.blackboard.get('frame_changed', False)
+                if frame_just_changed and no_change == 0:
+                    # Frame changed after being tracked — check if the prior
+                    # streak was long enough to count as a break.
+                    prev_streak = self.blackboard.get('_prev_no_change_streak', 0)
+                    if prev_streak >= 3:
+                        self.blackboard.slot('pattern_break', True)
+                elif no_change >= 3 and not self.blackboard.get('pattern_break', False):
+                    # Currently in a long static stretch — not a break yet
+                    self.blackboard.slot('_prev_no_change_streak', no_change)
+
                 # Handle transitions (algorithm switching, etc.)
                 for transition in transitions:
                     self._state.transitions.append(transition)
@@ -1047,10 +1087,49 @@ class CognitiveRouter:
                     logger.debug(
                         f"[ROUTER] Feel anomaly in {phase}: {anomaly.description}"
                     )
+                    # ACT on the anomaly instead of just logging it.
+                    # Inject signal into blackboard so downstream systems
+                    # (Eisenhower, phenomenology, meta-planner) can react.
+                    self.blackboard.write_with_valence(
+                        'feel_anomaly_active', True,
+                        valence=Valence.THREAT if anomaly.severity > 0.6 else Valence.CONFUSION,
+                        urgency=min(1.0, anomaly.severity + 0.2),
+                        importance=anomaly.severity,
+                        reason=anomaly.description,
+                        source_rung='feel_trajectory',
+                    )
+                    # Raise a high-priority question so the epistemic tracker
+                    # can direct investigation toward the mismatch.
+                    if self.question_manager:
+                        self.question_manager.raise_question(
+                            question_id=f"feel_anomaly_{phase}_{self._state.iteration}",
+                            text=(
+                                f"Feel anomaly in {phase}: expected "
+                                f"{anomaly.expected_valence.value}, got "
+                                f"{anomaly.actual_valence.value}"
+                            ),
+                            answerable_by=[],  # open question
+                            raised_by='feel_trajectory',
+                            current_tick=self._state.iteration,
+                            priority=0.5 + anomaly.severity * 0.5,
+                        )
+                    # Severe anomaly: force exploration boost on next iteration
+                    if anomaly.severity > 0.7:
+                        context.excluded_rungs.update(
+                            self._state.visited_rungs[-3:]
+                            if len(self._state.visited_rungs) >= 3
+                            else self._state.visited_rungs
+                        )
 
             # Update context
             context = self._update_search_context(context)
             self._state.iterations_since_switch += 1
+
+            # Advance hysteresis tick so cooldowns can expire.
+            # Without this, current_tick stays at 0 and cooldowns
+            # (set to current_tick + N) become permanent lockouts.
+            if self.hysteresis:
+                self.hysteresis.tick()
 
             # Process mutation requests
             self._process_mutations(context)
@@ -1098,7 +1177,13 @@ class CognitiveRouter:
                 context.excluded_rungs.update(modulation.exclusion_set)
 
         # Use meta-planner for selection if available
-        if self.meta_planner:
+        # CRITICAL: If phenomenology issued an algorithm override (panic, threat,
+        # boredom), respect it. The felt state override is a higher-priority signal
+        # than the meta-planner's epistemic-based selection.
+        phenomenology_override_active = (
+            modulation and modulation.algorithm_override is not None
+        )
+        if self.meta_planner and not phenomenology_override_active:
             selection = self.meta_planner.select_algorithm(context)
             if selection.algorithm:
                 # SelectionResult.algorithm is a SearchAlgorithm instance
@@ -1396,6 +1481,9 @@ class CognitiveRouter:
                     current_tick=self._state.iteration,
                 )
 
+        # Save confidence for next cycle's confidence_delta computation
+        self._last_decision_confidence = result.confidence
+
         # Extract actual ACTION string from the rung result's value field
         action_value = None
         if isinstance(result.value, str) and result.value.startswith('ACTION'):
@@ -1455,6 +1543,9 @@ class CognitiveRouter:
                 quadrant=self.epistemic_tracker.current_state.primary_quadrant.name,
                 used_fallback=False,
             )
+
+        # Save confidence for next cycle's confidence_delta computation
+        self._last_decision_confidence = confidence
 
         # Phase 6: Flush epistemic logger at decision end
         if self.epistemic_logger:
@@ -1541,12 +1632,96 @@ class CognitiveRouter:
 
         # =====================================================================
         # ALIASING: Context keys -> Cognitive slot names
-        # The context builder uses different names than cognitive components
+        # The context builder uses different names than cognitive components.
+        #
+        # DEAD SIGNAL AUDIT (2026-02-07): Phenomenology and Eisenhower read
+        # ~20 blackboard keys that nothing ever wrote. This section bridges
+        # the evolution_runner context dict to the slot names that cognitive
+        # components expect. Without these bridges, phenomenology runs on
+        # ~80% default values and its valence/arousal/certainty/agency/
+        # salience outputs are systematically wrong.
         # =====================================================================
+
+        # Reset ephemeral signals that are populated during the routing loop.
+        # Without this, stale values from a previous decide() call persist
+        # and phenomenology/eisenhower see old data.
+        self.blackboard.slot('surprise_score', 0.0)
+        self.blackboard.slot('pattern_break', False)
+        self.blackboard.slot('feel_anomaly_active', False)
+        self.blackboard.slot('contradiction_detected', False)
 
         # Eisenhower reads 'actions_taken' but context passes 'action_count'
         if 'action_count' in game_state and self.blackboard.get('actions_taken') is None:
             self.blackboard.slot('actions_taken', game_state['action_count'])
+
+        # Phenomenology reads 'stuck_detected', context has 'recent_stuck_count'
+        stuck_count = game_state.get('recent_stuck_count', 0)
+        if stuck_count > 0:
+            self.blackboard.slot('stuck_detected', True)
+
+        # Phenomenology reads 'death_count', derive from last_outcome history
+        last_outcome = game_state.get('last_outcome', 'neutral')
+        death_count = self.blackboard.get('death_count', 0)
+        if last_outcome == 'death':
+            death_count += 1
+        self.blackboard.slot('death_count', death_count)
+
+        # Phenomenology reads 'recent_success_rate', derive from frame_changed
+        frame_changed = game_state.get('frame_changed', False)
+        _success_window = self.blackboard.get('_success_window', [])
+        _success_window.append(1.0 if frame_changed else 0.0)
+        if len(_success_window) > 20:
+            _success_window = _success_window[-20:]
+        self.blackboard.slot('_success_window', _success_window)
+        if _success_window:
+            self.blackboard.slot(
+                'recent_success_rate',
+                sum(_success_window) / len(_success_window)
+            )
+
+        # Phenomenology reads 'no_change_frames', track consecutive no-change
+        no_change = self.blackboard.get('no_change_frames', 0)
+        if not frame_changed:
+            no_change += 1
+        else:
+            no_change = 0
+        self.blackboard.slot('no_change_frames', no_change)
+
+        # Phenomenology reads 'frame_delta_magnitude'
+        # Approximate from frame_changed + score_delta
+        score_delta_raw = game_state.get('score_delta', 0)
+        magnitude = abs(score_delta_raw) * 10 if frame_changed else 0
+        self.blackboard.slot('frame_delta_magnitude', magnitude)
+
+        # Eisenhower reads 'action_budget' for budget calculations
+        action_budget = game_state.get('action_budget', 400)
+        self.blackboard.slot('action_budget', action_budget)
+
+        # Phenomenology reads 'controlled_object' for agency computation.
+        # Dead-signal fix: Bridge from context. The evolution_runner passes
+        # 'player_position' from player_localizer. If we have a real
+        # localization (not the default sentinel), an object was detected.
+        # Also accept 'controlled_object' if the context already has one
+        # (e.g., from control_tracker integration).
+        if self.blackboard.get('controlled_object') is None:
+            controlled = game_state.get('controlled_object')
+            if controlled is None:
+                # Derive from player_position: default (32,32) is sentinel
+                pos = game_state.get('player_position')
+                if pos is not None and pos != (32, 32):
+                    controlled = f"player_at_{pos[0]}_{pos[1]}"
+            if controlled is not None:
+                self.blackboard.slot('controlled_object', controlled)
+
+        # Phenomenology reads 'open_questions' - bridge from question_manager
+        if self.question_manager:
+            active_qs = self.question_manager.get_active_questions()
+            self.blackboard.slot('open_questions', active_qs)
+
+        # Phenomenology reads 'contradiction_detected' - initialise from
+        # last_outcome; will be updated live from rung results in the loop
+        if last_outcome == 'death':
+            self.blackboard.slot('contradiction_detected', True)
 
         # =====================================================================
         # DERIVED SLOTS: Computed from raw context for cognitive components
@@ -1575,6 +1750,30 @@ class CognitiveRouter:
         self.blackboard.slot('score_delta', score_delta)
         self.blackboard.slot('_prev_score', current_score)
 
+        # Dead-signal fix: Bridge active_sequence to cached_sequence_* slots.
+        # Eisenhower Q3_DELEGATE reads cached_sequence_{rung_name} to shortcut
+        # rung execution when a winning sequence already exists. The context
+        # passes active_sequence (full winning sequence) and sequence_position.
+        # When available, we store the remaining actions as the cached sequence
+        # keyed by a generic rung name so ANY rung can be delegated via it.
+        active_seq = game_state.get('active_sequence', [])
+        seq_pos = game_state.get('sequence_position', 0)
+        if active_seq and seq_pos < len(active_seq):
+            remaining = active_seq[seq_pos:]
+            # Convert int actions to ACTION strings for rung compatibility
+            remaining_actions = [
+                f"ACTION{a}" if isinstance(a, int) else a for a in remaining
+            ]
+            # Write as a generic cached_sequence that any Q3_DELEGATE rung
+            # can use. Eisenhower reads cached_sequence_{rung_name}, so we
+            # populate a wildcard entry under the key 'cached_sequence_replay'.
+            self.blackboard.slot('cached_sequence_replay', remaining_actions)
+            # Also set per-rung entries for common replay-relevant rungs
+            # so the exact key Eisenhower looks up has data.
+            for rung in ('survey', 'exploration_phase', 'random_walk',
+                         'action_repeater', 'landmark_navigator'):
+                self.blackboard.slot(f'cached_sequence_{rung}', remaining_actions)
+
         # =====================================================================
         # EPISTEMIC SIGNAL ENRICHMENT
         # Bridge game-state evidence into epistemic-compatible signals.
@@ -1592,14 +1791,29 @@ class CognitiveRouter:
             productive_streak = max(0, productive_streak - 1)
         self.blackboard.slot('_productive_streak', productive_streak)
 
-        # Write working_theory slot based on game progress
-        # This is what the epistemic tracker reads as a KK fact
+        # Write working_theory slot based on game progress.
+        # CRITICAL: Phenomenology and Eisenhower read 'working_theory',
+        # NOT 'working_theory_confirmed'. Write BOTH for backward compat.
         if levels_completed > 0:
+            theory_conf = min(1.0, 0.5 + levels_completed * 0.15)
             self.blackboard.slot(
-                'working_theory_confirmed', True,
-                confidence=min(1.0, 0.5 + levels_completed * 0.15),
+                'working_theory', f'level_{levels_completed}_cleared',
+                confidence=theory_conf,
                 source_rung='game_evidence'
             )
+            self.blackboard.slot(
+                'working_theory_confirmed', True,
+                confidence=theory_conf,
+                source_rung='game_evidence'
+            )
+
+        # Confidence delta for phenomenology valence computation.
+        # Track how confidence is trending across decisions.
+        prev_conf = self.blackboard.get('_prev_confidence', 0.0)
+        # Use best result confidence from previous decision if available
+        current_conf = getattr(self, '_last_decision_confidence', prev_conf)
+        self.blackboard.slot('confidence_delta', current_conf - prev_conf)
+        self.blackboard.slot('_prev_confidence', current_conf)
 
         # Novelty detection for phenomenology salience
         if score_delta > 0:

@@ -20,8 +20,8 @@ from typing import Dict, List, Set
 
 import pytest
 
-# Phase 6 imports (graph evolution)
-from engines.cognition.graph_evolution import (
+# Phase 6 imports (edge trust management)
+from engines.cognition.edge_trust_manager import (
     EdgeTrustRecord,
     GraphEvolutionManager,
     TraversalOutcome,

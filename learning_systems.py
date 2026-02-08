@@ -473,28 +473,46 @@ class LearningSystems:
             # Check if it's a full win or partial
             if result.is_full_win:
                 # Store in full game sequences table
+                import uuid as _uuid
+                seq_id = f"seq_{_uuid.uuid4().hex[:12]}"
                 self._db.execute("""
                     INSERT INTO winning_sequences_full_game
-                    (game_type, sequence_data, action_count, agent_id, timestamp, is_active)
-                    VALUES (?, ?, ?, ?, ?, 1)
+                    (sequence_id, game_id, game_type, total_levels,
+                     action_sequence, total_actions, total_score,
+                     efficiency_score, agent_id, discovered_at, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, (
+                    seq_id,
+                    result.game_id,
                     result.game_id[:4],
+                    result.levels_completed,
                     json.dumps(result.action_sequence),
                     result.total_actions,
+                    getattr(result, 'score', 0.0),
+                    getattr(result, 'score', 0.0) / max(1, result.total_actions),
                     result.agent_id,
                     datetime.now().isoformat(),
                 ))
             else:
                 # Store as partial sequence
+                import uuid as _uuid
+                seq_id = f"seq_{_uuid.uuid4().hex[:12]}"
                 self._db.execute("""
                     INSERT INTO winning_sequences
-                    (game_type, level, sequence_data, action_count, agent_id, timestamp, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                    (sequence_id, game_id, game_type, level_number,
+                     action_sequence, total_actions, total_score,
+                     efficiency_score, agent_id, session_id,
+                     discovered_at, is_active, initial_frame, final_frame)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown', ?, 1, '[]', '[]')
                 """, (
+                    seq_id,
+                    result.game_id,
                     result.game_id[:4],
                     result.levels_completed - 1,  # Last completed level
                     json.dumps(result.action_sequence),
                     result.total_actions,
+                    getattr(result, 'score', 0.0),
+                    getattr(result, 'score', 0.0) / max(1, result.total_actions),
                     result.agent_id,
                     datetime.now().isoformat(),
                 ))
@@ -666,17 +684,17 @@ class LearningSystems:
             if level is None:
                 # Full game sequence
                 cursor = self._db.execute("""
-                    SELECT sequence_data FROM winning_sequences_full_game
+                    SELECT action_sequence FROM winning_sequences_full_game
                     WHERE game_type = ? AND is_active = 1
-                    ORDER BY action_count ASC
+                    ORDER BY total_actions ASC
                     LIMIT 1
                 """, (game_type,))
             else:
                 # Level sequence
                 cursor = self._db.execute("""
-                    SELECT sequence_data FROM winning_sequences
-                    WHERE game_type = ? AND level = ? AND is_active = 1
-                    ORDER BY action_count ASC
+                    SELECT action_sequence FROM winning_sequences
+                    WHERE game_type = ? AND level_number = ? AND is_active = 1
+                    ORDER BY total_actions ASC
                     LIMIT 1
                 """, (game_type, level))
 

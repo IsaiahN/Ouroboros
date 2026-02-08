@@ -20,6 +20,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from config.cognitive_parameters import DEFAULT_COGNITIVE_PARAMS as _PARAMS
 from engines.cognition.blackboard import RumsfeldQuadrant
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ class TransitionGate:
     """
     # Confirmation counts needed before allowing transition
     # Higher values = more stability, slower response
+    # Values sourced from CognitiveParameters for centralized tuning.
     CONFIRMATIONS_REQUIRED: Dict[Tuple[RumsfeldQuadrant, RumsfeldQuadrant], int] = field(
         default_factory=lambda: {
             # Easy transitions (low confirmation)
@@ -46,16 +48,16 @@ class TransitionGate:
             (RumsfeldQuadrant.UU, RumsfeldQuadrant.UK): 1,  # Retrieval is cheap
             (RumsfeldQuadrant.UU, RumsfeldQuadrant.KK): 1,  # Forward progress - allow immediately
 
-            # Moderate transitions
-            (RumsfeldQuadrant.KU, RumsfeldQuadrant.KK): 2,  # Need solid answer
-            (RumsfeldQuadrant.KK, RumsfeldQuadrant.KU): 2,  # Don't abandon hastily
+            # Moderate transitions — from CognitiveParameters
+            (RumsfeldQuadrant.KU, RumsfeldQuadrant.KK): _PARAMS.ku_kk_confirmations,
+            (RumsfeldQuadrant.KK, RumsfeldQuadrant.KU): _PARAMS.kk_ku_confirmations,
             (RumsfeldQuadrant.KU, RumsfeldQuadrant.UU): 2,  # Broadening search
             (RumsfeldQuadrant.UK, RumsfeldQuadrant.KU): 2,  # Retrieval raised questions
-            (RumsfeldQuadrant.KK, RumsfeldQuadrant.UK): 2,  # Found untapped knowledge
+            (RumsfeldQuadrant.KK, RumsfeldQuadrant.UK): _PARAMS.kk_uk_confirmations,
 
             # Hard transitions (high confirmation)
             (RumsfeldQuadrant.KK, RumsfeldQuadrant.UU): 3,  # Nuclear option - severe contradiction
-            (RumsfeldQuadrant.UK, RumsfeldQuadrant.UU): 3,  # Cached knowledge contradicted
+            (RumsfeldQuadrant.UK, RumsfeldQuadrant.UU): _PARAMS.uk_uu_confirmations,
         }
     )
 

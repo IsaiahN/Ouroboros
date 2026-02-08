@@ -113,7 +113,8 @@ class TestHysteresisManager:
         """Test cooldown period enforcement."""
         manager = HysteresisManager()
 
-        # Transition from KK to KU (needs 2 confirmations)
+        # Transition from KK to KU (needs 3 confirmations per config)
+        manager.record_signal(RumsfeldQuadrant.KK, RumsfeldQuadrant.KU)
         manager.record_signal(RumsfeldQuadrant.KK, RumsfeldQuadrant.KU)
         manager.record_signal(RumsfeldQuadrant.KK, RumsfeldQuadrant.KU)  # Should succeed
 

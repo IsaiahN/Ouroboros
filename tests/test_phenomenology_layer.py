@@ -215,9 +215,20 @@ class TestValenceComputation:
         assert valence == Valence.THREAT
 
     def test_valence_confusion_from_uu_quadrant(self, layer):
-        """UU epistemic quadrant = CONFUSION valence."""
+        """Low raw valence score (between threat and confusion thresholds) = CONFUSION.
+
+        Previously this was hardcoded to UU→CONFUSION. Now it's score-driven:
+        a raw score between -0.3 and -0.1 produces CONFUSION regardless of
+        epistemic quadrant.
+        """
         layer.blackboard.set('epistemic_quadrant', 'UU')
         layer.blackboard.set('contradiction_detected', False)
+        # Push score into confusion range [-0.3, -0.1) by adding
+        # strong negative internal signals + stuck penalty
+        layer.blackboard.set('confidence_delta', -1.0)
+        layer.blackboard.set('agency_score', 0.0)
+        layer.blackboard.set('recent_success_rate', 0.0)
+        layer.blackboard.set('stuck_detected', True)
 
         valence = layer._compute_valence()
 

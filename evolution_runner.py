@@ -981,7 +981,7 @@ class EvolutionRunner:
         # Check if game already has a winning sequence (for frontier_mode)
         try:
             result = self.db.execute_query("""
-                SELECT winning_sequence FROM winning_sequences_full_game
+                SELECT action_sequence FROM winning_sequences_full_game
                 WHERE game_id = ? AND is_active = 1
                 ORDER BY efficiency_score DESC LIMIT 1
             """, (game_id,))
@@ -996,6 +996,16 @@ class EvolutionRunner:
                     else:
                         active_sequence = list(seq_data)
                     is_replay_mode = True
+                    # Track reuse of this sequence
+                    try:
+                        self.db.execute_query("""
+                            UPDATE winning_sequences_full_game
+                            SET times_referenced = COALESCE(times_referenced, 0) + 1,
+                                last_referenced = datetime('now')
+                            WHERE game_id = ? AND is_active = 1
+                        """, (game_id,))
+                    except Exception:
+                        pass  # Non-critical tracking
         except Exception:
             has_full_win = False
 

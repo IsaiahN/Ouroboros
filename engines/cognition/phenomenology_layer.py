@@ -493,14 +493,13 @@ class PhenomenologyLayer:
         # Score-based mapping - uses CognitiveParameters thresholds
         if raw_score < _PARAMS.phenomenology_valence_threat_threshold:
             return Valence.THREAT
+        elif raw_score < _PARAMS.phenomenology_confusion_threshold:
+            # Between threat (-0.3) and confusion (-0.1) = CONFUSION
+            return Valence.CONFUSION
         elif raw_score > _PARAMS.phenomenology_valence_opportunity_threshold:
             return Valence.OPPORTUNITY
 
-        # CONFUSION signals
-        epistemic = self.blackboard.get('epistemic_quadrant', 'UU')
-        if epistemic == 'UU':
-            return Valence.CONFUSION
-
+        # Middle range: use discrete signals as tie-breakers
         # BOREDOM signals
         if self.blackboard.get('no_change_frames', 0) > 10:
             return Valence.BOREDOM
@@ -525,7 +524,10 @@ class PhenomenologyLayer:
         confidence_trend = self.blackboard.get('confidence_delta', 0)
 
         # Agency - how much we feel in control
-        agency = self.blackboard.get('agency_score', 0.5)  # Default moderate
+        # Dead-signal fix: 'agency_score' was a phantom read (never written).
+        # Use _compute_agency() which reads real blackboard signals
+        # (controlled_object, working_theory, recent_success_rate).
+        agency = self._compute_agency()
 
         # Certainty from epistemic state
         epistemic = self.blackboard.get('epistemic_quadrant', 'UU')

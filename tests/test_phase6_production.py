@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Phase 6 imports
-from engines.cognition.graph_evolution import (
+from engines.cognition.edge_trust_manager import (
     EdgeEvolutionConfig,
     EdgeTrustRecord,
     GraphEvolutionManager,

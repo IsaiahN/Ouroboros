@@ -78,9 +78,10 @@ def get_network_informed_action(db: DatabaseInterface, game_id: str, level_numbe
     try:
         # Strategy 1: What actions start winning sequences in this game TYPE?
         game_type_actions = db.execute_query("""
-            SELECT SUBSTR(action_sequence, 2, 1) as first_action, COUNT(*) as cnt
+            SELECT json_extract(action_sequence, '$[0]') as first_action, COUNT(*) as cnt
             FROM winning_sequences
             WHERE game_id LIKE ? AND is_active = 1
+              AND json_valid(action_sequence)
             GROUP BY first_action
             ORDER BY cnt DESC
             LIMIT 3
@@ -92,7 +93,12 @@ def get_network_informed_action(db: DatabaseInterface, game_id: str, level_numbe
             weights = []
             for row in game_type_actions:
                 try:
-                    action = int(row['first_action'])
+                    fa = row['first_action']
+                    # Extract action number from 'ACTION3' or raw int
+                    if isinstance(fa, str) and fa.startswith('ACTION'):
+                        action = int(fa.replace('ACTION', ''))
+                    else:
+                        action = int(fa)
                     if 1 <= action <= 7:
                         actions.append(action)
                         weights.append(row['cnt'])
@@ -112,9 +118,10 @@ def get_network_informed_action(db: DatabaseInterface, game_id: str, level_numbe
 
         # Strategy 2: What actions are most common overall for this level number?
         level_actions = db.execute_query("""
-            SELECT SUBSTR(action_sequence, 2, 1) as first_action, COUNT(*) as cnt
+            SELECT json_extract(action_sequence, '$[0]') as first_action, COUNT(*) as cnt
             FROM winning_sequences
             WHERE level_number = ? AND is_active = 1
+              AND json_valid(action_sequence)
             GROUP BY first_action
             ORDER BY cnt DESC
             LIMIT 3
@@ -125,7 +132,11 @@ def get_network_informed_action(db: DatabaseInterface, game_id: str, level_numbe
             weights = []
             for row in level_actions:
                 try:
-                    action = int(row['first_action'])
+                    fa = row['first_action']
+                    if isinstance(fa, str) and fa.startswith('ACTION'):
+                        action = int(fa.replace('ACTION', ''))
+                    else:
+                        action = int(fa)
                     if 1 <= action <= 7:
                         actions.append(action)
                         weights.append(row['cnt'])
@@ -144,9 +155,10 @@ def get_network_informed_action(db: DatabaseInterface, game_id: str, level_numbe
 
         # Strategy 3: Global most common first actions
         global_actions = db.execute_query("""
-            SELECT SUBSTR(action_sequence, 2, 1) as first_action, COUNT(*) as cnt
+            SELECT json_extract(action_sequence, '$[0]') as first_action, COUNT(*) as cnt
             FROM winning_sequences
             WHERE is_active = 1
+              AND json_valid(action_sequence)
             GROUP BY first_action
             ORDER BY cnt DESC
             LIMIT 3
@@ -157,7 +169,11 @@ def get_network_informed_action(db: DatabaseInterface, game_id: str, level_numbe
             weights = []
             for row in global_actions:
                 try:
-                    action = int(row['first_action'])
+                    fa = row['first_action']
+                    if isinstance(fa, str) and fa.startswith('ACTION'):
+                        action = int(fa.replace('ACTION', ''))
+                    else:
+                        action = int(fa)
                     if 1 <= action <= 7:
                         actions.append(action)
                         weights.append(row['cnt'])
@@ -301,9 +317,15 @@ def get_problem_space_maturity(db: DatabaseInterface, game_id: str, level_number
         logger.debug(f"[MATURITY] Resonance check skipped: {e}")
 
     # Query 3: Check sequence diversity (different action patterns)
+    # Use first 3 actions as pattern fingerprint instead of raw SUBSTR on JSON
     diversity_result = db.execute_query("""
         SELECT COUNT(DISTINCT
-            SUBSTR(action_sequence, 1, 20)  -- First 20 chars as pattern proxy
+            CASE WHEN json_valid(action_sequence)
+                THEN json_extract(action_sequence, '$[0]') || ',' ||
+                     COALESCE(json_extract(action_sequence, '$[1]'), '') || ',' ||
+                     COALESCE(json_extract(action_sequence, '$[2]'), '')
+                ELSE SUBSTR(action_sequence, 1, 20)
+            END
         ) as pattern_diversity
         FROM winning_sequences
         WHERE game_id LIKE ? AND level_number = ? AND is_active = 1
@@ -410,6 +432,8 @@ class MultiStageMatchingPipeline:
             result = stage_func(*args)
             if result:
                 self.stage_success_counts[stage_name] += 1
+                # Track reuse: increment times_referenced for matched sequences
+                self._increment_times_referenced(game_id, level_number)
                 return result, stage_name, {
                     'confidence': confidence,
                     'maturity': maturity,
@@ -442,6 +466,22 @@ class MultiStageMatchingPipeline:
             self.min_prefix_length = 15
             self.min_suffix_length = 12
             self.pattern_similarity_threshold = 0.7
+
+    def _increment_times_referenced(self, game_id: str, level_number: int) -> None:
+        """Increment times_referenced for matching sequences (fire-and-forget).
+
+        Updates the most relevant winning sequence for this game/level
+        to track how often sequences are reused by the network.
+        """
+        try:
+            self.db.execute_query("""
+                UPDATE winning_sequences
+                SET times_referenced = COALESCE(times_referenced, 0) + 1,
+                    last_referenced = datetime('now')
+                WHERE game_id = ? AND level_number = ? AND is_active = 1
+            """, (game_id, level_number))
+        except Exception:
+            pass  # Non-critical tracking, don't break pipeline
 
     def _stage_1_exact_match(self, game_id: str, level_number: int) -> Optional[List[int]]:
         """Stage 1: Exact sequence match (existing system)."""

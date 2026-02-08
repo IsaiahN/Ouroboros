@@ -301,6 +301,19 @@ class EisenhowerLayer:
             # Blend felt urgency into cascade_risk (capped at 1.0)
             cascade_risk = min(1.0, cascade_risk + felt_urgency * 0.3)
 
+        # Dead-signal fix: Read felt_arousal to modulate volatility.
+        # High arousal (from phenomenology) means the game state is
+        # changing rapidly — amplify the urgency volatility component.
+        felt_arousal = self.blackboard.get('felt_arousal', 0.0)
+        if felt_arousal > 0.5:
+            volatility = min(1.0, volatility + (felt_arousal - 0.5) * 0.4)
+
+        # Dead-signal fix: Read feel_anomaly_active to boost cascade risk.
+        # When the feel trajectory detector fires an anomaly, something is
+        # going unexpectedly wrong — raise urgency so we act on it.
+        if self.blackboard.get('feel_anomaly_active', False):
+            cascade_risk = min(1.0, cascade_risk + 0.3)
+
         return UrgencyScore(
             budget_pressure=budget_pressure,
             volatility=volatility,
@@ -364,6 +377,14 @@ class EisenhowerLayer:
             rung_win_contribution = min(
                 1.0, rung_win_contribution + felt_importance * 0.3
             )
+
+        # Dead-signal fix: Read felt_certainty to modulate theory_validation.
+        # When phenomenology reports high certainty, theory-testing rungs
+        # become MORE important (confirm what we think we know).
+        # When certainty is low, they're less critical — explore instead.
+        felt_certainty = self.blackboard.get('felt_certainty', 0.0)
+        if felt_certainty > 0.6 and rung_tests_theory:
+            theory_validation = min(1.0, theory_validation + felt_certainty * 0.2)
 
         return ImportanceScore(
             win_probability_delta=rung_win_contribution,

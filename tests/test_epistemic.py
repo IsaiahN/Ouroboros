@@ -79,7 +79,7 @@ class TestEpistemicState:
         """Test UK quadrant when high untapped potential."""
         state = EpistemicState()
         state.uk_potential = 0.7
-        state.unknown_knowns = {"r1", "r2", "r3", "r4"}
+        state.unknown_knowns = {"r1", "r2", "r3", "r4", "r5"}
 
         quadrant = state.compute_primary_quadrant()
         assert quadrant == RumsfeldQuadrant.UK
