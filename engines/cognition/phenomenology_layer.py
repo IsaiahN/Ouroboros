@@ -735,7 +735,7 @@ class PhenomenologyLayer:
         # PANIC MODE: High arousal + low agency
         # Use faster, more conservative algorithm
         if felt.arousal > 0.8 and felt.agency < 0.3:
-            modulation.algorithm_override = 'BeamSearch'
+            modulation.algorithm_override = 'beam_search'
             modulation.beam_width_multiplier = 0.5  # Narrow beam, fast
             logger.debug("[PHENOMENOLOGY] PANIC MODE: narrow beam search")
             return modulation

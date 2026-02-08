@@ -50,12 +50,15 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 # Slots that affect algorithm selection - invalidate cache when these change significantly
+# NOTE: These MUST match actual blackboard slot names written by cognitive_router.
+# Previous version used phantom names ("contradiction", "rumsfeld",
+# "domain_signature", "time_budget_remaining") that nothing ever wrote.
 ALGORITHM_RELEVANT_SLOTS: Set[str] = {
     "complexity",
-    "rumsfeld",
-    "contradiction",
-    "time_budget_remaining",
-    "domain_signature",
+    "epistemic_quadrant",       # was "rumsfeld" - written by router per-rung
+    "contradiction_detected",   # was "contradiction" - written by router
+    "budget_pressure",          # was "time_budget_remaining" - written by router
+    "game_id",                  # was "domain_signature" - from game_state
     "max_confidence",
     "uu_estimate",
 }
@@ -174,15 +177,18 @@ def compute_cache_key(context: SearchContext) -> CacheKey:
     max_conf = context.get_confidence()
     uu_est = context.get_slot('uu_estimate', 0.5)
 
-    # Time budget
-    time_remaining = context.get_slot('time_budget_remaining', 1.0)
-    total_budget = context.get_slot('time_budget_total', 1.0)
+    # Time budget — router writes 'budget_pressure' as action_count/action_budget
+    # (0.0 = fresh start, 1.0 = budget exhausted)
+    budget_pressure = context.get_slot('budget_pressure', 0.0)
+    # Convert pressure to remaining fraction for bucketing
+    time_remaining = max(0.0, 1.0 - float(budget_pressure))
+    total_budget = 1.0
 
-    # Contradiction state
-    has_contradiction = bool(context.get_slot('contradiction'))
+    # Contradiction state — router writes 'contradiction_detected'
+    has_contradiction = bool(context.get_slot('contradiction_detected', False))
 
-    # Domain and quadrant
-    domain = context.get_slot('domain_signature', 'unknown')
+    # Domain and quadrant — router writes 'game_id' from game_state
+    domain = context.get_slot('game_id', 'unknown')
     quadrant = context.current_quadrant
 
     # Active rungs for complexity
@@ -536,13 +542,13 @@ class MetaPlannerCache:
             new_bucket = bucket_uu(float(new_value))
             return old_bucket != new_bucket
 
-        if slot_name == 'time_budget_remaining':
-            # Need total budget for proper bucketing
-            # Assume significant if crosses 20% or 60% threshold
-            old_ratio = float(old_value)
-            new_ratio = float(new_value)
-            old_bucket = bucket_time(old_ratio)
-            new_bucket = bucket_time(new_ratio)
+        if slot_name == 'budget_pressure':
+            # budget_pressure is 0.0→1.0 (fraction of budget used)
+            # Convert to remaining fraction for bucketing
+            old_remaining = max(0.0, 1.0 - float(old_value))
+            new_remaining = max(0.0, 1.0 - float(new_value))
+            old_bucket = bucket_time(old_remaining)
+            new_bucket = bucket_time(new_remaining)
             return old_bucket != new_bucket
 
         # For other values, any change is significant
@@ -651,17 +657,16 @@ class MetaPlanner:
         5. Fallback -> LandmarkAStar
         """
         # 1. Contradiction override
-        if context.get_slot('contradiction'):
+        if context.get_slot('contradiction_detected', False):
             return BacktrackingAStar()
 
         # 2. Time pressure override
-        time_remaining = context.get_slot('time_budget_remaining', 1.0)
-        total_budget = context.get_slot('time_budget_total', 1.0)
-        if total_budget > 0 and time_remaining / total_budget < 0.2:
+        budget_pressure = context.get_slot('budget_pressure', 0.0)
+        if budget_pressure > 0.8:
             return BeamSearch(beam_width=2)
 
         # 3. Domain-specific selection
-        domain = context.get_slot('domain_signature', 'unknown')
+        domain = context.get_slot('game_id', 'unknown')
         if domain and domain != 'unknown':
             domain_config = DOMAIN_ALGORITHMS.get(domain)
             if domain_config:

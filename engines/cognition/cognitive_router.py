@@ -1723,6 +1723,21 @@ class CognitiveRouter:
         if last_outcome == 'death':
             self.blackboard.slot('contradiction_detected', True)
 
+        # Phenomenology reads 'cascade_failure' for THREAT valence.
+        # A cascade failure = multiple negative signals simultaneously:
+        # death + stuck + high budget pressure = system is failing broadly.
+        is_cascade = (
+            last_outcome == 'death'
+            and stuck_count > 0
+            and game_state.get('action_count', 0) > game_state.get('action_budget', 400) * 0.5
+        )
+        self.blackboard.slot('cascade_failure', is_cascade)
+
+        # Phenomenology reads 'recent_path' for THREAT exclusion modulation.
+        # Bridge from visited_rungs so the exclusion set has real data.
+        if hasattr(self, '_state') and self._state.visited_rungs:
+            self.blackboard.slot('recent_path', list(self._state.visited_rungs))
+
         # =====================================================================
         # DERIVED SLOTS: Computed from raw context for cognitive components
         # =====================================================================

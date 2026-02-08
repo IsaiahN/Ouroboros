@@ -84,10 +84,9 @@ def sample_blackboard_snapshot() -> Dict[str, Any]:
     """Sample blackboard snapshot for testing."""
     return {
         'confidence': 0.5,
-        'rumsfeld': {'uu_estimate': 0.4},
-        'domain_signature': 'unknown',
-        'time_budget_remaining': 0.8,
-        'time_budget_total': 1.0,
+        'uu_estimate': 0.4,
+        'game_id': 'unknown',
+        'budget_pressure': 0.2,
         'complexity': 'MEDIUM',
         'goal_rungs': ['smart_action_selection'],
     }
@@ -594,7 +593,7 @@ class TestMetaPlanner:
         planner = create_meta_planner()
 
         # Set contradiction
-        sample_context.blackboard_snapshot['contradiction'] = True
+        sample_context.blackboard_snapshot['contradiction_detected'] = True
 
         result = planner.select_algorithm(sample_context)
 
@@ -604,9 +603,8 @@ class TestMetaPlanner:
         """Test that critical time pressure triggers beam search."""
         planner = create_meta_planner()
 
-        # Set critical time
-        sample_context.blackboard_snapshot['time_budget_remaining'] = 0.1
-        sample_context.blackboard_snapshot['time_budget_total'] = 1.0
+        # Set critical budget pressure (>0.8 triggers beam search)
+        sample_context.blackboard_snapshot['budget_pressure'] = 0.9
 
         planner.invalidate_cache("time change")
         result = planner.select_algorithm(sample_context)
@@ -845,10 +843,9 @@ class TestIntegration:
         # 3. Create context
         blackboard = {
             'confidence': 0.4,
-            'rumsfeld': {'uu_estimate': 0.5},
-            'domain_signature': 'unknown',
-            'time_budget_remaining': 0.8,
-            'time_budget_total': 1.0,
+            'uu_estimate': 0.5,
+            'game_id': 'unknown',
+            'budget_pressure': 0.2,
         }
         context = create_search_context(
             blackboard=blackboard,

@@ -684,11 +684,11 @@ class EvolutionRunner:
                     str(change.get('to')),
                 ))
 
-                row = existing.fetchone() if existing else None
+                row = existing[0] if existing else None
 
                 if row:
                     # Update existing record
-                    new_times = row[1] + 1
+                    new_times = row['times_observed'] + 1
                     new_confidence = min(0.99, 0.5 + (new_times * 0.1))
                     self.db.execute_query("""
                         UPDATE property_transformations SET
@@ -696,7 +696,7 @@ class EvolutionRunner:
                             confidence = ?,
                             last_observed = datetime('now')
                         WHERE id = ?
-                    """, (new_times, new_confidence, row[0]))
+                    """, (new_times, new_confidence, row['id']))
                 else:
                     # Insert new record
                     self.db.execute_query("""
@@ -748,16 +748,16 @@ class EvolutionRunner:
                 WHERE game_id = ? AND level_number = ? AND goal_index = ?
             """, (game_id, level_number, goal_index))
 
-            row = existing.fetchone() if existing else None
+            row = existing[0] if existing else None
 
             if row:
                 # Update existing record
                 if succeeded:
-                    new_succeeded = row[1] + 1
-                    new_failed = row[2]
+                    new_succeeded = row['times_succeeded'] + 1
+                    new_failed = row['times_failed']
                 else:
-                    new_succeeded = row[1]
-                    new_failed = row[2] + 1
+                    new_succeeded = row['times_succeeded']
+                    new_failed = row['times_failed'] + 1
 
                 total = new_succeeded + new_failed
                 new_confidence = new_succeeded / total if total > 0 else 0.0
@@ -779,7 +779,7 @@ class EvolutionRunner:
                     str(properties.get('dominant_color')) if succeeded else None,
                     properties.get('shape_signature') if succeeded else None,
                     properties.get('orientation') if succeeded else None,
-                    row[0],
+                    row['id'],
                 ))
             else:
                 # Insert new record

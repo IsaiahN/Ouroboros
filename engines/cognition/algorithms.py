@@ -949,9 +949,15 @@ def get_algorithm(name: str, **kwargs) -> SearchAlgorithm:
     Returns:
         Algorithm instance
     """
+    # Defensive: normalise PascalCase / camelCase to snake_case registry keys
     if name not in ALGORITHM_CLASSES:
-        logger.warning(f"[ALGORITHMS] Unknown algorithm '{name}', using landmark_astar")
-        name = "landmark_astar"
+        import re
+        normalised = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', name).lower()
+        if normalised in ALGORITHM_CLASSES:
+            name = normalised
+        else:
+            logger.warning(f"[ALGORITHMS] Unknown algorithm '{name}', using landmark_astar")
+            name = "landmark_astar"
 
     return ALGORITHM_CLASSES[name](**kwargs)
 

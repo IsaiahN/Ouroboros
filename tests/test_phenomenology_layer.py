@@ -378,7 +378,7 @@ class TestAlgorithmModulation:
 
         modulation = layer.get_algorithm_modulation(felt)
 
-        assert modulation.algorithm_override == 'BeamSearch'
+        assert modulation.algorithm_override == 'beam_search'
         assert modulation.beam_width_multiplier < 1.0
 
     def test_confident_but_threatened_excludes_path(self, layer):
