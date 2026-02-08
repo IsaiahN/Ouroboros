@@ -28,7 +28,6 @@ class VisualAnalyzer:
         """Initialize visual analyzer."""
         self.previous_frame = None
         self.clicked_coordinates = set()  # Track coordinates we've already tried
-        self.dead_coordinates: Dict[Tuple[int, int], int] = {}  # coord -> failure count (don't retry 50+ times)
         self.last_action_changed_frame = False  # Did last action change the frame?
         self.consecutive_no_change_count = 0  # How many actions with no frame change?
         self.grid_exploration_index = 0  # For systematic grid walking
@@ -287,7 +286,14 @@ class VisualAnalyzer:
                     self._expansion_step = 2
 
     def mark_coordinate_clicked(self, x: int, y: int, frame_changed: bool = False):
-        """Mark a coordinate as already clicked and track failures.
+        """Mark a coordinate as already clicked.
+
+        NOTE: dead_coordinates system was REMOVED (2026-02-08).
+        ARC games require re-clicking coordinates (toggles, state cycling,
+        level transitions change meaning). The frame_changed signal is also
+        unreliable for ACTION6-only games (frame hash comparison misses
+        game state changes). The dead list was filtering out winning
+        coordinates, preventing any wins across 5000+ generations.
 
         Args:
             x: X coordinate
@@ -295,18 +301,6 @@ class VisualAnalyzer:
             frame_changed: Whether clicking this coordinate changed the frame
         """
         self.clicked_coordinates.add((x, y))
-
-        # Track dead coordinates - coords that never produce frame changes
-        coord = (x, y)
-        if not frame_changed:
-            self.dead_coordinates[coord] = self.dead_coordinates.get(coord, 0) + 1
-            if self.dead_coordinates[coord] >= 5:
-                logger.debug(f"[DEAD] Coordinate ({x},{y}) failed {self.dead_coordinates[coord]} times - marked as dead")
-        else:
-            # Success! Remove from dead coordinates
-            if coord in self.dead_coordinates:
-                del self.dead_coordinates[coord]
-                logger.info(f"[REVIVE] Coordinate ({x},{y}) worked! Removed from dead list")
 
         # Track target history for oscillation detection
         self.recent_targets.append((x, y))
@@ -369,9 +363,8 @@ class VisualAnalyzer:
     def reset_clicked_coordinates(self):
         """Reset clicked coordinates (e.g., when starting new game)."""
         self.clicked_coordinates.clear()
-        self.dead_coordinates.clear()
         self.grid_exploration_index = 0
-        logger.debug("Cleared clicked coordinates and dead coordinates")
+        logger.debug("Cleared clicked coordinates")
 
     # =========================================================================
     # PUBLIC INTERFACE METHODS (Used by Decision Rungs)
@@ -432,7 +425,6 @@ class VisualAnalyzer:
                 for x in range(grid_step // 2, 64, grid_step):
                     coord = (x, y)
                     if coord not in self.clicked_coordinates:
-                        if self.dead_coordinates.get(coord, 0) < 5:
                             targets.append({
                                 'x': x,
                                 'y': y,
@@ -524,17 +516,6 @@ class VisualAnalyzer:
 
         # Deduplicate and sort targets by priority
         analysis["targets"] = self._deduplicate_targets(analysis["targets"])
-
-        # Filter out dead coordinates that have failed too many times
-        if self.dead_coordinates:
-            original_count = len(analysis["targets"])
-            analysis["targets"] = [
-                t for t in analysis["targets"]
-                if self.dead_coordinates.get((t["x"], t["y"]), 0) < 10  # Allow up to 10 failures
-            ]
-            filtered_count = original_count - len(analysis["targets"])
-            if filtered_count > 0:
-                logger.debug(f"[DEAD] Filtered {filtered_count} dead-coordinate targets")
 
         # Store frame for next comparison
         self.previous_frame = [row[:] for row in frame]  # Deep copy
@@ -636,23 +617,12 @@ class VisualAnalyzer:
         for y in range(grid_step // 2, height, grid_step):
             for x in range(grid_step // 2, width, grid_step):
                 coord = (x, y)
-                # Skip if this coordinate has failed 5+ times
-                if self.dead_coordinates.get(coord, 0) < 5:
-                    grid_points.append(coord)
+                grid_points.append(coord)
 
         # Start from where we left off (rotating through grid)
         num_points = len(grid_points)
         if num_points == 0:
-            # All grid points are dead - use finer grid
-            for y in range(2, height - 2, 4):
-                for x in range(2, width - 2, 4):
-                    coord = (x, y)
-                    if self.dead_coordinates.get(coord, 0) < 5:
-                        grid_points.append(coord)
-            num_points = len(grid_points)
-
-        if num_points == 0:
-            return targets  # Truly exhausted
+            return targets  # No grid points available
 
         # Get next few grid points to try (rotate through them)
         start_idx = self.grid_exploration_index % num_points

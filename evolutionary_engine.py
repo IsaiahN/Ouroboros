@@ -745,17 +745,19 @@ class EvolutionaryEngine:
         # Get IDs of agents that made it to new population
         selected_ids = {agent['agent_id'] for agent in new_population}
 
-        # Deactivate agents that were NOT selected (culled from population)
-        # This is CRITICAL to prevent population explosion
+        # Deactivate ALL active agents that were NOT selected (culled)
+        # This is CRITICAL to prevent population explosion.
+        # Previous bug: filtered by AND generation = ? which only deactivated
+        # same-generation agents, leaving agents from ALL other generations
+        # permanently active (2000+ zombie agents from gen 0 alone).
         with self.db._get_connection() as conn:
             conn.execute("""
                 UPDATE agents
                 SET is_active = 0
                 WHERE is_active = 1
-                AND generation = ?
                 AND agent_id NOT IN ({})
             """.format(','.join('?' * len(selected_ids))),
-            [generation] + list(selected_ids))
+            list(selected_ids))
             conn.commit()
 
         # Store new agents or update existing

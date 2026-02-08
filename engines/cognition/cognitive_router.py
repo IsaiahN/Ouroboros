@@ -902,9 +902,6 @@ class CognitiveRouter:
                 context.visited_rungs.add(rung_name)
                 context.current_path.append(rung_name)
 
-                if self.fallback:
-                    self.fallback.record_iteration(rung_name)
-
                 # Track best result (any confidence)
                 if result.confidence > self._state.max_confidence:
                     self._state.max_confidence = result.confidence
@@ -997,6 +994,13 @@ class CognitiveRouter:
                         )
                         if transition.is_regression:
                             self.fallback.record_contradiction()
+
+            # Record one iteration for catastrophic fallback tracking.
+            # This is per outer-loop iteration (not per-rung) so the
+            # max_iterations threshold counts decision cycles, not the
+            # 5x-inflated rung evaluation count.
+            if self.fallback and batch_results:
+                self.fallback.record_iteration(batch_results[-1][0])
 
             # =================================================================
             # AGREEMENT CHECK: Look for action consensus within the batch
@@ -1372,18 +1376,25 @@ class CognitiveRouter:
         # Return first rung from ordering as action
         action = ordering[0] if ordering else "survey"
 
-        # Extract action_value from best_result if available
-        # Without this, fallback returns rung name with no action_value,
-        # causing the caller to fall back to random action selection.
+        # Prefer best_actionable_result (has valid ACTION string) over
+        # best_result.  Same logic as _finalize_decision.  Many rungs
+        # (palette_detection, survey, filters) produce non-zero confidence
+        # without suggesting an action.  Without this preference, the
+        # caller always falls back to random action selection.
         action_value = None
-        if self._state.best_result:
+        confidence = self._state.max_confidence
+        if self._state.best_actionable_result:
+            action_value = self._state.best_actionable_result.value
+            action = self._state.best_actionable_result.rung_name
+            confidence = self._state.best_actionable_result.confidence
+        elif self._state.best_result:
             if isinstance(self._state.best_result.value, str) and self._state.best_result.value.startswith('ACTION'):
                 action_value = self._state.best_result.value
 
         return DecisionResult(
             action=action,
             reasoning=f"Fallback triggered: {failure_type.value}",
-            confidence=self._state.max_confidence,
+            confidence=confidence,
             action_value=action_value,
             iterations=self._state.iteration,
             rungs_evaluated=len(self._state.visited_rungs),

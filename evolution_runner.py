@@ -1039,6 +1039,24 @@ class EvolutionRunner:
         self._prev_frame = None
         self._prev_properties = None
 
+        # Reset visual analyzer for new game (clear clicked/dead coordinate tracking)
+        try:
+            va = None
+            if hasattr(self, 'decision_system') and hasattr(self.decision_system, '_engine_registry'):
+                registry = self.decision_system._engine_registry
+                if registry:
+                    va = getattr(registry, 'visual_analyzer', None)
+            if va:
+                va.reset_clicked_coordinates()
+                if hasattr(va, 'clear_priority_on_new_game'):
+                    va.clear_priority_on_new_game()
+                # Set agent mode for mode-specific exploration behavior
+                agent_mode = mode_assignments.get(agent.agent_id, 'generalist') if mode_assignments else 'generalist'
+                if hasattr(va, 'set_agent_mode'):
+                    va.set_agent_mode(agent_mode)
+        except Exception:
+            pass  # Non-critical
+
         # Create session for action traces (FK requirement)
         self._current_session_id = f"session_{uuid.uuid4().hex[:12]}_{int(datetime.now().timestamp())}"
         try:
@@ -1397,6 +1415,20 @@ class EvolutionRunner:
                 # Reset for next level
                 level_start_action_index = len(action_sequence)
 
+                # Clear visual_analyzer clicked tracking for new level
+                # Coordinates that didn't work on level N may be the
+                # winning click on level N+1 (game state changes)
+                try:
+                    va = None
+                    if hasattr(self, 'decision_system') and hasattr(self.decision_system, '_engine_registry'):
+                        registry = self.decision_system._engine_registry
+                        if registry:
+                            va = getattr(registry, 'visual_analyzer', None)
+                    if va:
+                        va.reset_clicked_coordinates()
+                except Exception:
+                    pass  # Non-critical
+
                 # Load per-level winning sequence for the NEXT level
                 # This is how knowledge from previous agents' level wins
                 # gets reused: after beating level N, load best sequence
@@ -1648,17 +1680,33 @@ class EvolutionRunner:
     def _store_game_result(self, result: GameResult):
         """Store game result in database."""
         import uuid
-        session_id = str(uuid.uuid4())
+
+        # Use existing session from play_game (avoids orphan sessions)
+        session_id = self._current_session_id
+        if not session_id:
+            # Fallback: create session if play_game didn't
+            session_id = str(uuid.uuid4())
+            try:
+                self.db.execute_query("""
+                    INSERT INTO training_sessions (
+                        session_id, game_id, start_time, mode, status, total_actions
+                    ) VALUES (?, ?, datetime('now'), 'evolution', 'completed', ?)
+                """, (session_id, result.game_id, result.actions_taken))
+            except Exception:
+                pass
+        else:
+            # Update existing session to completed with final action count
+            try:
+                self.db.execute_query("""
+                    UPDATE training_sessions
+                    SET status = 'completed', total_actions = ?
+                    WHERE session_id = ?
+                """, (result.actions_taken, session_id))
+            except Exception:
+                pass
 
         try:
-            # Create training session first (FK requirement)
-            self.db.execute_query("""
-                INSERT INTO training_sessions (
-                    session_id, game_id, start_time, mode, status, total_actions
-                ) VALUES (?, ?, datetime('now'), 'evolution', 'completed', ?)
-            """, (session_id, result.game_id, result.actions_taken))
-
-            # Now store game result
+            # Store game result
             self.db.execute_query("""
                 INSERT INTO game_results (
                     game_id, session_id, start_time, end_time, status,
@@ -1674,6 +1722,51 @@ class EvolutionRunner:
                 result.is_win,
                 result.levels_completed,
                 self.current_generation,
+            ))
+
+            # CRITICAL: Write to agent_arc_performance for evolutionary fitness.
+            # Without this, evolutionary_engine._calculate_standard_fitness()
+            # returns 0.0 for ALL agents (get_agent_arc_performance finds nothing).
+            # This makes natural selection have ZERO signal -- evolution becomes
+            # pure random drift with no improvement across generations.
+            efficiency = result.score / max(1, result.actions_taken)
+            level_bonus = result.levels_completed * 0.1
+            win_bonus = 1.0 if result.is_win else 0.0
+            total_reward = result.score + win_bonus + efficiency + level_bonus
+
+            self.db.execute_query("""
+                INSERT INTO agent_arc_performance (
+                    performance_id, agent_id, game_id, session_id, game_timestamp,
+                    final_score, win_score_threshold, win_achieved, total_actions,
+                    score_efficiency, win_proximity, level_progressions,
+                    strategy_used, genome_config,
+                    base_reward, win_bonus, efficiency_bonus,
+                    level_progression_bonus, total_evolutionary_reward
+                ) VALUES (?, ?, ?, ?, datetime('now'),
+                          ?, ?, ?, ?,
+                          ?, ?, ?,
+                          ?, ?,
+                          ?, ?, ?,
+                          ?, ?)
+            """, (
+                str(uuid.uuid4()),
+                result.agent_id,
+                result.game_id,
+                session_id,
+                result.score,
+                1.0,  # win threshold = perfect score (all levels)
+                result.is_win,
+                result.actions_taken,
+                efficiency,
+                result.score,  # win_proximity = score / 1.0
+                result.levels_completed,
+                'cognitive' if self._use_cognitive_router else 'ladder',
+                '{}',
+                result.score,  # base_reward
+                win_bonus,
+                efficiency,
+                level_bonus,
+                total_reward,
             ))
 
             # Store winning sequence if won
