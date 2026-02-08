@@ -108,7 +108,7 @@ class SearchAlgorithm(ABC):
         """
         # Base score from rung metadata
         rung_info = graph_info.get('nodes', {}).get(rung, {})
-        priority = rung_info.get('default_priority', 50)
+        priority = rung_info.get('priority', rung_info.get('default_priority', 50))
 
         # Lower priority number = higher score (survey=5 should score higher)
         base_score = 1.0 - (priority / 100.0)
@@ -249,7 +249,7 @@ class BidirectionalSearch(SearchAlgorithm):
 
         # Default estimate based on priority difference
         rung_info = graph_info.get('nodes', {}).get(rung, {})
-        rung_priority = rung_info.get('default_priority', 50)
+        rung_priority = rung_info.get('priority', rung_info.get('default_priority', 50))
         goal_priority = 60  # Assume goals are exploitation phase
 
         return abs(goal_priority - rung_priority) / 10.0
@@ -524,8 +524,11 @@ class InformationMaximizingSearch(SearchAlgorithm):
         """Compute expected cost of executing this rung."""
         rung_info = graph_info.get('nodes', {}).get(rung, {})
 
-        # Cost based on priority (higher priority = lower cost)
-        priority = rung_info.get('default_priority', 50)
+        # Cost based on priority (higher priority number = lower urgency = higher cost)
+        # Node dict stores 'priority' (set from rung.get_priority()), not
+        # 'default_priority'. The mismatch caused every rung to score 50/50=1.0,
+        # making the algorithm blind to priority differences.
+        priority = rung_info.get('priority', rung_info.get('default_priority', 50))
         base_cost = priority / 50.0  # Normalize to ~1.0
 
         # Edge cost modifier

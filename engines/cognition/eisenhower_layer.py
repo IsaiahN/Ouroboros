@@ -238,6 +238,15 @@ class EisenhowerLayer:
         self.blackboard = blackboard
         self.scheduled_queue: List[PrioritizedTask] = []
 
+        # Per-decision sparsity flag.  Computed once at the start of a
+        # decision cycle (via ``snapshot_sparsity``) and reused for every
+        # ``gate_single_rung`` call within that cycle.  This prevents a
+        # mid-batch flip: the first rung in a batch passes (guard fires),
+        # writes a signal to the blackboard, and subsequent rungs no longer
+        # qualify as "sparse" — causing them to be Q4_ELIMINATE'd despite
+        # the system genuinely being in a cold-start / data-poor state.
+        self._decision_is_sparse: bool = True  # Optimistic default
+
         # Statistics for debugging
         self.stats = {
             'tasks_classified': 0,
@@ -248,6 +257,24 @@ class EisenhowerLayer:
             'all_eliminate_triggered': 0,
             'promotions_from_aging': 0,
         }
+
+    def snapshot_sparsity(self) -> None:
+        """Capture blackboard sparsity at the start of a decision cycle.
+
+        Call this once per ``decide()`` invocation — BEFORE the evaluation
+        loop starts — so that the sparsity determination is stable for the
+        entire batch of ``gate_single_rung`` calls.
+        """
+        _key_signals = (
+            # Per-rung contribution is always None here (no rung name),
+            # but we check generic strategy signals.
+            self.blackboard.get('frame_delta_magnitude'),
+            self.blackboard.get('strategy_stability'),
+            self.blackboard.get('working_theory'),
+            self.blackboard.get('rung_win_contribution_survey'),
+        )
+        populated = sum(1 for s in _key_signals if s is not None)
+        self._decision_is_sparse = populated < 2
 
     # =========================================================================
     # URGENCY COMPUTATION
@@ -527,26 +554,11 @@ class EisenhowerLayer:
                 0.0, min(1.0, importance.win_probability_delta + importance_boost)
             )
 
-        # Signal-sparsity guard: Eisenhower reads several blackboard signals
-        # (rung_win_contribution_*, frame_delta_magnitude, strategy_stability,
-        # working_theory, open_questions, etc.) to compute urgency/importance.
-        # If those signals are missing — which they are until the upstream
-        # components that produce them are wired — every rung scores below
-        # the 0.5 thresholds and gets Q4_ELIMINATE'd.
-        #
-        # Detect sparsity by checking whether the key inputs actually exist
-        # on the blackboard.  When data is sparse, boost both axes above the
-        # thresholds so candidates classify as Q1_DO and get executed.
-        # Once upstream systems populate these slots the boosts become no-ops
-        # because the real values will already exceed the floor.
-        _key_signals = (
-            self.blackboard.get(f'rung_win_contribution_{rung_name}'),
-            self.blackboard.get('frame_delta_magnitude'),
-            self.blackboard.get('strategy_stability'),
-            self.blackboard.get('working_theory'),
-        )
-        populated = sum(1 for s in _key_signals if s is not None)
-        if populated < 2:
+        # Signal-sparsity guard: Use the cached per-decision sparsity flag
+        # (set by ``snapshot_sparsity`` at the start of the cycle).
+        # This ensures consistent behaviour for ALL rungs in a batch,
+        # even after the first rung writes signals to the blackboard.
+        if self._decision_is_sparse:
             # Sparse data — be optimistic rather than eliminative.
             # Importance: need total > 0.5
             #   win_prob(w=0.4) + theory(w=0.3) + unlock(w=0.2) + trust(w=0.1)

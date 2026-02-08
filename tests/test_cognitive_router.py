@@ -369,7 +369,7 @@ class TestCognitiveRouterBasics:
         router = CognitiveRouter()
         assert router.blackboard is not None
         assert router.epistemic_tracker is not None
-        assert router.config.max_iterations == 12
+        assert router.config.max_iterations == 15
 
     def test_init_with_custom_config(self):
         """Test initialization with custom config."""

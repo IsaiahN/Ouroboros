@@ -319,10 +319,12 @@ def get_algorithm_for_transition(transition: EpistemicTransition) -> TransitionR
 class RouterConfig:
     """Configuration for the CognitiveRouter."""
     # Maximum iterations per decision (each evaluates up to max_rungs_per_call)
-    # With batch evaluation: 12 iterations x 5 rungs = 60 rung evals max.
+    # With batch evaluation: 15 iterations x 5 rungs = 75 rung evals max.
+    # The rung graph has ~63 nodes, so 15 iterations guarantees full
+    # coverage even when some candidates are skipped.
     # Architecture target: O(26) typical. With agreement boost, the router
     # usually commits in 2-4 iterations when rungs agree.
-    max_iterations: int = 12
+    max_iterations: int = 15
 
     # Maximum rungs to evaluate per algorithm call (batch size)
     # Algorithms return their top-K candidates ranked by expected value.
@@ -336,8 +338,12 @@ class RouterConfig:
     # rungs, causing 100% fallback.
     commit_threshold: float = 0.50
 
-    # Time budget per decision (seconds)
-    time_budget_seconds: float = 5.0
+    # Time budget per decision (seconds).
+    # Must be generous enough for engine warm-up (first call per game
+    # initialises DB connections and engine objects inside rung evaluations)
+    # and for DB-querying rungs on large databases (3+ GB).
+    # The action budget is the real limiter, not wall-clock time.
+    time_budget_seconds: float = 30.0
 
     # Enable hysteresis for quadrant transitions
     use_hysteresis: bool = True
@@ -757,6 +763,12 @@ class CognitiveRouter:
         and feeds it back into the blackboard, creating a consciousness-like loop.
         """
         algorithm_switches = 0
+
+        # Snapshot Eisenhower sparsity BEFORE the loop.  This ensures the
+        # guard stays stable for the entire decision — rung evaluations that
+        # write to the blackboard mid-loop cannot flip the guard and cause
+        # subsequent candidates to be Q4_ELIMINATE'd.
+        self.eisenhower.snapshot_sparsity()
 
         # Phase 9: Compress previous state and inject (phenomenology feedback)
         # This creates the High-D → Compress → Summary → Feed back loop

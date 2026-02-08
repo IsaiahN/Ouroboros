@@ -6710,7 +6710,21 @@ class DecisionRungSystem:
                 print(f"[RUNG-SYSTEM] Warning: Unknown ordering '{preset_name}', using efficiency")
                 ordering = ORDERING_PRESETS['comprehensive']
 
-        # Instantiate rungs with both legacy core AND engine registry
+        # =====================================================================
+        # SHARED ENGINE REGISTRY - Ensure all rungs share a single registry
+        # Without this, each rung lazily creates its own EngineRegistry
+        # (and its own DB connection), causing 20+ DB connections to open
+        # during the first decision loop.  This blows the cognitive router's
+        # time budget (5 s) and forces fallback on every action.
+        # =====================================================================
+        if self._engine_registry is None:
+            from engines.registry import EngineRegistry
+            if self.core is not None:
+                self._engine_registry = EngineRegistry(legacy_core=self.core)
+            else:
+                self._engine_registry = EngineRegistry()
+
+        # Instantiate rungs with both legacy core AND shared engine registry
         for rung_name, priority in ordering:
             if rung_name in self.RUNG_REGISTRY:
                 rung = self.RUNG_REGISTRY[rung_name](
