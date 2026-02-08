@@ -1378,7 +1378,7 @@ class ExplorationPhaseRung(DecisionRung):
             budget_used = context.get('budget_used_percent', 0)
             coverage = context.get('coverage_percent', 0)
 
-            # Discovery phase: 0-30% budget
+            # Discovery phase: 0-30% budget AND low coverage
             if budget_used < 0.3 and coverage < 0.3:
                 exploration_actions = filter_available_actions(
                     ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION6'], context
@@ -1410,10 +1410,35 @@ class ExplorationPhaseRung(DecisionRung):
                         metadata['x'] = random.randint(4, 60)
                         metadata['y'] = random.randint(4, 60)
 
+                # Dynamic confidence: starts at 0.55 (fresh game, unknown
+                # territory) and decays as exploration exhausts itself.
+                # Without this, the hardcoded 0.6 exceeds the router's 0.50
+                # commit threshold every time, monopolising the first
+                # iteration and preventing any other rung from executing.
+                #
+                # Decay factors:
+                #   - budget_used: you've spent actions without advancing
+                #   - coverage: grid has been explored (less to discover)
+                #   - action_count penalty: even at 0% budget_used,
+                #     repeated calls without progress should decay.
+                action_count = context.get('action_count', 0)
+                # How many actions have occurred since last level change?
+                # Proxy: if score hasn't increased, exploration isn't working.
+                actions_since_progress = action_count - context.get(
+                    'last_progress_action', 0
+                )
+                # Decay: steep drop from budget consumption, mild from
+                # action repetition (each action without progress = -0.005).
+                staleness_penalty = min(0.3, actions_since_progress * 0.005)
+                confidence = max(
+                    0.15,  # Floor: never fully block, but yield to better rungs
+                    0.55 - budget_used * 0.8 - coverage * 0.5 - staleness_penalty
+                )
+
                 return RungResult(
                     action=chosen_action,
-                    confidence=0.6,
-                    reason=f"Discovery phase: budget={budget_used:.0%}, coverage={coverage:.0%}",
+                    confidence=confidence,
+                    reason=f"Discovery phase: budget={budget_used:.0%}, coverage={coverage:.0%}, conf={confidence:.2f}",
                     metadata=metadata
                 )
             return RungResult(metadata={'phase': 'intermediate' if budget_used < 0.7 else 'final'})
@@ -2480,15 +2505,15 @@ class StateMatchingRung(DecisionRung):
                 LIMIT 1
             """, (f"{game_type}%", level))
 
-            row = result.fetchone() if result else None
+            row = result[0] if result else None
             if row:
                 req = {
-                    'dominant_color': row[0],
-                    'shape_signature': row[1],
-                    'orientation': row[2],
-                    'times_succeeded': row[3],
-                    'times_failed': row[4],
-                    'confidence': row[5],
+                    'dominant_color': row['required_dominant_color'],
+                    'shape_signature': row['required_shape_phash'],
+                    'orientation': row['required_orientation'],
+                    'times_succeeded': row['times_succeeded'],
+                    'times_failed': row['times_failed'],
+                    'confidence': row['confidence'],
                 }
                 self._cached_requirements[cache_key] = req
                 return req
@@ -2523,13 +2548,13 @@ class StateMatchingRung(DecisionRung):
             """, (f"{game_type}%", level, property_needed))
 
             transformers = []
-            for row in result.fetchall() if result else []:
+            for row in result if result else []:
                 transformers.append({
-                    'position': (row[0], row[1]),
-                    'value_before': row[2],
-                    'value_after': row[3],
-                    'times_observed': row[4],
-                    'confidence': row[5],
+                    'position': (row['object_position_x'], row['object_position_y']),
+                    'value_before': row['value_before'],
+                    'value_after': row['value_after'],
+                    'times_observed': row['times_observed'],
+                    'confidence': row['confidence'],
                 })
 
             self._cached_transformers[cache_key] = transformers
@@ -2563,12 +2588,12 @@ class StateMatchingRung(DecisionRung):
                 LIMIT 1
             """, (session_id,))
 
-            row = result.fetchone() if result else None
+            row = result[0] if result else None
             if row:
                 return {
-                    'dominant_color': row[0],
-                    'shape_signature': row[1],
-                    'orientation': row[2],
+                    'dominant_color': row['dominant_color'],
+                    'shape_signature': row['shape_phash'],
+                    'orientation': row['orientation'],
                 }
             return None
         except Exception as e:
@@ -3269,8 +3294,9 @@ class EventUnderstandingRung(DecisionRung):
             """, (game_type,))
 
             return [
-                {'type': r[0], 'objects': r[1], 'positions': r[2], 'confidence': r[3]}
-                for r in (result.fetchall() if result else [])
+                {'type': r['event_type'], 'objects': r['objects_involved'],
+                 'positions': r['positions'], 'confidence': r['confidence']}
+                for r in (result if result else [])
             ]
         except Exception:
             return self._event_history[-10:]
@@ -4733,17 +4759,28 @@ class NetworkSharingRung(DecisionRung):
 
                 if hypotheses:
                     # Find highest-reliability hypothesis
-                    best = max(hypotheses, key=lambda h: h.get('reliability_score', 0))
+                    # Key is 'reliability' (from get_network_control_hypotheses),
+                    # NOT 'reliability_score' (that's the DB column name).
+                    best = max(hypotheses, key=lambda h: h.get('reliability', 0))
 
-                    if best.get('reliability_score', 0) > 0.6:
+                    if best.get('reliability', 0) > 0.6:
                         action_map = best.get('action_response_map', {})
 
                         # Suggest first action from the map
                         if action_map:
-                            action = list(action_map.keys())[0]
+                            raw_key = list(action_map.keys())[0]
+                            # Normalize: DB stores keys as "3" (bare number)
+                            # or "ACTION6" depending on discovery path.
+                            # The rung MUST return proper ACTION format.
+                            if raw_key.startswith('ACTION'):
+                                action = raw_key
+                            elif raw_key.isdigit():
+                                action = f'ACTION{raw_key}'
+                            else:
+                                return RungResult()  # Unrecognisable key
                             return RungResult(
                                 action=action,
-                                confidence=best.get('reliability_score', 0.5) * 0.7,
+                                confidence=best.get('reliability', 0.5) * 0.7,
                                 reason=f"Network hypothesis: {best.get('hypothesis_id', 'unknown')[:20]}",
                                 metadata={
                                     'hypothesis': best,
@@ -5512,6 +5549,163 @@ class AssumptionFormationRung(DecisionRung):
             return RungResult(reason=f"Assumption formation failed: {e}")
 
 
+class ViralPackageWeightsRung(DecisionRung):
+    """Apply action weights from viral information packages - FILTER
+
+    Wires: engines/social/viral_package_engine.py:get_package_action_weights()
+
+    Viral packages carry knowledge from winning strategies that spread
+    across the agent population. Each package contains action sequences
+    weighted by success rate, infection strength, and emotional compatibility.
+
+    This rung reads those packages and converts them to action weights,
+    closing the loop: winning sequences -> viral packages -> action decisions.
+
+    Data flow:
+        winning_sequences -> viral_information_packages (post-game)
+        -> agent_viral_infections (horizontal transfer)
+        -> get_package_action_weights() (this rung reads)
+        -> action weights applied to decision
+    """
+    name = "viral_package_weights"
+    category = "filter"
+    default_priority = 20  # After pariah_avoidance (19), before hypothesis
+    confidence_threshold = 0.0  # Modifies weights, not a direct action
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        vpe = self.engines.viral_package_engine
+        if vpe is None:
+            return RungResult()
+
+        try:
+            agent_id = context.get('agent_id', '')
+            if not agent_id:
+                return RungResult()
+
+            if not hasattr(vpe, 'get_package_action_weights'):
+                return RungResult()
+
+            generation = context.get('generation', 0)
+            raw_weights = vpe.get_package_action_weights(
+                agent_id=agent_id,
+                generation=generation,
+                track_retrieval=True,
+            )
+
+            if not raw_weights:
+                return RungResult()
+
+            # Convert int action keys to ACTION strings and normalize
+            # get_package_action_weights returns {action_int: weight_float}
+            weights: Dict[str, float] = {}
+            max_weight = max(raw_weights.values()) if raw_weights else 1.0
+            boosted_actions = []
+
+            for action_num, weight in raw_weights.items():
+                action = f'ACTION{action_num}'
+                # Validate action is available in this game
+                if not is_action_available(action, context):
+                    continue
+                # Normalize to 0.5-1.5 range (boost, not replace)
+                normalized = 0.5 + (weight / max(max_weight, 0.001))
+                weights[action] = min(1.5, normalized)
+                if normalized > 1.0:
+                    boosted_actions.append(f"{action}({normalized:.2f})")
+
+            if weights:
+                return RungResult(
+                    confidence=0.35,
+                    weights=weights,
+                    reason=f"Viral packages: {len(raw_weights)} actions weighted, {len(boosted_actions)} boosted",
+                    metadata={
+                        'package_count': len(raw_weights),
+                        'boosted': boosted_actions[:5],
+                    }
+                )
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Viral package weights failed: {e}")
+
+
+class MetacognitiveEliminationRung(DecisionRung):
+    """Penalize actions that metacognition has systematically eliminated - FILTER
+
+    Wires: engines/cognition/metacognition.py:get_eliminated_actions()
+
+    The metacognitive engine tracks actions that consistently fail for a
+    given game/level (e.g., ACTION3 always leads to death on level 2 of ft09).
+    These eliminations are stored in metacognitive_eliminations table with
+    confidence scores.
+
+    This rung reads those eliminations and applies heavy weight penalties,
+    effectively steering the agent away from provably bad actions without
+    hard-blocking them (in case context has changed).
+
+    Unlike contextual_failure (position-aware), this is GLOBAL elimination
+    per game_type + level.
+
+    Data flow:
+        gameplay failures -> metacognitive_eliminations (recorded by MetacognitiveReasoningEngine)
+        -> get_eliminated_actions() (this rung reads)
+        -> heavy weight penalties on eliminated actions
+    """
+    name = "metacognitive_elimination"
+    category = "filter"
+    default_priority = 16  # Right with death_avoidance
+    confidence_threshold = 0.0  # Modifies weights
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        me = self.engines.metacognitive_engine
+        if me is None:
+            return RungResult()
+
+        try:
+            if not hasattr(me, 'get_eliminated_actions'):
+                return RungResult()
+
+            game_type = context.get('game_type', '')
+            level = context.get('level', 1)
+
+            if not game_type:
+                return RungResult()
+
+            eliminated = me.get_eliminated_actions(
+                game_type=game_type,
+                level_number=level,
+                min_confidence=0.6,
+            )
+
+            if not eliminated:
+                return RungResult()
+
+            # Build penalty weights for eliminated actions (available only)
+            weights = get_available_action_weights(context, 1.0)
+            penalized = []
+
+            for action_str in eliminated:
+                # Normalize action format
+                if not action_str.startswith('ACTION'):
+                    action_str = f'ACTION{action_str}'
+                if action_str in weights:
+                    # Heavy penalty: 0.1 weight (nearly eliminated but not hard-blocked)
+                    weights[action_str] = 0.1
+                    penalized.append(action_str)
+
+            if penalized:
+                return RungResult(
+                    confidence=0.6,
+                    weights=weights,
+                    reason=f"Metacognitive eliminations: {', '.join(penalized)}",
+                    metadata={
+                        'eliminated_count': len(penalized),
+                        'eliminated_actions': penalized,
+                    }
+                )
+            return RungResult()
+        except Exception as e:
+            return RungResult(reason=f"Metacognitive elimination failed: {e}")
+
+
 class ContextualFailureRung(DecisionRung):
     """Track contextual failures - position/direction/object-aware - FILTER
 
@@ -5769,7 +5963,9 @@ ORDERING_PRESETS = {
         ('death_avoidance', 32),
         ('terminal_pattern', 34),
         ('theory_contradiction', 35),  # Filter actions contradicted by failed theories
+        ('metacognitive_elimination', 35),  # Penalize globally-eliminated actions
         ('pariah_avoidance', 36),
+        ('viral_package_weights', 37),  # Boost actions from viral packages
         ('three_layer_filter', 38),
         ('hypothesis_testing', 39),  # Test untested assumptions
         ('three_try_sequence', 40),
@@ -5811,6 +6007,8 @@ ORDERING_PRESETS = {
         ('embedding_suggestion', 8),    # Pattern recognition - I've seen this
         ('network_wisdom', 10),         # Social learning - what did others do?
         ('pariah_avoidance', 12),       # Social learning - what to avoid
+        ('metacognitive_elimination', 12),  # Avoid eliminated actions
+        ('viral_package_weights', 13),  # Viral knowledge weights
         ('exploration_phase', 14),      # Curiosity - novelty seeking
         ('scientific_method', 20),      # Prefrontal - slow reasoning
         ('theory_gate', 22),            # Theory validation
@@ -5846,11 +6044,13 @@ ORDERING_PRESETS = {
 
         # FILTER - Modify action weights (Priority 15-25)
         ('contextual_failure', 15),   # Context-aware failure avoidance (before death_avoidance)
+        ('metacognitive_elimination', 15),  # Penalize globally-eliminated actions
         ('death_avoidance', 16),
         ('terminal_pattern', 17),
         ('theory_contradiction', 18),  # Filter contradicted actions
         ('pariah_avoidance', 19),
-        ('three_layer_filter', 20),
+        ('viral_package_weights', 20),  # Boost actions from viral packages
+        ('three_layer_filter', 21),
 
         # HYPOTHESIS - Form and test theories (Priority 25-40)
         ('event_understanding', 23),  # Causal world model
@@ -6011,7 +6211,9 @@ ORDERING_PRESETS = {
         # VALENCE - What's good/bad to click?
         ('valence_goals', 24),      # Good/bad associations
         ('death_avoidance', 25),    # Don't click things that kill
+        ('metacognitive_elimination', 25),  # Eliminated actions
         ('pariah_avoidance', 26),   # Avoid known-bad patterns
+        ('viral_package_weights', 27),  # Viral knowledge weights
 
         # EXPLORATION - Systematic when all else fails
         ('grid_exploration', 30),   # Systematic grid walking
@@ -6061,7 +6263,9 @@ ORDERING_PRESETS = {
 
         # SAFETY
         ('death_avoidance', 25),
+        ('metacognitive_elimination', 25),
         ('pariah_avoidance', 26),
+        ('viral_package_weights', 27),
 
         # EXPLORATION - Systematic coverage
         ('grid_exploration', 30),
@@ -6090,6 +6294,8 @@ ORDERING_PRESETS = {
         ('action6_object_exploration', 24),  # Use Action6BehaviorEngine for click targets
         ('click_behavior_learning', 25),  # Learn click patterns for ACTION6 games
         ('grid_exploration', 26),  # Fallback: systematic grid walking
+        ('metacognitive_elimination', 35),  # Penalize eliminated actions
+        ('viral_package_weights', 36),  # Viral package weights
         ('death_avoidance', 40),  # Lower priority on frontier
         ('discovery_exploitation', 45),
         ('smart_action_selection', 99),
@@ -6187,6 +6393,8 @@ class DecisionRungSystem:
         'self_trust_boost': SelfTrustBoostRung,      # Manage wA based on context
         'assumption_formation': AssumptionFormationRung,  # Form testable assumptions
         'contextual_failure': ContextualFailureRung,  # Context-aware failure avoidance
+        'viral_package_weights': ViralPackageWeightsRung,  # Action weights from viral packages
+        'metacognitive_elimination': MetacognitiveEliminationRung,  # Penalize eliminated actions
     }
 
     def __init__(self,
@@ -7815,7 +8023,14 @@ class CoreGameplayAdapter:
             # Budget tracking
             if loop_state:
                 context['action_count'] = getattr(loop_state, 'action_count', 0)
-                context['budget_used_percent'] = context['action_count'] / 2000.0  # Assume 2000 budget
+                # Use real action budget — the phantom /2000.0 made budget_used_percent
+                # stuck at ~3% for an entire 129-action game, so exploration_phase
+                # never stopped firing.  Priority: context -> core config -> 400 default.
+                action_budget = context.get('action_budget') or getattr(
+                    getattr(self.core, '_loop_config', None), 'max_actions', 400
+                )
+                context.setdefault('action_budget', action_budget)
+                context['budget_used_percent'] = context['action_count'] / max(action_budget, 1)
 
             # Agent info
             if hasattr(self.core, 'game_config'):

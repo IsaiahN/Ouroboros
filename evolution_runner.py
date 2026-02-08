@@ -977,6 +977,8 @@ class EvolutionRunner:
         stuck_count = 0  # Count of consecutive stuck frames
         tried_colors: set = set()  # Colors we've tried clicking (for ACTION6 exploration)
         level_start_action_index = 0  # Track where current level's actions begin (for per-level winning sequences)
+        current_frame_hash = ''  # Frame hash for FrontierTopologyRung network queries
+        has_level_sequence = False  # Whether a per-level winning sequence exists for the current level
 
         # Check if game already has a winning sequence (for frontier_mode)
         try:
@@ -1008,6 +1010,26 @@ class EvolutionRunner:
                         pass  # Non-critical tracking
         except Exception:
             has_full_win = False
+
+        # Load per-level winning sequence for level 1 if no full-game sequence
+        if not active_sequence:
+            try:
+                import json as _json
+                game_type = game_id[:4] if len(game_id) >= 4 else game_id
+                level_seq = self.db.execute_query("""
+                    SELECT action_sequence, sequence_id FROM winning_sequences
+                    WHERE game_type = ? AND level_number = 1 AND is_active = 1
+                    ORDER BY efficiency_score DESC LIMIT 1
+                """, (game_type,))
+                if level_seq and level_seq[0].get('action_sequence'):
+                    seq_data = level_seq[0]['action_sequence']
+                    active_sequence = _json.loads(seq_data) if isinstance(seq_data, str) else list(seq_data)
+                    is_replay_mode = True
+                    has_level_sequence = True
+                    if self.verbose:
+                        print(f"    [SEQ-LOAD] Level 1 sequence loaded: {level_seq[0].get('sequence_id', '?')[:16]} ({len(active_sequence)} actions)")
+            except Exception:
+                pass  # No per-level sequences available
 
         # Reset symbolic reasoning state for new game
         self.player_localizer.reset()
@@ -1052,6 +1074,8 @@ class EvolutionRunner:
                 'agent_id': agent.agent_id,
                 'actions_taken': actions_taken,
                 'action_count': actions_taken,  # Alias for budget tracking
+                'action_budget': self.max_actions,  # Real budget for fraction computation
+                'budget_used_percent': actions_taken / max(self.max_actions, 1),  # Real fraction
                 'state': str(obs.state) if obs else 'UNKNOWN',
                 'frame_data': obs,
                 'available_actions': current_available,  # Current, not initial
@@ -1092,6 +1116,12 @@ class EvolutionRunner:
                 # ACTION6 is fundamentally different: it requires (x,y) coordinates
                 'is_action6_only_game': current_available == [6],
                 'action6_available': 6 in current_available,
+                # Frame hash for FrontierTopologyRung network queries
+                'frame_hash': current_frame_hash,
+                # Whether any winning sequence exists for this level
+                'has_winning_sequence': has_full_win or has_level_sequence,
+                # Last action index where progress occurred (for ExplorationPhaseRung staleness)
+                'last_progress_action': level_start_action_index,
             }
 
             # Get action from decision system
@@ -1222,6 +1252,7 @@ class EvolutionRunner:
             frame_hash_before = self._compute_frame_hash(obs_before)
             frame_hash_after = self._compute_frame_hash(obs)
             last_frame_changed = frame_hash_before != frame_hash_after
+            current_frame_hash = frame_hash_after  # Persist for context['frame_hash']
 
             # CRITICAL FIX: Feed ACTION6 click feedback to visual_analyzer
             # Without this, the visual_analyzer never learns which coordinates
@@ -1362,6 +1393,38 @@ class EvolutionRunner:
 
                 # Reset for next level
                 level_start_action_index = len(action_sequence)
+
+                # Load per-level winning sequence for the NEXT level
+                # This is how knowledge from previous agents' level wins
+                # gets reused: after beating level N, load best sequence
+                # for level N+1 from the winning_sequences table.
+                next_level = current_levels + 1  # current_levels already incremented
+                try:
+                    import json as _json_lvl
+                    next_seq = self.db.execute_query("""
+                        SELECT action_sequence, sequence_id FROM winning_sequences
+                        WHERE game_type = ? AND level_number = ? AND is_active = 1
+                        ORDER BY efficiency_score DESC LIMIT 1
+                    """, (game_type, next_level))
+                    if next_seq and next_seq[0].get('action_sequence'):
+                        seq_raw = next_seq[0]['action_sequence']
+                        active_sequence = _json_lvl.loads(seq_raw) if isinstance(seq_raw, str) else list(seq_raw)
+                        sequence_position = 0
+                        is_replay_mode = True
+                        has_level_sequence = True
+                        if self.verbose:
+                            print(f"    [SEQ-LOAD] Level {next_level} sequence loaded ({len(active_sequence)} actions)")
+                    else:
+                        # No sequence for next level — clear replay state
+                        active_sequence = []
+                        sequence_position = 0
+                        is_replay_mode = False
+                        has_level_sequence = False
+                except Exception:
+                    active_sequence = []
+                    sequence_position = 0
+                    is_replay_mode = False
+                    has_level_sequence = False
 
             prev_levels = current_levels
             prev_score = current_score

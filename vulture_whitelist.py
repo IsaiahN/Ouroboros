@@ -5,6 +5,7 @@
 # TYPE_CHECKING imports - vulture doesn't understand TYPE_CHECKING guards
 # These are used for type hints but vulture sees them as unused
 IThreadType  # noqa: F821 - Used in type hint line 63 of weaving_reporter.py
+IThread  # noqa: F821 - Used in TYPE_CHECKING type hints in episodic_memory.py
 RepresentationLearner  # noqa: F821 - Used in type hints in cognitive_core.py, embedding_matcher.py
 CognitiveStageSystem  # noqa: F821 - Used in type hint in hypothesis_system.py
 DatabaseInterface  # noqa: F821 - Used in type hint in hypothesis_system.py

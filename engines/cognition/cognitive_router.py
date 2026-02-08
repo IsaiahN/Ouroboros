@@ -393,6 +393,13 @@ class RouterState:
     # Best rung result so far
     best_result: Optional[RungResult] = None
 
+    # Best result that carries a valid ACTION string (e.g., 'ACTION3').
+    # Many rungs (survey, filters) produce confidence > 0 but no action.
+    # Without this, _finalize_decision returns a non-actionable rung,
+    # forcing the caller to fall back to random action selection.
+    best_actionable_result: Optional[RungResult] = None
+    max_actionable_confidence: float = 0.0
+
     # Time tracking
     start_time: float = 0.0
 
@@ -886,10 +893,22 @@ class CognitiveRouter:
                 if self.fallback:
                     self.fallback.record_iteration(rung_name)
 
-                # Track best result
+                # Track best result (any confidence)
                 if result.confidence > self._state.max_confidence:
                     self._state.max_confidence = result.confidence
                     self._state.best_result = result
+
+                # Track best ACTIONABLE result separately.
+                # Rungs like survey/filters produce confidence but no ACTION.
+                # Without this, finalize returns a non-actionable rung and
+                # the caller falls back to random — wasting SmartActionSelection.
+                is_actionable = (
+                    isinstance(result.value, str)
+                    and result.value.startswith('ACTION')
+                )
+                if is_actionable and result.confidence > self._state.max_actionable_confidence:
+                    self._state.max_actionable_confidence = result.confidence
+                    self._state.best_actionable_result = result
 
                 batch_results.append((rung_name, result))
 
@@ -1023,7 +1042,21 @@ class CognitiveRouter:
 
             # No agreement in batch - check if any single result crossed
             # the threshold (e.g., from external validation like score_delta)
-            if self._state.best_result:
+            #
+            # ACTIONABILITY GUARD: Only commit if the candidate produces a
+            # valid ACTION string.  Non-actionable rungs (survey, filters,
+            # or network_sharing with a malformed key) must NOT terminate
+            # the search — doing so blocks genuinely actionable rungs from
+            # ever being evaluated.
+            commit_candidate = (
+                self._state.best_actionable_result
+                or self._state.best_result
+            )
+            if commit_candidate:
+                candidate_is_actionable = (
+                    isinstance(commit_candidate.value, str)
+                    and commit_candidate.value.startswith('ACTION')
+                )
                 quadrant = self.epistemic_tracker.current_state.primary_quadrant
                 if quadrant == RumsfeldQuadrant.UU:
                     # UU: Slightly higher bar for single rung (no agreement)
@@ -1032,8 +1065,8 @@ class CognitiveRouter:
                     # KK/KU/UK: Single confident rung (0.6) can commit
                     effective_threshold = self.config.commit_threshold
 
-                if self._state.max_confidence >= effective_threshold:
-                    return self._commit_decision(self._state.best_result)
+                if candidate_is_actionable and commit_candidate.confidence >= effective_threshold:
+                    return self._commit_decision(commit_candidate)
 
             # Phase 6: Log epistemic state
             if self.epistemic_logger:
@@ -1515,13 +1548,25 @@ class CognitiveRouter:
     def _finalize_decision(self, algorithm_switches: int) -> DecisionResult:
         """Finalize decision after loop ends."""
         action_value = None
-        if self._state.best_result:
-            action = self._state.best_result.rung_name
-            confidence = self._state.best_result.confidence
+
+        # Prefer best actionable result (has a valid ACTION string) over
+        # best overall result. Many rungs (survey, filters) produce non-zero
+        # confidence without suggesting an action. Without this preference,
+        # finalize returns survey/filter rung names with action_value=None,
+        # forcing the caller into random action selection every time.
+        chosen_result = None
+        if self._state.best_actionable_result:
+            chosen_result = self._state.best_actionable_result
+        elif self._state.best_result:
+            chosen_result = self._state.best_result
+
+        if chosen_result:
+            action = chosen_result.rung_name
+            confidence = chosen_result.confidence
             reasoning = f"Best result from {action} ({confidence:.2f})"
             # Extract actual ACTION string if available
-            if isinstance(self._state.best_result.value, str) and self._state.best_result.value.startswith('ACTION'):
-                action_value = self._state.best_result.value
+            if isinstance(chosen_result.value, str) and chosen_result.value.startswith('ACTION'):
+                action_value = chosen_result.value
         else:
             action = self._state.path[-1] if self._state.path else "survey"
             confidence = self._state.max_confidence

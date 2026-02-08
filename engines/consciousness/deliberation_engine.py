@@ -962,20 +962,25 @@ class DeliberationEngine:
         game_type: str,
         level: int
     ) -> List[Dict[str, Any]]:
-        """Query past action outcomes for this agent on this game/level."""
+        """Query past action outcomes for this game/level from action_traces.
+
+        Uses collective data (all agents) since action_traces has no agent_id
+        column. This is actually preferable -- collective learning is richer.
+        Columns: action_number (int), score_change (real), game_id, level_number.
+        """
         try:
             results = self.db.execute_query("""
-                SELECT action_taken as action,
-                       CASE WHEN score_delta > 0 THEN 'positive'
-                            WHEN score_delta < 0 THEN 'negative'
+                SELECT action_number as action,
+                       CASE WHEN score_change > 0 THEN 'positive'
+                            WHEN score_change < 0 THEN 'negative'
                             ELSE 'neutral' END as outcome,
-                       score_delta
+                       score_change as score_delta
                 FROM action_traces
-                WHERE agent_id = ? AND game_type = ? AND level_number = ?
+                WHERE game_id LIKE ? AND level_number = ?
                 ORDER BY created_at DESC
                 LIMIT 50
-            """, (agent_id, game_type, level))
-            return [dict(r) for r in results] if results else []
+            """, (f"{game_type}%", level))
+            return results if results else []
         except Exception:
             return []
 
