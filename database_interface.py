@@ -1404,13 +1404,20 @@ class DatabaseInterface:
         return self.get_agent(agent_id) is not None
 
     def update_agent(self, agent_id: str, agent_data: Dict[str, Any]):
-        """Update agent data."""
+        """Update agent data.
+
+        NOTE: Does NOT update total_games_played, total_games_won, or
+        total_score_achieved. Those are synced from agent_arc_performance
+        by sync_agent_performance_to_agents_table(). Writing them here
+        would overwrite the freshly-synced values with stale pre-evolution
+        data (Junction 3 bug: _update_population_database passes agent_data
+        snapshots that predate the sync).
+        """
         with self._get_connection() as conn:
             conn.execute("""
                 UPDATE agents SET
                     agent_type = ?, genome = ?, generation = ?, parent_ids = ?,
-                    specialization = ?, is_active = ?, total_games_played = ?,
-                    total_games_won = ?, total_score_achieved = ?
+                    specialization = ?, is_active = ?
                 WHERE agent_id = ?
             """, (
                 agent_data['agent_type'],
@@ -1419,9 +1426,6 @@ class DatabaseInterface:
                 agent_data.get('parent_ids', '[]'),
                 agent_data['specialization'],
                 agent_data.get('is_active', True),
-                agent_data.get('total_games_played', 0),
-                agent_data.get('total_games_won', 0),
-                agent_data.get('total_score_achieved', 0.0),
                 agent_id
             ))
             conn.commit()

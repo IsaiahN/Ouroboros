@@ -457,6 +457,21 @@ class SafeDatabaseCleaner:
             c, conn, dry_run, verbose
         )
 
+        # =====================================================================
+        # ORPHANED TRAINING SESSIONS CLEANUP
+        # =====================================================================
+        # Session 7p fixed duplicate session creation bug. Before the fix,
+        # _store_game_result created a new session with random UUID even though
+        # play_game already created one. This left ~360K orphaned sessions
+        # (no matching game_result). Safe to delete since no FK points INTO
+        # training_sessions from any other table.
+        # =====================================================================
+        if verbose:
+            print('\n27. Orphaned training sessions (no matching game_result)')
+        results['tables_cleaned']['orphaned_sessions'] = self._clean_orphaned_sessions(
+            c, conn, dry_run, verbose
+        )
+
         # Calculate total
         results['total_deleted'] = sum(r.get('deleted', 0) for r in results['tables_cleaned'].values())
 
@@ -1378,6 +1393,90 @@ class SafeDatabaseCleaner:
                 print(f'   Deleted: {deleted:,} excess checkpoints')
 
         return {'found': excess, 'deleted': deleted}
+
+    def _clean_orphaned_sessions(self, c, conn, dry_run, verbose):
+        """
+        Delete training_sessions with no matching game_result.
+
+        Before Session 7p fix, _store_game_result created duplicate sessions
+        with random UUIDs. This left ~360K orphaned sessions. Safe to delete
+        because no FK points INTO training_sessions from other tables
+        (game_results and agent_arc_performance have session_id but don't
+        cascade — they just use it as a value).
+
+        Uses LEFT JOIN with idx_game_results_session_id for performance.
+        """
+        deleted = 0
+        orphaned = 0
+
+        try:
+            # Check if table exists
+            c.execute("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='training_sessions'
+            """)
+            if not c.fetchone():
+                if verbose:
+                    print('   Table does not exist yet')
+                return {'found': 0, 'deleted': 0}
+
+            # Ensure index exists for performance
+            try:
+                c.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_game_results_session_id
+                    ON game_results(session_id)
+                """)
+            except Exception:
+                pass
+
+            # Count orphaned sessions
+            c.execute("""
+                SELECT COUNT(*) FROM training_sessions ts
+                LEFT JOIN game_results gr ON gr.session_id = ts.session_id
+                WHERE gr.session_id IS NULL
+            """)
+            orphaned = c.fetchone()[0]
+
+            total = c.execute("SELECT COUNT(*) FROM training_sessions").fetchone()[0]
+
+            if verbose:
+                print(f'   Total sessions: {total:,}')
+                print(f'   Orphaned (no game_result): {orphaned:,}')
+
+            if not dry_run and orphaned > 0:
+                # Delete in batches to avoid lock timeout
+                batch_size = 50000
+                total_deleted = 0
+                while True:
+                    c.execute("""
+                        DELETE FROM training_sessions
+                        WHERE session_id IN (
+                            SELECT ts.session_id FROM training_sessions ts
+                            LEFT JOIN game_results gr ON gr.session_id = ts.session_id
+                            WHERE gr.session_id IS NULL
+                            LIMIT ?
+                        )
+                    """, (batch_size,))
+                    batch_deleted = c.rowcount
+                    total_deleted += batch_deleted
+                    conn.commit()
+                    if batch_deleted < batch_size:
+                        break
+                    if verbose:
+                        print(f'   ... deleted {total_deleted:,} so far')
+                deleted = total_deleted
+
+        except Exception as e:
+            if verbose:
+                print(f'   Could not clean orphaned sessions: {e}')
+
+        if verbose:
+            if dry_run and orphaned > 0:
+                print(f'   Would delete: {orphaned:,} orphaned sessions')
+            elif deleted > 0:
+                print(f'   Deleted: {deleted:,} orphaned sessions')
+
+        return {'found': orphaned, 'deleted': deleted}
 
     def verify_critical_data(self, verbose=True):
         """Verify that critical data is preserved."""

@@ -2094,16 +2094,17 @@ class MultiStageMatchingRung(DecisionRung):
             level = context.get('level', 1)
 
             if hasattr(pipeline, 'get_sequence_with_fallback'):
-                result = pipeline.get_sequence_with_fallback(game_type, level)
-                if result and result.get('sequence'):
-                    first_action = result['sequence'][0] if result['sequence'] else None
+                # Returns Tuple[Optional[List[int]], str, Dict[str, Any]]
+                seq_actions, stage_used, match_meta = pipeline.get_sequence_with_fallback(game_type, level)
+                if seq_actions:
+                    first_action = seq_actions[0] if seq_actions else None
                     # CRITICAL: Validate action is available in this game
                     if first_action and is_action_available(first_action, context):
                         return RungResult(
                             action=first_action,
-                            confidence=result.get('confidence', 0.5),
-                            reason=f"Multi-stage match: {result.get('stage', 'unknown')}",
-                            metadata={'match_result': result}
+                            confidence=match_meta.get('confidence', 0.5),
+                            reason=f"Multi-stage match: {stage_used}",
+                            metadata={'match_result': {'sequence': seq_actions, 'stage': stage_used, **match_meta}}
                         )
             return RungResult()
         except Exception as e:

@@ -47,6 +47,7 @@ from arcengine import GameAction, GameState
 # Local imports
 from database_interface import DatabaseInterface
 from decision_rung_system import DecisionRungSystem
+from pipeline_assertions import PipelineAssertions
 
 # Cognitive Router - Full architecture integration (Phases 1-11)
 try:
@@ -205,6 +206,7 @@ class EvolutionRunner:
         self.verbose = verbose
         self.rung_ordering = rung_ordering
         self.db = DatabaseInterface(db_path)
+        self.pipe = PipelineAssertions(self.db)
         self.population_size = population_size
         self.games_per_generation = games_per_generation
         self.max_generations = max_generations
@@ -1029,6 +1031,16 @@ class EvolutionRunner:
                     active_sequence = _json.loads(seq_data) if isinstance(seq_data, str) else list(seq_data)
                     is_replay_mode = True
                     has_level_sequence = True
+                    # Track sequence reuse (matches winning_sequences_full_game behavior)
+                    try:
+                        self.db.execute_query("""
+                            UPDATE winning_sequences
+                            SET times_referenced = COALESCE(times_referenced, 0) + 1,
+                                last_referenced = datetime('now')
+                            WHERE game_type = ? AND level_number = 1 AND is_active = 1
+                        """, (game_type,))
+                    except Exception:
+                        pass  # Non-critical tracking
                     if self.verbose:
                         print(f"    [SEQ-LOAD] Level 1 sequence loaded: {level_seq[0].get('sequence_id', '?')[:16]} ({len(active_sequence)} actions)")
             except Exception:
@@ -1051,13 +1063,25 @@ class EvolutionRunner:
                 if hasattr(va, 'clear_priority_on_new_game'):
                     va.clear_priority_on_new_game()
                 # Set agent mode for mode-specific exploration behavior
-                agent_mode = mode_assignments.get(agent.agent_id, 'generalist') if mode_assignments else 'generalist'
+                # Read from DB (written by run_generation before play_game is called)
+                try:
+                    agent_row = self.db.execute_query(
+                        "SELECT specialization FROM agents WHERE agent_id = ?",
+                        (agent.agent_id,)
+                    )
+                    agent_mode = agent_row[0]['specialization'] if agent_row and agent_row[0].get('specialization') else 'generalist'
+                except Exception:
+                    agent_mode = 'generalist'
                 if hasattr(va, 'set_agent_mode'):
                     va.set_agent_mode(agent_mode)
         except Exception:
             pass  # Non-critical
 
         # Create session for action traces (FK requirement)
+        # Junction 4 guard: If this INSERT fails, session_id has no parent row.
+        # With PRAGMA foreign_keys=ON, ALL downstream INSERTs to game_results
+        # and agent_arc_performance will fail with FK violations (silently
+        # caught by try/except). Entire game's data is lost.
         self._current_session_id = f"session_{uuid.uuid4().hex[:12]}_{int(datetime.now().timestamp())}"
         try:
             self.db.execute_query("""
@@ -1066,8 +1090,23 @@ class EvolutionRunner:
                 ) VALUES (?, ?, datetime('now'), 'evolution', 'in_progress', 0)
             """, (self._current_session_id, game_id))
         except Exception as e:
-            if self.verbose:
-                print(f"    [WARN] Failed to create training session: {e}")
+            print(f"    [WARN] Failed to create training session: {e}")
+
+        # Pipeline assertion: verify FK parent row exists before gameplay
+        if not self.pipe.assert_session_exists(self._current_session_id):
+            # FK parent missing -- force-create a fallback session so downstream
+            # writes don't silently fail
+            fallback_id = f"session_fallback_{uuid.uuid4().hex[:8]}"
+            try:
+                self.db.execute_query("""
+                    INSERT INTO training_sessions (
+                        session_id, game_id, start_time, mode, status, total_actions
+                    ) VALUES (?, ?, datetime('now'), 'evolution', 'in_progress', 0)
+                """, (fallback_id, game_id))
+                self._current_session_id = fallback_id
+                print(f"    [PIPE-RECOVER] Created fallback session {fallback_id[:16]}..")
+            except Exception:
+                pass  # Will be caught by downstream assertions
 
         # Get initial observation and available actions
         initial_obs = env.observation_space
@@ -1447,6 +1486,16 @@ class EvolutionRunner:
                         sequence_position = 0
                         is_replay_mode = True
                         has_level_sequence = True
+                        # Track sequence reuse
+                        try:
+                            self.db.execute_query("""
+                                UPDATE winning_sequences
+                                SET times_referenced = COALESCE(times_referenced, 0) + 1,
+                                    last_referenced = datetime('now')
+                                WHERE game_type = ? AND level_number = ? AND is_active = 1
+                            """, (game_type, next_level))
+                        except Exception:
+                            pass  # Non-critical tracking
                         if self.verbose:
                             print(f"    [SEQ-LOAD] Level {next_level} sequence loaded ({len(active_sequence)} actions)")
                     else:
@@ -1654,6 +1703,12 @@ class EvolutionRunner:
                 if self.verbose:
                     print(f"  [COLLECTIVE-ERR] Collective reasoning failed: {e}")
 
+        # Pipeline assertion: verify generation flow integrity
+        # Detects ANY silent write failure across the entire generation
+        self.pipe.assert_generation_flow(self.current_generation, games_played)
+        self.pipe.print_summary()
+        self.pipe.reset_counters()
+
         return {
             'games_played': games_played,
             'wins': total_wins,
@@ -1705,8 +1760,12 @@ class EvolutionRunner:
             except Exception:
                 pass
 
+        # Junction 1 fix: Separate dual writes into independent try blocks.
+        # Previously both INSERTs were in one try block -- if agent_arc_performance
+        # failed (e.g. FK violation, column mismatch), game_results was also lost.
+
+        # WRITE 1: game_results
         try:
-            # Store game result
             self.db.execute_query("""
                 INSERT INTO game_results (
                     game_id, session_id, start_time, end_time, status,
@@ -1723,12 +1782,13 @@ class EvolutionRunner:
                 result.levels_completed,
                 self.current_generation,
             ))
+        except Exception as e:
+            print(f"  [PIPE-BREAK] game_results INSERT failed: {e}")
 
-            # CRITICAL: Write to agent_arc_performance for evolutionary fitness.
-            # Without this, evolutionary_engine._calculate_standard_fitness()
-            # returns 0.0 for ALL agents (get_agent_arc_performance finds nothing).
-            # This makes natural selection have ZERO signal -- evolution becomes
-            # pure random drift with no improvement across generations.
+        # WRITE 2: agent_arc_performance (independent -- one failure can't kill both)
+        # CRITICAL: Without this, evolutionary_engine._calculate_standard_fitness()
+        # returns 0.0 for ALL agents. Evolution becomes pure random drift.
+        try:
             efficiency = result.score / max(1, result.actions_taken)
             level_bonus = result.levels_completed * 0.1
             win_bonus = 1.0 if result.is_win else 0.0
@@ -1768,15 +1828,55 @@ class EvolutionRunner:
                 level_bonus,
                 total_reward,
             ))
+        except Exception as e:
+            print(f"  [PIPE-BREAK] agent_arc_performance INSERT failed: {e}")
 
-            # Store winning sequence if won
-            if result.is_win and result.action_sequence:
-                # Generate sequence_id as required by schema
-                import json as json_lib
-                sequence_id = f"seq_{uuid.uuid4().hex[:12]}"
-                game_type = result.game_id[:4] if len(result.game_id) >= 4 else result.game_id
+        # WRITE 2b: agent_game_diversity UPSERT (feeds 40% diversity fitness)
+        # Without this, _calculate_diversity_fitness_component() returns 0.0
+        # for ALL agents. 40% of evolution signal is dead.
+        try:
+            self.db.execute_query("""
+                INSERT INTO agent_game_diversity (
+                    agent_id, game_id, attempts, first_attempt_score,
+                    best_score, last_attempt_score, is_novel_game,
+                    few_shot_improvement, last_played
+                ) VALUES (?, ?, 1, ?, ?, ?, 1, 0.0, datetime('now'))
+                ON CONFLICT(agent_id, game_id) DO UPDATE SET
+                    attempts = agent_game_diversity.attempts + 1,
+                    last_attempt_score = excluded.last_attempt_score,
+                    best_score = MAX(agent_game_diversity.best_score, excluded.best_score),
+                    is_novel_game = 0,
+                    few_shot_improvement = CASE
+                        WHEN agent_game_diversity.attempts = 1
+                        THEN excluded.last_attempt_score - agent_game_diversity.first_attempt_score
+                        ELSE agent_game_diversity.few_shot_improvement
+                    END,
+                    last_played = datetime('now')
+            """, (
+                result.agent_id,
+                result.game_id,
+                result.score,
+                result.score,
+                result.score,
+            ))
+        except Exception as e:
+            print(f"  [PIPE-BREAK] agent_game_diversity UPSERT failed: {e}")
 
-                # First, insert the winning sequence with proper schema
+        # Pipeline assertion: verify BOTH writes landed
+        self.pipe.assert_game_result_stored(session_id, result.game_id, result.agent_id)
+
+        # Store winning sequence if won
+        # NOTE: Each write is in its own try block. The pipeline assertion
+        # is OUTSIDE all try blocks so it ALWAYS fires -- even if the INSERT
+        # threw. This prevents the exact bug pattern we found: assertion
+        # inside a try block gets skipped when the write it guards fails.
+        if result.is_win and result.action_sequence:
+            import json as json_lib
+            sequence_id = f"seq_{uuid.uuid4().hex[:12]}"
+            game_type = result.game_id[:4] if len(result.game_id) >= 4 else result.game_id
+
+            # WRITE 3: winning_sequences (partial)
+            try:
                 self.db.execute_query("""
                     INSERT INTO winning_sequences (
                         sequence_id, game_id, game_type, level_number,
@@ -1789,60 +1889,91 @@ class EvolutionRunner:
                     result.game_id,
                     game_type,
                     result.levels_completed,
-                    json_lib.dumps(result.action_sequence),  # JSON array
+                    json_lib.dumps(result.action_sequence),
                     result.actions_taken,
                     result.score,
-                    result.score / max(1, result.actions_taken),  # efficiency
+                    result.score / max(1, result.actions_taken),
                     result.agent_id,
                     self._current_session_id or 'unknown',
                     self.current_generation,
                 ))
                 print(f"    [SAVED] Winning sequence {sequence_id[:12]} for {result.game_id}")
+            except Exception as e:
+                print(f"  [PIPE-BREAK] winning_sequences INSERT failed: {e}")
 
-                # CRITICAL: Create viral package to share with network
-                # This enables network-level knowledge transfer per theory
-                if self.viral_package_engine:
-                    try:
-                        package_id = self.viral_package_engine.create_viral_package_from_sequence(
-                            sequence_id=sequence_id,
-                            agent_id=result.agent_id,
-                            generation=self.current_generation,
-                            skip_if_exists=True  # Deduplication
-                        )
-                        if package_id:
-                            print(f"    [VIRAL] Created package {package_id[:12]} for network sharing")
-                    except Exception as vpe:
-                        if self.verbose:
-                            print(f"    [VIRAL-ERR] Could not create package: {vpe}")
+            # WRITE 4: winning_sequences_full_game (Junction 6 fix)
+            if result.levels_completed >= result.total_levels:
+                try:
+                    full_seq_id = f"fseq_{uuid.uuid4().hex[:12]}"
+                    self.db.execute_query("""
+                        INSERT INTO winning_sequences_full_game (
+                            sequence_id, game_id, total_levels,
+                            agent_id, session_id, action_sequence,
+                            total_actions, total_score, efficiency_score,
+                            game_type, generation_discovered, is_active,
+                            discovered_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
+                    """, (
+                        full_seq_id,
+                        result.game_id,
+                        result.total_levels,
+                        result.agent_id,
+                        self._current_session_id or 'unknown',
+                        json_lib.dumps(result.action_sequence),
+                        result.actions_taken,
+                        result.score,
+                        result.score / max(1, result.actions_taken),
+                        game_type,
+                        self.current_generation,
+                    ))
+                    print(f"    [SAVED] Full-game sequence {full_seq_id[:12]} "
+                          f"for {result.game_id} (replay path now active)")
+                except Exception as fge:
+                    print(f"    [PIPE-BREAK] winning_sequences_full_game INSERT failed: {fge}")
 
-                # GAMES-AS-TEACHERS: Extract lesson from win
-                # Per Unified Theory: "I won = I demonstrated understanding"
-                if self.games_as_teachers_engine:
-                    try:
-                        # Convert action sequence strings to ints for the engine
-                        action_ints = []
-                        for act in result.action_sequence:
-                            if isinstance(act, str) and act.startswith('ACTION'):
-                                action_ints.append(int(act.replace('ACTION', '')))
-                            elif isinstance(act, int):
-                                action_ints.append(act)
+            # Pipeline assertion: ALWAYS fires (outside all try blocks)
+            self.pipe.assert_win_sequence_stored(
+                result.game_id, session_id,
+                is_full_game_win=(result.levels_completed >= result.total_levels),
+            )
 
-                        lesson = self.games_as_teachers_engine.extract_lesson(
-                            game_type=game_type,
-                            level_number=result.levels_completed,
-                            winning_sequence=action_ints,
-                            frame_history=None,  # Could capture frames for deeper analysis
-                            working_theory=None  # Could pass current theory
-                        )
-                        if lesson:
-                            concept = lesson.get('concept_demonstrated', 'unknown')
-                            print(f"    [LESSON] Concept demonstrated: {concept}")
-                    except Exception as le:
-                        if self.verbose:
-                            print(f"    [LESSON-ERR] Could not extract lesson: {le}")
+            # Non-critical post-win processing (viral packages, lessons)
+            if self.viral_package_engine:
+                try:
+                    package_id = self.viral_package_engine.create_viral_package_from_sequence(
+                        sequence_id=sequence_id,
+                        agent_id=result.agent_id,
+                        generation=self.current_generation,
+                        skip_if_exists=True
+                    )
+                    if package_id:
+                        print(f"    [VIRAL] Created package {package_id[:12]} for network sharing")
+                except Exception as vpe:
+                    if self.verbose:
+                        print(f"    [VIRAL-ERR] Could not create package: {vpe}")
 
-        except Exception as e:
-            print(f"  [WARN] Failed to store result: {e}")
+            if self.games_as_teachers_engine:
+                try:
+                    action_ints = []
+                    for act in result.action_sequence:
+                        if isinstance(act, str) and act.startswith('ACTION'):
+                            action_ints.append(int(act.replace('ACTION', '')))
+                        elif isinstance(act, int):
+                            action_ints.append(act)
+
+                    lesson = self.games_as_teachers_engine.extract_lesson(
+                        game_type=game_type,
+                        level_number=result.levels_completed,
+                        winning_sequence=action_ints,
+                        frame_history=None,
+                        working_theory=None
+                    )
+                    if lesson:
+                        concept = lesson.get('concept_demonstrated', 'unknown')
+                        print(f"    [LESSON] Concept demonstrated: {concept}")
+                except Exception as le:
+                    if self.verbose:
+                        print(f"    [LESSON-ERR] Could not extract lesson: {le}")
 
     def evolve(self):
         """
@@ -1977,6 +2108,11 @@ class EvolutionRunner:
             # Fallback to simple evolution if engine fails
             self._simple_evolve_fallback()
 
+        # Pipeline assertion: population size after evolution
+        self.pipe.assert_population_size(
+            self.population_size, self.current_generation
+        )
+
     def _simple_evolve_fallback(self):
         """Fallback simple evolution if EvolutionaryEngine fails."""
         def fitness(a: AgentState) -> float:
@@ -2017,6 +2153,103 @@ class EvolutionRunner:
         self.agents = survivors + offspring
         print(f"  [FALLBACK] New population: {len(self.agents)}")
 
+    def _run_generation_health_checks(self, stats: Optional[Dict] = None):
+        """
+        Post-generation health assertions — catch silent pipeline bugs early.
+
+        Detects the EXACT bug patterns from sessions 7n-7p:
+        - Fitness pipeline disconnection (game_results -> agent_arc_performance)
+        - Population bloat (zombie agents from failed culling)
+        - Zero evolution signal (random drift for N generations)
+
+        Prints [HEALTH-WARN] / [HEALTH-CRIT] but does NOT gate execution.
+        These are diagnostic signals, not hard stops.
+        """
+        try:
+            # CHECK 1: Population size sanity
+            active_count_rows = self.db.execute_query(
+                "SELECT COUNT(*) as cnt FROM agents WHERE is_active = 1"
+            )
+            active_count = active_count_rows[0]['cnt'] if active_count_rows else 0
+
+            bloat_ratio = active_count / max(self.population_size, 1)
+            if bloat_ratio > 2.0:
+                print(f"  [HEALTH-CRIT] Population bloat: {active_count} active "
+                      f"vs {self.population_size} expected ({bloat_ratio:.1f}x)")
+            elif bloat_ratio > 1.5:
+                print(f"  [HEALTH-WARN] Population slightly bloated: "
+                      f"{active_count} vs {self.population_size} expected")
+
+            # CHECK 2: Fitness pipeline — agent_arc_performance must grow with game_results
+            # NOTE: agent_arc_performance has NO 'generation' column.
+            # Previous code queried WHERE generation = ? which silently failed
+            # inside the try/except -- the very watchdog designed to catch
+            # fitness disconnection was itself broken (Junction 10).
+            # Use game_results.generation to find this gen's session_ids,
+            # then count matching arc_performance rows.
+            gr_rows = self.db.execute_query(
+                "SELECT COUNT(*) as cnt FROM game_results "
+                "WHERE generation = ?", [self.current_generation]
+            )
+            gr_count = gr_rows[0]['cnt'] if gr_rows else 0
+
+            if gr_count > 0:
+                # Count arc_performance rows for the same sessions
+                arc_rows = self.db.execute_query("""
+                    SELECT COUNT(*) as cnt FROM agent_arc_performance ap
+                    WHERE EXISTS (
+                        SELECT 1 FROM game_results gr
+                        WHERE gr.session_id = ap.session_id
+                        AND gr.generation = ?
+                    )
+                """, [self.current_generation])
+                arc_count = arc_rows[0]['cnt'] if arc_rows else 0
+
+                if arc_count == 0:
+                    print(f"  [HEALTH-CRIT] Fitness disconnected: {gr_count} game_results "
+                          f"this gen but 0 agent_arc_performance rows! "
+                          f"Evolution has ZERO selection signal.")
+
+            # CHECK 3: Evolution signal — are scores improving?
+            if self.current_generation > 20 and self.current_generation % 10 == 0:
+                trend_rows = self.db.execute_query("""
+                    SELECT AVG(final_score) as avg_score FROM game_results
+                    WHERE generation BETWEEN ? AND ?
+                """, [self.current_generation - 10, self.current_generation])
+                recent_avg = trend_rows[0]['avg_score'] if trend_rows and trend_rows[0]['avg_score'] else 0
+
+                if recent_avg == 0.0:
+                    print(f"  [HEALTH-WARN] Average score is 0.0 for last 10 generations. "
+                          f"Evolution may lack selection signal.")
+
+        except Exception as e:
+            # Health checks must NEVER crash the evolution loop
+            if self.verbose:
+                print(f"  [HEALTH-ERR] Health check failed: {e}")
+
+    def _run_safe_cleanup(self):
+        """
+        Rule 12 compliance: Run SafeDatabaseCleaner every 10 generations.
+
+        Per Master Ruleset: "Automatic: Runs every 10 generations in
+        autonomous_evolution_runner.py" — but was NEVER actually wired.
+        Now it is.
+        """
+        if self.current_generation % 10 != 0 or self.current_generation == 0:
+            return
+
+        try:
+            from safe_cleanup import SafeDatabaseCleaner
+            cleaner = SafeDatabaseCleaner(db_path=self.db.db_path)
+            results = cleaner.cleanup(dry_run=False, verbose=False)
+            total_deleted = results.get('total_deleted', 0)
+            if total_deleted > 0:
+                print(f"  [CLEANUP] Rule 12: Cleaned {total_deleted} stale records "
+                      f"(gen {self.current_generation})")
+        except Exception as e:
+            if self.verbose:
+                print(f"  [CLEANUP-ERR] Safe cleanup failed: {e}")
+
     def run(self):
         """Main evolution loop."""
         print("\n" + "="*60)
@@ -2044,6 +2277,12 @@ class EvolutionRunner:
 
             # Evolve
             self.evolve()
+
+            # Post-generation health checks (catch silent pipeline bugs)
+            self._run_generation_health_checks(stats)
+
+            # Rule 12: Safe cleanup every 10 generations
+            self._run_safe_cleanup()
 
             self.current_generation += 1
 

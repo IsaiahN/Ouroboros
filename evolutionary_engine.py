@@ -127,6 +127,18 @@ class EvolutionaryEngine:
                     "generation": generation
                 })
 
+            # Sync agent_meta_learning proxy metrics from agent_arc_performance
+            # Without this, _calculate_meta_learning_fitness() returns 0.0 for ALL
+            # agents (30% of fitness is dead). These are proxy metrics computed
+            # from game performance data until the full concept discovery pipeline
+            # produces real rules and transfers.
+            meta_synced = self._sync_meta_learning_from_performance(generation)
+            if meta_synced > 0:
+                self._log_evolution_event("meta_learning_synced", {
+                    "agents_updated": meta_synced,
+                    "generation": generation
+                })
+
             # 1. Load current population from database (Rule 2)
             current_population = self._load_population_from_database()
 
@@ -136,6 +148,19 @@ class EvolutionaryEngine:
                 diversity_mode=diversity_mode,
                 specialist_mode=specialist_mode
             )
+
+            # Pipeline guard: detect zero-fitness (all agents at 0.0 = no signal)
+            if fitness_scores:
+                nonzero = sum(1 for f in fitness_scores.values() if f > 0.0)
+                if nonzero == 0 and len(current_population) > 0:
+                    print(f"  [PIPE-BREAK] ALL {len(fitness_scores)} agents have "
+                          f"0.0 fitness -- evolution is RANDOM DRIFT. "
+                          f"Check: agent_arc_performance writes, "
+                          f"diversity/meta-learning data sources.")
+                    self._log_evolution_event("zero_fitness_detected", {
+                        "generation": generation,
+                        "population_size": len(fitness_scores),
+                    })
 
             # 3. Select breeding pairs based on ARC performance
             breeding_pairs = self._select_breeding_pairs(
@@ -232,6 +257,21 @@ class EvolutionaryEngine:
                 standard_fitness = self._calculate_standard_fitness(agent_id)
                 diversity_fitness = self._calculate_diversity_fitness_component(agent_id)
                 meta_fitness = self._calculate_meta_learning_fitness(agent_id)
+
+                # Track dead components (only log once per population)
+                if agent_id == population[0]['agent_id']:
+                    dead_components = []
+                    if diversity_fitness == 0.0:
+                        dead_components.append('diversity(40%)')
+                    if meta_fitness == 0.0:
+                        dead_components.append('meta-learning(30%)')
+                    if standard_fitness == 0.0:
+                        dead_components.append('standard(30%)')
+                    if dead_components:
+                        pct = sum(40 if 'diversity' in c else 30 for c in dead_components)
+                        print(f"  [PIPE-BREAK] Fitness signal: {pct}% is DEAD "
+                              f"({', '.join(dead_components)} returning 0.0). "
+                              f"Evolution runs on only {100-pct}% signal.")
 
                 # Weighted combination
                 fitness = (
@@ -505,6 +545,82 @@ class EvolutionaryEngine:
                 "error": str(e)
             })
             return 0.0
+
+    def _sync_meta_learning_from_performance(self, generation: int) -> int:
+        """
+        Compute proxy meta-learning metrics from agent_arc_performance.
+
+        Until the full concept discovery pipeline produces real rules/transfers,
+        these proxies ensure the 30% meta-learning fitness component has signal:
+          - total_rules_learned: unique games where agent scored > 0
+          - learning_rate: fraction of games with positive score
+          - transfer_success_rate: ratio of scored-on games to total games
+          - avg_rule_generality: unique game types scored > 0
+
+        Returns count of agents updated.
+        """
+        try:
+            # UPSERT proxy metrics for all agents with arc_performance data
+            self.db.execute_query("""
+                INSERT INTO agent_meta_learning (
+                    agent_id, generation,
+                    total_rules_learned, rules_created_this_gen,
+                    avg_rules_per_game,
+                    successful_transfers, failed_transfers,
+                    transfer_success_rate,
+                    avg_rule_generality, learning_rate,
+                    last_updated
+                )
+                SELECT
+                    ap.agent_id,
+                    ?,
+                    -- total_rules_learned: unique games where score > 0
+                    COUNT(DISTINCT CASE WHEN ap.final_score > 0 THEN ap.game_id END),
+                    -- rules_created_this_gen: scored games in most recent session
+                    0,
+                    -- avg_rules_per_game: fraction of unique games scored on
+                    CAST(COUNT(DISTINCT CASE WHEN ap.final_score > 0 THEN ap.game_id END) AS REAL)
+                        / MAX(COUNT(DISTINCT ap.game_id), 1),
+                    -- successful_transfers: games with score > 0
+                    SUM(CASE WHEN ap.final_score > 0 THEN 1 ELSE 0 END),
+                    -- failed_transfers: games with score = 0
+                    SUM(CASE WHEN ap.final_score = 0 THEN 1 ELSE 0 END),
+                    -- transfer_success_rate
+                    CAST(SUM(CASE WHEN ap.final_score > 0 THEN 1 ELSE 0 END) AS REAL)
+                        / MAX(COUNT(*), 1),
+                    -- avg_rule_generality: unique game types scored > 0
+                    COUNT(DISTINCT CASE WHEN ap.final_score > 0 THEN SUBSTR(ap.game_id, 1, 4) END),
+                    -- learning_rate: improvement proxy (scored games / total games)
+                    CAST(SUM(CASE WHEN ap.final_score > 0 THEN 1 ELSE 0 END) AS REAL)
+                        / MAX(COUNT(*), 1),
+                    CURRENT_TIMESTAMP
+                FROM agent_arc_performance ap
+                WHERE ap.agent_id IN (SELECT agent_id FROM agents WHERE is_active = 1)
+                GROUP BY ap.agent_id
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    generation = excluded.generation,
+                    total_rules_learned = excluded.total_rules_learned,
+                    avg_rules_per_game = excluded.avg_rules_per_game,
+                    successful_transfers = excluded.successful_transfers,
+                    failed_transfers = excluded.failed_transfers,
+                    transfer_success_rate = excluded.transfer_success_rate,
+                    avg_rule_generality = excluded.avg_rule_generality,
+                    learning_rate = excluded.learning_rate,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (generation,))
+
+            # Count how many agents were affected
+            rows = self.db.execute_query(
+                "SELECT COUNT(*) as cnt FROM agent_meta_learning"
+            )
+            return rows[0]['cnt'] if rows else 0
+
+        except Exception as e:
+            self._log_evolution_event("meta_learning_sync_error", {
+                "generation": generation,
+                "error": str(e)
+            })
+            return 0
 
     def _select_breeding_pairs(self, population: List[Dict[str, Any]],
                              fitness_scores: Dict[str, float],
