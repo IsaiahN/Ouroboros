@@ -656,10 +656,6 @@ class DatabaseInterface:
         """Get action traces (stub - returns empty for now)."""
         return []
 
-    def get_score_history(self, game_id: str) -> list:
-        """Get score history (stub - returns empty for now)."""
-        return []
-
     def close(self):
         """Close database connections and checkpoint WAL."""
         if hasattr(self._local, 'connection'):

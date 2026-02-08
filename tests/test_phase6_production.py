@@ -501,7 +501,7 @@ class TestRoutingTraceStore:
         )
 
         assert trace_id is not None
-        assert len(trace_id) == 8  # UUID prefix
+        assert len(trace_id) == 32  # Full UUID hex
 
     def test_get_trace(self, trace_store):
         """Test retrieving a trace."""

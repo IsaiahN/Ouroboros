@@ -301,7 +301,7 @@ class RoutingTraceStore:
         Returns:
             Trace ID for later outcome update
         """
-        trace_id = str(uuid.uuid4())[:8]
+        trace_id = uuid.uuid4().hex
 
         trace = RoutingTrace(
             trace_id=trace_id,
@@ -563,7 +563,7 @@ class RoutingTraceStore:
 
         try:
             self.db.execute("""
-                INSERT INTO cognitive_routing_traces (
+                INSERT OR REPLACE INTO cognitive_routing_traces (
                     trace_id, timestamp, game_id, agent_id,
                     path, algorithm_used, algorithms_history,
                     initial_quadrant, final_quadrant, quadrant_transitions,

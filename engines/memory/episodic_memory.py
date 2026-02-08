@@ -297,7 +297,7 @@ class EpisodicMemorySystem:
         result = self.db.execute_query("""
             SELECT COUNT(*) as win_count
             FROM winning_sequences
-            WHERE game_type = ? AND sequence_data LIKE ?
+            WHERE game_type = ? AND action_sequence LIKE ?
         """, (game_type, f'%{action}%'))
 
         win_count = result[0]['win_count'] if result else 0
