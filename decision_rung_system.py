@@ -2855,7 +2855,7 @@ class PaletteDetectionRung(DecisionRung):
             context['extracted_objects'] = cached.get('extracted_objects')
             context['detected_transformations'] = cached.get('detected_transformations')
             return RungResult(
-                confidence=0.1,
+                confidence=0.0,  # Context-setter only: no action to suggest
                 reason=f"Cached palette analysis: {'found' if cached.get('detected_palette') else 'none'}",
                 metadata={'cached': True, **cached}
             )
@@ -2942,7 +2942,7 @@ class PaletteDetectionRung(DecisionRung):
             parts.append(f"transforms={len(transformations)}")
 
         return RungResult(
-            confidence=0.1 if palette_dict else 0.0,  # Low - context setter
+            confidence=0.0,  # Context-setter only: enriches context, never suggests action
             reason=f"Two-stage analysis: {', '.join(parts)}",
             metadata={
                 'palette_found': palette_dict is not None,
@@ -7525,6 +7525,34 @@ class DecisionRungSystem:
         emergency_result = self._check_emergency_rungs(game_state, context)
         if emergency_result is not None:
             return emergency_result
+
+        # =====================================================================
+        # REPLAY FAST-PATH - Bypass full cognitive router when replaying a
+        # known winning sequence. The graph-search algorithm evaluates rungs
+        # in batches of 5 via edge connectivity. With 63 rungs competing,
+        # three_try_sequence is not guaranteed to be evaluated before the
+        # router commits to a context-setter (palette_detection) that has
+        # no action and triggers random fallback. This fast-path ensures
+        # deterministic sequence replay without wasting router iterations.
+        # =====================================================================
+        active_seq = context.get('active_sequence')
+        seq_pos = context.get('sequence_position', 0)
+        if active_seq and seq_pos < len(active_seq) and context.get('is_replay'):
+            seq_action = active_seq[seq_pos]
+            if is_action_available(seq_action, context):
+                rung_name = 'three_try_sequence'
+                # Track the win for statistics
+                self.rung_wins[rung_name] = self.rung_wins.get(rung_name, 0) + 1
+                # Record outcome on the actual rung if it exists
+                rung_obj = next((r for r in self.rungs if r.name == rung_name), None)
+                if rung_obj:
+                    rung_obj.record_outcome(was_accepted=True)
+                    self._last_winning_rung = rung_obj
+                reason = (
+                    f"[COGNITIVE:{rung_name}] Replay fast-path: "
+                    f"step {seq_pos + 1}/{len(active_seq)}"
+                )
+                return seq_action, reason
 
         # Initialize router if needed (once per game)
         game_id = context.get('game_id', context.get('scorecard_id', 'unknown'))

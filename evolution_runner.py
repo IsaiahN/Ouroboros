@@ -1351,9 +1351,15 @@ class EvolutionRunner:
             if 'reason' in dir() and reason and 'EMERGENCY' in reason:
                 stuck_count = 0
 
-            # Update sequence position if following a sequence
+            # Update sequence position ONLY if the action taken matches
+            # the expected sequence action. Without this guard, the position
+            # advances every frame regardless of which rung won, "consuming"
+            # the sequence without actually following it.
             if is_replay_mode and active_sequence and sequence_position < len(active_sequence):
-                sequence_position += 1
+                expected_action = active_sequence[sequence_position]
+                # Compare action name (e.g. 'ACTION4') to sequence element
+                if action.name == expected_action or action.name == f'ACTION{expected_action}':
+                    sequence_position += 1
 
             last_obs = obs
 

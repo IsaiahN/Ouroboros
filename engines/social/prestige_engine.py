@@ -288,10 +288,20 @@ class PrestigeEngine:
             else:
                 # Sort by prestige
                 sorted_agents = sorted(generation_agents, key=lambda x: x[1])
-                agent_rank = next(
-                    (i for i, (aid, _) in enumerate(sorted_agents) if aid == agent_id),
-                    len(sorted_agents) // 2
+                # Handle ties: agents with equal prestige get average rank
+                # Without this, sorted() preserves insertion order and agents
+                # with identical prestige (e.g., all 0.0) get ranks 0-23,
+                # producing false percentile spread (0.0 to 1.0).
+                agent_prestige = next(
+                    (p for aid, p in sorted_agents if aid == agent_id),
+                    0.0
                 )
+                # Find all agents with same prestige and compute average rank
+                same_prestige_indices = [
+                    i for i, (_, p) in enumerate(sorted_agents)
+                    if p == agent_prestige
+                ]
+                agent_rank = sum(same_prestige_indices) / len(same_prestige_indices)
                 percentile = agent_rank / (len(sorted_agents) - 1)
 
             # Convert percentile to benefits
