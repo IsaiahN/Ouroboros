@@ -10141,10 +10141,22 @@ class DecisionRungSystem:
             # Safety net: validate action is a real ACTION and is available
             if not action or not is_action_available(action, context):
                 # The router found a rung but it didn't produce a usable action
-                # (e.g., filter rung, or action not available in this game)
-                accumulated_weights = get_available_action_weights(context, 1.0)
-                action = self._weighted_random_choice(accumulated_weights, context)
-                reasoning = f"[COGNITIVE:{rung_name}] Fallback: no usable action from router"
+                # (e.g., filter/orientation rung, or action not available).
+                #
+                # FIX: Instead of uniform random, use WEIGHTED VOTING across
+                # ALL rungs. This lets filter rungs (WallAwareNavigation,
+                # BudgetAwarePlanning, DestructiveActionDetection) and
+                # exploitation rungs (SpatialMap, ConstraintSatisfaction)
+                # contribute their weights/actions. Without this, the new
+                # rungs are invisible to the cognitive path.
+                weighted_action, weighted_reason = self._decide_weighted_non_emergency(
+                    game_state, context
+                )
+                action = weighted_action
+                reasoning = (
+                    f"[COGNITIVE:{rung_name}] Weighted fallback "
+                    f"(router rung had no action) -> {weighted_reason}"
+                )
 
             # Final format check (defense-in-depth)
             if action not in {f'ACTION{i}' for i in range(1, 8)}:
