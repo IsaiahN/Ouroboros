@@ -2303,7 +2303,7 @@ class Ft09(ARCBaseGame):
         ZnK = levels[0].get_data("kCv") if levels else 0
         bUg = ZnK if ZnK else 0
         self.lpw = sve(bUg, self)
-        super().__init__("ft09", levels, Camera(0, 0, 16, 16, 4, 4, [self.lpw]))
+        super().__init__("ft09", levels, Camera(0, 0, 16, 16, 4, 4, [self.lpw]), available_actions=[6])
 
     def olv(self) -> None:
         yTL = self.current_level.get_data("kCv")

@@ -183,6 +183,9 @@ class OutcomeProcessor:
         self._event_detector: Any = None
         self._recent_events: List[Dict[str, Any]] = []  # Ring buffer of recent events
         self._max_recent_events = 50
+        # Lazy-loaded click behavior classifier (was orphaned, now wired)
+        self._click_classifier: Any = None
+        self._click_classifier_failed: bool = False
 
     def process(
         self,
@@ -263,6 +266,14 @@ class OutcomeProcessor:
         # Record action trace to database (enables FrontierTopologyRung)
         self._record_action_trace(before_state, action, outcome, observation)
 
+        # Classify click behavior for ACTION6 (enables ClickBehaviorClassifier learning)
+        if action.name == 'ACTION6' and frame_before is not None and frame_after is not None:
+            self._classify_click_behavior(
+                frame_before, frame_after,
+                before_state.score, observation.score,
+                before_state.game_id
+            )
+
         return outcome
 
     def get_recent_events(self) -> List[Dict[str, Any]]:
@@ -278,6 +289,65 @@ class OutcomeProcessor:
             except ImportError:
                 pass
         return self._event_detector
+
+    def _get_click_classifier(self) -> Any:
+        """Lazy-load the click behavior classifier."""
+        if self._click_classifier is not None or self._click_classifier_failed:
+            return self._click_classifier
+        try:
+            from engines.self_model.click_behavior import ClickBehaviorClassifier
+            self._click_classifier = ClickBehaviorClassifier()
+        except Exception:
+            self._click_classifier_failed = True
+        return self._click_classifier
+
+    def _classify_click_behavior(
+        self,
+        frame_before: List[List[int]],
+        frame_after: List[List[int]],
+        score_before: float,
+        score_after: float,
+        game_id: str,
+    ) -> None:
+        """
+        Classify click behavior using the ClickBehaviorClassifier.
+
+        This wires the previously-orphaned ClickBehaviorClassifier into
+        the outcome processing pipeline, building per-object click profiles
+        that other rungs can query for intelligent targeting.
+        """
+        classifier = self._get_click_classifier()
+        if classifier is None:
+            return
+        try:
+            # The click position is tracked in the most recent action trace
+            # Use center-of-change as a proxy since exact click coords
+            # are in decision metadata, not the outcome processor
+            # Find what position was actually affected
+            changes: List[Tuple[int, int]] = []
+            height = min(len(frame_before), len(frame_after))
+            for y in range(height):
+                width = min(len(frame_before[y]), len(frame_after[y]))
+                for x in range(width):
+                    if frame_before[y][x] != frame_after[y][x]:
+                        changes.append((y, x))
+            if not changes:
+                return
+            # Use center of changed region as click proxy
+            avg_y = sum(c[0] for c in changes) // len(changes)
+            avg_x = sum(c[1] for c in changes) // len(changes)
+            game_type = game_id[:4] if len(game_id) >= 4 else game_id
+            classifier.classify_click(
+                position=(avg_y, avg_x),
+                frame_before=frame_before,
+                frame_after=frame_after,
+                score_before=score_before,
+                score_after=score_after,
+                game_type=game_type,
+            )
+        except Exception:
+            # Non-critical - classification failure doesn't break gameplay
+            pass
 
     def _detect_events(
         self,

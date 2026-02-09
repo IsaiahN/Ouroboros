@@ -309,28 +309,32 @@ class Action6CoordinateProvider:
             'source': 'random_fallback'
         }
 
+    # Class-level state for cycling through objects
+    _cycle_index: int = 0
+    _last_game_key: str = ""
+
     @staticmethod
     def _find_interesting_region(frame: List[List[int]]) -> Optional[Dict[str, int]]:
         """
-        Find visually interesting regions in the frame.
+        Find visually interesting regions in the frame, cycling through objects.
 
-        Looks for:
-        - Non-background colors (not 0)
-        - Color clusters (multiple adjacent pixels of same color)
-        - Centers of colored regions
+        Instead of always returning the largest color cluster centroid,
+        cycles through distinct colored objects so different positions
+        get explored over successive calls.
 
         Returns:
             Dict with 'x', 'y' or None if no interesting regions found
         """
-        if not frame or len(frame) < 64:
+        if not frame or len(frame) < 4:
             return None
 
         # Find all non-background pixels
         interesting_points: List[Tuple[int, int, int]] = []  # (x, y, color)
         for y, row in enumerate(frame):
             for x, pixel in enumerate(row):
-                if pixel != 0:  # Non-background
-                    interesting_points.append((x, y, pixel))
+                val = int(pixel) if hasattr(pixel, '__int__') else pixel
+                if val != 0:  # Non-background
+                    interesting_points.append((x, y, val))
 
         if not interesting_points:
             return None
@@ -342,12 +346,28 @@ class Action6CoordinateProvider:
                 color_groups[color] = []
             color_groups[color].append((x, y))
 
-        # Find the largest non-background group
-        largest_group = max(color_groups.values(), key=len)
+        # Filter out very large clusters (borders/background) and tiny ones (noise)
+        frame_area = len(frame) * (len(frame[0]) if frame else 64)
+        valid_groups = {
+            c: pts for c, pts in color_groups.items()
+            if 3 <= len(pts) <= frame_area * 0.4
+        }
+        if not valid_groups:
+            # Fall back to all groups
+            valid_groups = color_groups
 
-        # Return centroid of largest group
-        avg_x = sum(p[0] for p in largest_group) // len(largest_group)
-        avg_y = sum(p[1] for p in largest_group) // len(largest_group)
+        # Sort by size descending for consistency
+        sorted_colors = sorted(valid_groups.keys(), key=lambda c: len(valid_groups[c]), reverse=True)
+
+        # Cycle through different colors on successive calls
+        Action6CoordinateProvider._cycle_index += 1
+        idx = Action6CoordinateProvider._cycle_index % len(sorted_colors)
+        target_color = sorted_colors[idx]
+        target_group = valid_groups[target_color]
+
+        # Return centroid of selected group
+        avg_x = sum(p[0] for p in target_group) // len(target_group)
+        avg_y = sum(p[1] for p in target_group) // len(target_group)
 
         return {'x': avg_x, 'y': avg_y}
 
@@ -4179,47 +4199,62 @@ class ClickBehaviorLearningRung(DecisionRung):
             if not game_type:
                 return RungResult()
 
+            # Get current frame for locating objects by color
+            frame = getattr(game_state, 'frame', None)
+
             # First: Check for collectible objects (positive score impact)
             if hasattr(cb, 'get_collectible_objects'):
-                collectibles = cb.get_collectible_objects(game_type)
-                if collectibles:
-                    # Click on the most valuable collectible
-                    best = collectibles[0]
-                    x = best.get('x', best.get('center_x', 32))
-                    y = best.get('y', best.get('center_y', 32))
-                    return RungResult(
-                        action='ACTION6',
-                        confidence=0.6 + best.get('avg_score_impact', 0) * 0.2,
-                        reason=f"Collectible object at ({x},{y}) - avg impact: {best.get('avg_score_impact', 0):.2f}",
-                        metadata={
-                            'x': x,
-                            'y': y,
-                            'collectible': best,
-                            'behavior_type': 'collect'
-                        }
-                    )
+                collectible_ids = cb.get_collectible_objects(game_type)
+                if collectible_ids and hasattr(cb, 'get_all_profiles'):
+                    # Find profiles for collectible objects to get their colors
+                    profiles = cb.get_all_profiles(game_type, min_clicks=2)
+                    profile_map = {p.object_id: p for p in profiles}
+                    for obj_id in collectible_ids:
+                        profile = profile_map.get(obj_id)
+                        if profile and profile.color > 0 and frame is not None:
+                            # Locate this color in the current frame
+                            pos = self._find_color_in_frame(frame, profile.color)
+                            if pos:
+                                x, y = pos
+                                return RungResult(
+                                    action='ACTION6',
+                                    confidence=0.6 + profile.avg_score_impact * 0.2,
+                                    reason=f"Collectible color={profile.color} at ({x},{y}) - avg impact: {profile.avg_score_impact:.2f}",
+                                    metadata={
+                                        'x': x,
+                                        'y': y,
+                                        'object_id': obj_id,
+                                        'color': profile.color,
+                                        'behavior_type': 'collect'
+                                    }
+                                )
 
             # Second: Check for trigger objects (chain reactions)
             if hasattr(cb, 'get_trigger_objects'):
-                triggers = cb.get_trigger_objects(game_type)
-                if triggers:
-                    best = triggers[0]
-                    x = best.get('x', best.get('center_x', 32))
-                    y = best.get('y', best.get('center_y', 32))
-                    return RungResult(
-                        action='ACTION6',
-                        confidence=0.5,
-                        reason=f"Trigger object at ({x},{y}) - may cause chain reaction",
-                        metadata={
-                            'x': x,
-                            'y': y,
-                            'trigger': best,
-                            'behavior_type': 'trigger'
-                        }
-                    )
+                trigger_ids = cb.get_trigger_objects(game_type)
+                if trigger_ids and hasattr(cb, 'get_all_profiles'):
+                    profiles = cb.get_all_profiles(game_type, min_clicks=2)
+                    profile_map = {p.object_id: p for p in profiles}
+                    for obj_id in trigger_ids:
+                        profile = profile_map.get(obj_id)
+                        if profile and profile.color > 0 and frame is not None:
+                            pos = self._find_color_in_frame(frame, profile.color)
+                            if pos:
+                                x, y = pos
+                                return RungResult(
+                                    action='ACTION6',
+                                    confidence=0.5,
+                                    reason=f"Trigger color={profile.color} at ({x},{y}) - may cause chain reaction",
+                                    metadata={
+                                        'x': x,
+                                        'y': y,
+                                        'object_id': obj_id,
+                                        'color': profile.color,
+                                        'behavior_type': 'trigger'
+                                    }
+                                )
 
             # Third: Predict behavior for objects in current frame
-            frame = getattr(game_state, 'frame', None)
             if frame is not None and hasattr(cb, 'predict_click_behavior'):
                 # Try center region first as likely interactive area
                 prediction = cb.predict_click_behavior(
@@ -4243,6 +4278,2279 @@ class ClickBehaviorLearningRung(DecisionRung):
             return RungResult()
         except Exception as e:
             return RungResult(reason=f"Click behavior learning failed: {e}")
+
+    @staticmethod
+    def _find_color_in_frame(
+        frame: List[List[int]], target_color: int
+    ) -> Optional[Tuple[int, int]]:
+        """Find centroid of a specific color in the frame."""
+        try:
+            pixels: List[Tuple[int, int]] = []
+            for y, row in enumerate(frame):
+                for x, pixel in enumerate(row):
+                    val = int(pixel) if hasattr(pixel, '__int__') else pixel
+                    if val == target_color:
+                        pixels.append((x, y))
+            if not pixels:
+                return None
+            avg_x = sum(p[0] for p in pixels) // len(pixels)
+            avg_y = sum(p[1] for p in pixels) // len(pixels)
+            return (avg_x, avg_y)
+        except Exception:
+            return None
+
+
+# =============================================================================
+# NEW RUNGS: Long-term solutions for LS20, FT09, VC33 (Feb 2026)
+# =============================================================================
+
+
+class WallAwareNavigationRung(DecisionRung):
+    """Track which directional actions produce movement vs hit walls - EXPLOITATION
+
+    For directional-action games (like LS20 with [1,2,3,4]):
+    1. Track which actions produced frame changes (= valid movement)
+    2. Track which actions produced no frame change (= wall/obstacle)
+    3. Build a movement feasibility map per-frame
+    4. Bias toward actions that historically produce movement
+    5. Avoid actions that repeatedly hit walls
+
+    ROOT CAUSE ADDRESSED: LS20 agents spend 96% of actions hitting walls
+    because they don't learn which directions are blocked.
+    """
+    name = "wall_aware_navigation"
+    category = "exploitation"
+    default_priority = 35
+    confidence_threshold = 0.4
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # Track per-game-type, per-level: action -> (successes, failures)
+        self._movement_history: Dict[str, Dict[str, List[int]]] = {}
+        # Track recent action->outcome pairs for current game session
+        self._recent_outcomes: List[Tuple[str, bool]] = []  # (action, frame_changed)
+        self._consecutive_wall_hits: Dict[str, int] = {}  # action -> consecutive wall count
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        available = context.get('available_actions', [])
+
+        # Only for directional games (actions 1-4 present, not click-only)
+        has_directional = any(
+            (a in [1, 2, 3, 4] if isinstance(a, int) else a in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'])
+            for a in available
+        )
+        if not has_directional:
+            return RungResult()
+
+        # Build weights: penalize actions that consistently hit walls
+        weights: Dict[str, float] = {}
+        for a in available:
+            action_name = f'ACTION{a}' if isinstance(a, int) else a
+            if not action_name.startswith('ACTION'):
+                continue
+            consecutive_walls = self._consecutive_wall_hits.get(action_name, 0)
+            if consecutive_walls >= 3:
+                # Strong penalty for 3+ consecutive wall hits
+                weights[action_name] = max(0.05, 1.0 / (1 + consecutive_walls))
+            elif consecutive_walls >= 1:
+                # Mild penalty
+                weights[action_name] = 0.5
+            else:
+                weights[action_name] = 1.0
+
+        # If we have strong directional preferences, suggest the best one
+        if self._recent_outcomes:
+            # Count recent successes per action
+            action_success: Dict[str, int] = {}
+            action_total: Dict[str, int] = {}
+            for action, changed in self._recent_outcomes[-20:]:
+                action_total[action] = action_total.get(action, 0) + 1
+                if changed:
+                    action_success[action] = action_success.get(action, 0) + 1
+
+            # Find action with best recent success rate
+            best_action = None
+            best_rate = 0.0
+            for action, total in action_total.items():
+                if total >= 2:
+                    rate = action_success.get(action, 0) / total
+                    if rate > best_rate and is_action_available(action, context):
+                        best_rate = rate
+                        best_action = action
+
+            if best_action and best_rate > 0.5:
+                # Suggest the most productive direction
+                return RungResult(
+                    action=best_action,
+                    confidence=0.35 + best_rate * 0.25,
+                    reason=f"Wall-aware: {best_action} has {best_rate:.0%} movement rate (last 20 actions)",
+                    weights=weights,
+                    metadata={'movement_rate': best_rate}
+                )
+
+        # Return as weights filter only
+        if any(w < 0.5 for w in weights.values()):
+            return RungResult(
+                weights=weights,
+                reason=f"Wall penalties: {[(k, f'{v:.2f}') for k, v in weights.items() if v < 1.0]}"
+            )
+
+        return RungResult()
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Track whether directional actions produce movement or hit walls."""
+        if not action or not action.startswith('ACTION'):
+            return
+
+        # Only track directional actions
+        try:
+            action_num = int(action.replace('ACTION', ''))
+            if action_num not in [1, 2, 3, 4]:
+                return
+        except ValueError:
+            return
+
+        # Detect if frame changed
+        frame_changed = False
+        if frame_before is not None and frame_after is not None:
+            try:
+                if isinstance(frame_before, list) and isinstance(frame_after, list):
+                    frame_changed = frame_before != frame_after
+                else:
+                    import numpy as np
+                    frame_changed = not np.array_equal(frame_before, frame_after)
+            except Exception:
+                pass
+
+        # Update consecutive wall hit tracking
+        if frame_changed:
+            self._consecutive_wall_hits[action] = 0
+        else:
+            self._consecutive_wall_hits[action] = self._consecutive_wall_hits.get(action, 0) + 1
+
+        # Track recent outcomes (ring buffer)
+        self._recent_outcomes.append((action, frame_changed))
+        if len(self._recent_outcomes) > 100:
+            self._recent_outcomes = self._recent_outcomes[-100:]
+
+
+class ObjectColorTargetingRung(DecisionRung):
+    """Detect and systematically target distinct colored objects - EXPLOITATION
+
+    For click-based games (FT09, VC33):
+    1. Scan frame for distinct non-background colored object clusters
+    2. Find centroid of each cluster
+    3. Cycle through untried colors/positions systematically
+    4. Use click_behavior profiles to prefer productive colors
+
+    ROOT CAUSE ADDRESSED: FT09 clicks only at center (36,36), VC33 scatters
+    randomly. Neither systematically targets actual game objects.
+    """
+    name = "object_color_targeting"
+    category = "exploitation"
+    default_priority = 34
+    confidence_threshold = 0.35
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._tried_positions: Dict[str, Set[Tuple[int, int]]] = {}  # game_key -> set of (x,y)
+        self._color_centroids_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._last_frame_hash: str = ""
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        available = context.get('available_actions', [])
+        if 6 not in available and 'ACTION6' not in available:
+            return RungResult()
+
+        # Get frame
+        frame = None
+        if hasattr(game_state, 'frame'):
+            frame = game_state.frame
+        elif isinstance(game_state, dict):
+            frame = game_state.get('frame')
+        if frame is None or not frame:
+            return RungResult()
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # Find colored object centroids in frame
+        centroids = self._find_colored_object_centroids(frame)
+        if not centroids:
+            return RungResult()
+
+        # Check click_behavior profiles to prefer productive colors
+        cb = self.engines.click_behavior if self.engines else None
+        productive_colors: Set[int] = set()
+        dangerous_colors: Set[int] = set()
+        if cb and hasattr(cb, 'get_all_profiles'):
+            try:
+                profiles = cb.get_all_profiles(game_type, min_clicks=2)
+                for p in profiles:
+                    if p.avg_score_impact > 0 or p.dominant_behavior.value in ('toggle', 'trigger', 'activate', 'move'):
+                        productive_colors.add(p.color)
+                    elif p.dominant_behavior.value in ('destroy', 'no_effect'):
+                        dangerous_colors.add(p.color)
+            except Exception:
+                pass
+
+        # Get tried positions for this game session
+        tried = self._tried_positions.get(game_key, set())
+
+        # ----- AFFORDANCE INTEGRATION -----
+        # AffordanceDetectionRung injects classified object IDs into context.
+        # interactive_objects = objects that responded to clicks (is_interactive)
+        # obstacle_objects   = objects that block movement (is_obstacle)
+        # reference_objects   = template/legend objects (is_reference)
+        # If affordance data exists, use it to dramatically narrow the search
+        # space instead of targeting every colored cluster.
+        interactive_ids: List[str] = context.get('interactive_objects', [])
+        obstacle_ids: List[str] = context.get('obstacle_objects', [])
+        reference_ids: List[str] = context.get('reference_objects', [])
+        has_affordance_data = bool(interactive_ids or obstacle_ids or reference_ids)
+
+        # Score centroids by: interactive > productive > untried > tried, avoid obstacles
+        best_target = None
+        best_score = -999.0
+        for c in centroids:
+            cx, cy, color, size = c['x'], c['y'], c['color'], c['size']
+            pos_key = (cx // 4, cy // 4)  # Quantize to 4px grid to avoid exact-match issues
+            obj_id = f'color_{color}'
+
+            score = 0.0
+
+            # Affordance-based scoring (highest priority when available)
+            if has_affordance_data:
+                if obj_id in interactive_ids:
+                    score += 5.0  # STRONG boost: proven interactive
+                elif obj_id in reference_ids:
+                    score += 1.0  # Reference objects are informative but not click targets
+                elif obj_id in obstacle_ids:
+                    score -= 4.0  # Obstacles rarely respond to clicks
+                elif interactive_ids:
+                    # We know WHICH objects are interactive; penalize unknowns
+                    score -= 1.0
+
+            # Click behavior profile scoring
+            if color in productive_colors:
+                score += 3.0
+            if color in dangerous_colors:
+                score -= 5.0
+            if pos_key not in tried:
+                score += 2.0
+            # Prefer larger objects (more likely interactive)
+            score += min(1.0, size / 50.0)
+            # Small random tiebreak
+            score += random.random() * 0.1
+
+            if score > best_score:
+                best_score = score
+                best_target = c
+
+        if best_target is None:
+            return RungResult()
+
+        # Mark as tried
+        tx, ty = best_target['x'], best_target['y']
+        pos_key = (tx // 4, ty // 4)
+        if game_key not in self._tried_positions:
+            self._tried_positions[game_key] = set()
+        self._tried_positions[game_key].add(pos_key)
+
+        # Clean up tried positions (reset after full cycle)
+        if len(self._tried_positions[game_key]) > len(centroids) * 2:
+            self._tried_positions[game_key] = set()
+
+        confidence = 0.40
+        if best_target['color'] in productive_colors:
+            confidence = 0.60
+
+        return RungResult(
+            action='ACTION6',
+            confidence=confidence,
+            reason=f"Object targeting: color={best_target['color']} at ({tx},{ty}) size={best_target['size']} score={best_score:.1f}",
+            metadata={
+                'x': tx,
+                'y': ty,
+                'target_color': best_target['color'],
+                'target_size': best_target['size'],
+                'source': 'object_color_targeting',
+            }
+        )
+
+    def _find_colored_object_centroids(
+        self, frame: List[List[int]]
+    ) -> List[Dict[str, Any]]:
+        """Find centroids of colored object clusters in frame."""
+        if not frame:
+            return []
+
+        # Collect all non-background pixels by color
+        color_pixels: Dict[int, List[Tuple[int, int]]] = {}
+        try:
+            for y, row in enumerate(frame):
+                for x, pixel in enumerate(row):
+                    val = int(pixel) if hasattr(pixel, '__int__') else pixel
+                    if val != 0:  # Non-background
+                        if val not in color_pixels:
+                            color_pixels[val] = []
+                        color_pixels[val].append((x, y))
+        except Exception:
+            return []
+
+        # Filter out very large clusters (likely background/borders) and very small (noise)
+        centroids = []
+        frame_area = len(frame) * (len(frame[0]) if frame else 64)
+        for color, pixels in color_pixels.items():
+            size = len(pixels)
+            if size < 4 or size > frame_area * 0.4:
+                continue  # Skip noise and background-like colors
+            avg_x = sum(p[0] for p in pixels) // size
+            avg_y = sum(p[1] for p in pixels) // size
+            centroids.append({
+                'x': avg_x,
+                'y': avg_y,
+                'color': color,
+                'size': size,
+            })
+
+        # Sort by size descending (larger objects first)
+        centroids.sort(key=lambda c: c['size'], reverse=True)
+        return centroids
+
+
+class CausalClickMappingRung(DecisionRung):
+    """Build and use click->effect causal maps from frame diffs - EXPLOITATION
+
+    For click-based puzzle games (FT09, VC33):
+    1. After each click, compare frame_before and frame_after
+    2. Record "click at (x,y) caused changes at [(x1,y1), (x2,y2), ...]"
+    3. Build a per-game causal map: position -> effect pattern
+    4. Use the causal map to plan clicks that move toward goals
+    5. Detect toggle patterns (click X toggles neighbors through color cycle)
+
+    ROOT CAUSE ADDRESSED: System has 8-12% frame change rates but never
+    builds causal models of what changes cause what effects. The data
+    exists in frame_before/frame_after but is never analyzed for causality.
+
+    Integrates with SpatialEffectLearner (already wired via on_action_complete)
+    but adds an active planning layer on top.
+    """
+    name = "causal_click_mapping"
+    category = "exploitation"
+    default_priority = 33
+    confidence_threshold = 0.45
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # Per-game causal maps: game_key -> {(click_x, click_y) -> [(change_x, change_y, old_color, new_color)]}
+        self._causal_map: Dict[str, Dict[Tuple[int, int], List[Tuple[int, int, int, int]]]] = {}
+        # Track last click position for correlating with frame changes
+        self._last_click_pos: Optional[Tuple[int, int]] = None
+        # Toggle cycle detection: game_key -> {position -> [color_sequence]}
+        self._color_cycles: Dict[str, Dict[Tuple[int, int], List[int]]] = {}
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        available = context.get('available_actions', [])
+        if 6 not in available and 'ACTION6' not in available:
+            return RungResult()
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # Do we have a causal map for this game?
+        causal = self._causal_map.get(game_key, {})
+        if not causal:
+            # No causal data yet - defer to other rungs for exploration
+            return RungResult()
+
+        # Try to use SpatialEffectLearner for planning
+        effect_pattern = self._get_learned_effect_pattern(game_type)
+
+        # Get current frame
+        frame = None
+        if hasattr(game_state, 'frame'):
+            frame = game_state.frame
+        elif isinstance(game_state, dict):
+            frame = game_state.get('frame')
+
+        if frame is None:
+            return RungResult()
+
+        # Strategy 1: Find clicks that produce the MOST changes
+        # (useful for exploration phase - find the most "active" positions)
+        if len(causal) >= 3:
+            # Find position with most effect range
+            best_pos = None
+            best_effect_count = 0
+            for pos, effects in causal.items():
+                if len(effects) > best_effect_count:
+                    best_effect_count = len(effects)
+                    best_pos = pos
+
+            if best_pos and best_effect_count >= 2:
+                # Check if this position still has the same color as when we learned
+                # (i.e., it's worth clicking again for toggle games)
+                return RungResult(
+                    action='ACTION6',
+                    confidence=0.45 + min(0.2, best_effect_count * 0.05),
+                    reason=f"Causal map: clicking ({best_pos[0]},{best_pos[1]}) affects {best_effect_count} cells",
+                    metadata={
+                        'x': best_pos[0],
+                        'y': best_pos[1],
+                        'effect_count': best_effect_count,
+                        'source': 'causal_click_mapping',
+                    }
+                )
+
+        # Strategy 2: Affordance-guided exploration.
+        # AffordanceDetectionRung classifies objects as is_reference, is_interactive, etc.
+        # For FT09-like puzzles: reference objects (bsT sprites) encode the rules.
+        # Prioritize clicking interactive > reference > any non-bg pixel.
+        interactive_ids: List[str] = context.get('interactive_objects', [])
+        reference_ids: List[str] = context.get('reference_objects', [])
+        detected_objects: List[Dict[str, Any]] = context.get('detected_objects', [])
+        tried_positions = set(causal.keys())
+
+        # If we have affordance-classified objects, target them first
+        if detected_objects:
+            # Priority 1: Interactive objects (proven to respond to clicks)
+            for obj in detected_objects:
+                obj_id = obj.get('object_id', '')
+                cx, cy = obj.get('center_x', 0), obj.get('center_y', 0)
+                if (cx, cy) in tried_positions:
+                    continue
+                if obj_id in interactive_ids:
+                    return RungResult(
+                        action='ACTION6',
+                        confidence=0.50,
+                        reason=f"Causal exploration: interactive object '{obj_id}' at ({cx},{cy})",
+                        metadata={
+                            'x': cx, 'y': cy,
+                            'source': 'causal_affordance_interactive',
+                        }
+                    )
+
+            # Priority 2: Reference objects (templates/legends that encode rules)
+            for obj in detected_objects:
+                obj_id = obj.get('object_id', '')
+                cx, cy = obj.get('center_x', 0), obj.get('center_y', 0)
+                if (cx, cy) in tried_positions:
+                    continue
+                if obj_id in reference_ids:
+                    return RungResult(
+                        action='ACTION6',
+                        confidence=0.45,
+                        reason=f"Causal exploration: reference object '{obj_id}' at ({cx},{cy})",
+                        metadata={
+                            'x': cx, 'y': cy,
+                            'source': 'causal_affordance_reference',
+                        }
+                    )
+
+        # Fallback: If no affordance data or all classified objects tried,
+        # explore untried non-background positions (original behavior)
+        if effect_pattern:
+            frame_h = len(frame)
+            frame_w = len(frame[0]) if frame else 64
+
+            for y in range(0, frame_h, 4):  # Sample every 4 pixels
+                for x in range(0, frame_w, 4):
+                    if (x, y) not in tried_positions:
+                        try:
+                            if frame[y][x] != 0:  # Non-background
+                                return RungResult(
+                                    action='ACTION6',
+                                    confidence=0.40,
+                                    reason=f"Causal exploration: untried non-bg at ({x},{y}) with known effect pattern",
+                                    metadata={
+                                        'x': x, 'y': y,
+                                        'source': 'causal_exploration',
+                                    }
+                                )
+                        except (IndexError, TypeError):
+                            pass
+
+        return RungResult()
+
+    def _get_learned_effect_pattern(self, game_type: str) -> List[Tuple[int, int]]:
+        """Get the SpatialEffectLearner's learned effect pattern."""
+        try:
+            from database_interface import DatabaseInterface
+            from engines.perception.spatial_learning import SpatialEffectLearner
+            db = DatabaseInterface()
+            learner = SpatialEffectLearner(db)
+            return learner.get_effect_pattern(game_type, min_observations=2)
+        except Exception:
+            return []
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Record causal mapping from click position to frame changes."""
+        if action != 'ACTION6':
+            return
+
+        click_x = action_data.get('x', 0)
+        click_y = action_data.get('y', 0)
+
+        if frame_before is None or frame_after is None:
+            return
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # Find what changed
+        changes: List[Tuple[int, int, int, int]] = []
+        try:
+            if isinstance(frame_before, list) and isinstance(frame_after, list):
+                for y in range(min(len(frame_before), len(frame_after))):
+                    for x in range(min(len(frame_before[y]), len(frame_after[y]))):
+                        old = frame_before[y][x]
+                        new = frame_after[y][x]
+                        if hasattr(old, '__int__'):
+                            old = int(old)
+                        if hasattr(new, '__int__'):
+                            new = int(new)
+                        if old != new:
+                            changes.append((x, y, old, new))
+            else:
+                import numpy as np
+                diff_mask = np.array(frame_before) != np.array(frame_after)
+                ys, xs = np.where(diff_mask)
+                for y_idx, x_idx in zip(ys, xs):
+                    changes.append((
+                        int(x_idx), int(y_idx),
+                        int(frame_before[y_idx][x_idx]),
+                        int(frame_after[y_idx][x_idx])
+                    ))
+        except Exception:
+            return
+
+        if not changes:
+            return
+
+        # Store in causal map
+        if game_key not in self._causal_map:
+            self._causal_map[game_key] = {}
+        self._causal_map[game_key][(click_x, click_y)] = changes
+
+        # Track color cycles at each changed position
+        if game_key not in self._color_cycles:
+            self._color_cycles[game_key] = {}
+        for cx, cy, old_color, new_color in changes:
+            pos = (cx, cy)
+            if pos not in self._color_cycles[game_key]:
+                self._color_cycles[game_key][pos] = [old_color]
+            self._color_cycles[game_key][pos].append(new_color)
+
+
+class ControlledMovementPlanningRung(DecisionRung):
+    """Plan movement by tracking action-to-direction correlations - EXPLOITATION
+
+    For directional-action games (like LS20):
+    1. Correlate ACTION1-4 with actual pixel displacement
+    2. Build "ACTION1=up, ACTION2=down, ACTION3=left, ACTION4=right" mapping
+    3. Detect "stuck" positions (all directions blocked = trapped)
+    4. When stuck, suggest unexplored directions or backtracking
+
+    ROOT CAUSE ADDRESSED: LS20 agents never learn that ACTION1=up because they
+    don't correlate actions with frame changes. This rung builds the mapping.
+    """
+    name = "controlled_movement_planning"
+    category = "exploitation"
+    default_priority = 32
+    confidence_threshold = 0.4
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # action -> (total_dx, total_dy, success_count)
+        self._action_displacement: Dict[str, Tuple[float, float, int]] = {}
+        # Track visited frame hashes to detect loops
+        self._visited_frame_hashes: List[str] = []
+        self._max_frame_history = 50
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        available = context.get('available_actions', [])
+
+        # Only for directional games
+        has_directional = any(
+            (a in [1, 2, 3, 4] if isinstance(a, int) else a in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'])
+            for a in available
+        )
+        if not has_directional:
+            return RungResult()
+
+        # Need enough data to have learned direction mappings
+        total_observations = sum(d[2] for d in self._action_displacement.values())
+        if total_observations < 8:
+            return RungResult()  # Not enough data yet
+
+        # Build direction map: which action goes which way?
+        direction_map: Dict[str, Tuple[float, float]] = {}
+        for action, (total_dx, total_dy, count) in self._action_displacement.items():
+            if count >= 2:
+                avg_dx = total_dx / count
+                avg_dy = total_dy / count
+                direction_map[action] = (avg_dx, avg_dy)
+
+        if not direction_map:
+            return RungResult()
+
+        # Check current frame hash for loop detection
+        frame = None
+        if hasattr(game_state, 'frame'):
+            frame = game_state.frame
+        if frame is not None:
+            try:
+                frame_hash = str(hash(str(frame)))[:16]
+                if frame_hash in self._visited_frame_hashes[-20:]:
+                    # We've been here recently - try a less-used direction
+                    action_counts: Dict[str, int] = {}
+                    for a, (_, _, c) in self._action_displacement.items():
+                        action_counts[a] = c
+                    if action_counts:
+                        least_used = min(action_counts, key=action_counts.get)  # type: ignore[arg-type]
+                        if is_action_available(least_used, context):
+                            return RungResult(
+                                action=least_used,
+                                confidence=0.45,
+                                reason=f"Loop detected - trying least-used direction: {least_used}",
+                                metadata={'reason': 'loop_escape'}
+                            )
+                self._visited_frame_hashes.append(frame_hash)
+                if len(self._visited_frame_hashes) > self._max_frame_history:
+                    self._visited_frame_hashes = self._visited_frame_hashes[-self._max_frame_history:]
+            except Exception:
+                pass
+
+        # Find actions with the strongest directional signal
+        # Suggest the one that moves us in a direction we haven't explored much
+        best_action = None
+        best_magnitude = 0.0
+        for action, (avg_dx, avg_dy) in direction_map.items():
+            magnitude = (avg_dx ** 2 + avg_dy ** 2) ** 0.5
+            if magnitude > best_magnitude and is_action_available(action, context):
+                best_magnitude = magnitude
+                best_action = action
+
+        if best_action and best_magnitude > 0.5:
+            dx, dy = direction_map[best_action]
+            return RungResult(
+                action=best_action,
+                confidence=0.40,
+                reason=f"Movement planning: {best_action} moves avg ({dx:.1f},{dy:.1f})",
+                metadata={
+                    'direction': direction_map,
+                    'source': 'movement_planning',
+                }
+            )
+
+        return RungResult()
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Track movement displacement per action to learn direction mapping."""
+        if not action or not action.startswith('ACTION'):
+            return
+        try:
+            action_num = int(action.replace('ACTION', ''))
+            if action_num not in [1, 2, 3, 4]:
+                return
+        except ValueError:
+            return
+
+        if frame_before is None or frame_after is None:
+            return
+
+        # Find displacement by comparing object positions
+        try:
+            displacement = self._compute_displacement(frame_before, frame_after)
+            if displacement is not None:
+                dx, dy = displacement
+                if action not in self._action_displacement:
+                    self._action_displacement[action] = (0.0, 0.0, 0)
+                prev_dx, prev_dy, prev_count = self._action_displacement[action]
+                self._action_displacement[action] = (prev_dx + dx, prev_dy + dy, prev_count + 1)
+        except Exception:
+            pass
+
+    def _compute_displacement(
+        self,
+        frame_before: Any,
+        frame_after: Any
+    ) -> Optional[Tuple[float, float]]:
+        """Compute the net displacement of moved objects between frames."""
+        try:
+            # Find pixels that disappeared and appeared
+            disappeared: List[Tuple[int, int, int]] = []
+            appeared: List[Tuple[int, int, int]] = []
+
+            if isinstance(frame_before, list):
+                height = min(len(frame_before), len(frame_after))
+                for y in range(height):
+                    width = min(len(frame_before[y]), len(frame_after[y]))
+                    for x in range(width):
+                        old = int(frame_before[y][x]) if hasattr(frame_before[y][x], '__int__') else frame_before[y][x]
+                        new = int(frame_after[y][x]) if hasattr(frame_after[y][x], '__int__') else frame_after[y][x]
+                        if old != new:
+                            if old != 0 and new == 0:
+                                disappeared.append((x, y, old))
+                            elif old == 0 and new != 0:
+                                appeared.append((x, y, new))
+            else:
+                import numpy as np
+                fb = np.array(frame_before)
+                fa = np.array(frame_after)
+                diff_mask = fb != fa
+                ys, xs = np.where(diff_mask)
+                for yi, xi in zip(ys, xs):
+                    old, new = int(fb[yi, xi]), int(fa[yi, xi])
+                    if old != 0 and new == 0:
+                        disappeared.append((int(xi), int(yi), old))
+                    elif old == 0 and new != 0:
+                        appeared.append((int(xi), int(yi), new))
+
+            if not disappeared or not appeared:
+                return None
+
+            # Compute centroid displacement
+            d_cx = sum(p[0] for p in disappeared) / len(disappeared)
+            d_cy = sum(p[1] for p in disappeared) / len(disappeared)
+            a_cx = sum(p[0] for p in appeared) / len(appeared)
+            a_cy = sum(p[1] for p in appeared) / len(appeared)
+
+            return (a_cx - d_cx, a_cy - d_cy)
+        except Exception:
+            return None
+
+
+# =============================================================================
+# DEEPER SOLUTION RUNGS: Algorithmic fixes for LS20, FT09, VC33 (Feb 2026)
+# Addresses: maze solving, constraint satisfaction, multi-step planning,
+#            affordance detection, budget awareness, irreversibility detection,
+#            and win-condition modeling.
+# =============================================================================
+
+
+class AffordanceDetectionRung(DecisionRung):
+    """Wire seed affordance primitives into gameplay decisions - ORIENTATION
+
+    The AFFORDANCE category (is_reference, is_interactive, is_obstacle,
+    is_container, is_tool, is_movable) exists in seed_primitives.py but
+    was NEVER queried by any decision rung.
+
+    This rung:
+    1. Runs affordance primitives on objects detected in the frame
+    2. Tags objects with affordance labels (reference, interactive, obstacle)
+    3. Injects affordance data into context for downstream rungs
+    4. Specifically detects reference objects (CRITICAL for FT09)
+
+    ROOT CAUSE ADDRESSED: "No is_reference primitive active" - the entire
+    affordance detection category was registered but disconnected.
+    """
+    name = "affordance_detection"
+    category = "orientation"
+    default_priority = 8
+    confidence_threshold = 0.3
+    required_primitives = [
+        'is_reference', 'is_interactive', 'is_obstacle',
+        'is_container', 'is_tool', 'is_movable'
+    ]
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # Cache affordances per game_key to avoid recomputing every frame
+        self._affordance_cache: Dict[str, Dict[str, List[str]]] = {}
+        # Track interaction history for is_interactive primitive
+        self._interaction_history: List[Dict[str, Any]] = []
+        # Track rule history for is_reference primitive
+        self._rule_history: List[Dict[str, Any]] = []
+        # Track effect history for is_tool primitive
+        self._effect_history: List[Dict[str, Any]] = []
+        # Discovered objects by game
+        self._object_registry: Dict[str, List[Dict[str, Any]]] = {}
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        """Detect affordances and inject into context. Does NOT suggest actions."""
+        frame = getattr(game_state, 'frame', None)
+        if frame is None:
+            return RungResult()
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # Detect distinct objects in frame
+        objects = self._detect_objects(frame)
+        if not objects:
+            return RungResult()
+
+        self._object_registry[game_key] = objects
+
+        # Run affordance primitives on each object
+        affordances: Dict[str, List[str]] = {
+            'reference': [],
+            'interactive': [],
+            'obstacle': [],
+            'container': [],
+            'tool': [],
+            'movable': [],
+        }
+
+        for obj in objects:
+            obj_id = obj.get('object_id', '')
+
+            # is_obstacle: checks frame for blocking behavior
+            if self.call_primitive('is_obstacle', obj_id, frame):
+                affordances['obstacle'].append(obj_id)
+
+            # is_interactive: checks interaction history
+            if self.call_primitive('is_interactive', obj_id, self._interaction_history):
+                affordances['interactive'].append(obj_id)
+
+            # is_reference: checks rule history
+            if self.call_primitive('is_reference', obj_id, frame, self._rule_history):
+                affordances['reference'].append(obj_id)
+
+            # is_tool: checks effect history
+            if self.call_primitive('is_tool', obj_id, self._effect_history):
+                affordances['tool'].append(obj_id)
+
+        # Inject affordance data into context for downstream rungs
+        context['affordances'] = affordances
+        context['detected_objects'] = objects
+        context['reference_objects'] = affordances['reference']
+        context['interactive_objects'] = affordances['interactive']
+        context['obstacle_objects'] = affordances['obstacle']
+
+        # Heuristic: if no interaction history yet but we see distinct colored
+        # objects that don't move, they might be reference objects
+        if not affordances['reference'] and len(objects) > 2:
+            # Objects with unique colors that don't appear elsewhere could be references
+            color_counts: Dict[int, int] = {}
+            for obj in objects:
+                c = obj.get('color', 0)
+                color_counts[c] = color_counts.get(c, 0) + 1
+            unique_color_objs = [
+                o for o in objects
+                if color_counts.get(o.get('color', 0), 0) == 1
+            ]
+            if unique_color_objs:
+                context['potential_reference_objects'] = unique_color_objs
+
+        # This rung is informational - enriches context, doesn't suggest action
+        if affordances['reference']:
+            return RungResult(
+                reason=f"Affordances detected: {sum(len(v) for v in affordances.values())} tagged objects, {len(affordances['reference'])} reference objects",
+                metadata={'affordances': affordances}
+            )
+
+        return RungResult(
+            reason=f"Affordances: {sum(len(v) for v in affordances.values())} tagged",
+            metadata={'affordances': affordances}
+        )
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Update interaction and effect histories for affordance detection."""
+        if frame_before is None or frame_after is None:
+            return
+
+        frame_changed = False
+        try:
+            if isinstance(frame_before, list) and isinstance(frame_after, list):
+                frame_changed = frame_before != frame_after
+            else:
+                import numpy as np
+                frame_changed = not np.array_equal(frame_before, frame_after)
+        except Exception:
+            pass
+
+        # Update interaction history
+        if action == 'ACTION6':
+            x, y = action_data.get('x', 0), action_data.get('y', 0)
+            # Find which object was at (x, y)
+            game_type = context.get('game_type', '')
+            level = context.get('level', 1)
+            game_key = f"{game_type}_L{level}"
+            objects = self._object_registry.get(game_key, [])
+            for obj in objects:
+                if self._point_in_object(x, y, obj):
+                    self._interaction_history.append({
+                        'object_id': obj['object_id'],
+                        'action': action,
+                        'responded': frame_changed,
+                        'x': x, 'y': y,
+                    })
+                    if frame_changed:
+                        self._effect_history.append({
+                            'tool_object': obj['object_id'],
+                            'caused_effect': True,
+                        })
+                    break
+
+        elif frame_changed and action in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4']:
+            # Directional movement that caused change - might have interacted with tile
+            self._interaction_history.append({
+                'object_id': f'tile_at_movement_{action}',
+                'action': action,
+                'responded': True,
+            })
+
+            # Check if significant state change happened (potential rule discovery)
+            try:
+                change_count = self._count_frame_changes(frame_before, frame_after)
+                if change_count > 10:  # Significant state change
+                    self._rule_history.append({
+                        'reference_object': f'tile_at_movement_{action}',
+                        'rule_confidence': 0.5,
+                        'change_count': change_count,
+                    })
+            except Exception:
+                pass
+
+    def _detect_objects(self, frame: List[List[int]]) -> List[Dict[str, Any]]:
+        """Detect distinct colored objects in the frame."""
+        if not frame:
+            return []
+
+        color_pixels: Dict[int, List[Tuple[int, int]]] = {}
+        try:
+            for y, row in enumerate(frame):
+                for x, pixel in enumerate(row):
+                    val = int(pixel) if hasattr(pixel, '__int__') else pixel
+                    if val != 0:
+                        if val not in color_pixels:
+                            color_pixels[val] = []
+                        color_pixels[val].append((x, y))
+        except Exception:
+            return []
+
+        objects = []
+        frame_area = len(frame) * (len(frame[0]) if frame else 64)
+        for color, pixels in color_pixels.items():
+            size = len(pixels)
+            if size < 2 or size > frame_area * 0.5:
+                continue
+            avg_x = sum(p[0] for p in pixels) // size
+            avg_y = sum(p[1] for p in pixels) // size
+            min_x = min(p[0] for p in pixels)
+            max_x = max(p[0] for p in pixels)
+            min_y = min(p[1] for p in pixels)
+            max_y = max(p[1] for p in pixels)
+            objects.append({
+                'object_id': f'color_{color}',
+                'color': color,
+                'center_x': avg_x,
+                'center_y': avg_y,
+                'size': size,
+                'bbox': (min_x, min_y, max_x, max_y),
+                'positions': pixels if size < 200 else [],  # Don't store huge position lists
+            })
+
+        return objects
+
+    @staticmethod
+    def _point_in_object(x: int, y: int, obj: Dict[str, Any]) -> bool:
+        """Check if point is within object bounding box."""
+        bbox = obj.get('bbox')
+        if bbox:
+            return bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]
+        return False
+
+    @staticmethod
+    def _count_frame_changes(frame_before: Any, frame_after: Any) -> int:
+        """Count number of pixel changes between frames."""
+        count = 0
+        try:
+            if isinstance(frame_before, list):
+                for y in range(min(len(frame_before), len(frame_after))):
+                    for x in range(min(len(frame_before[y]), len(frame_after[y]))):
+                        if frame_before[y][x] != frame_after[y][x]:
+                            count += 1
+            else:
+                import numpy as np
+                count = int(np.sum(np.array(frame_before) != np.array(frame_after)))
+        except Exception:
+            pass
+        return count
+
+
+class InteractableTileDiscoveryRung(DecisionRung):
+    """Learn that moving to specific tiles changes agent state - HYPOTHESIS
+
+    For directional games like LS20 where:
+    - Walking over tile X changes tool shape (gsu)
+    - Walking over tile Y changes tool color (gic)
+    - Walking over tile Z changes rotation (bgt)
+
+    This rung:
+    1. Tracks frame state BEFORE and AFTER each directional movement
+    2. Detects when movement causes state changes BEYOND just position
+    3. Maps tile positions to the state changes they cause
+    4. Builds a "property modification map" of the level
+    5. Suggests revisiting known modifier tiles when current state
+       doesn't match the target
+
+    ROOT CAUSE ADDRESSED: LS20 agents never discover that gsu/gic/bgt tiles
+    modify the tool's properties. Without this, the 3-property matching
+    system is invisible.
+    """
+    name = "interactable_tile_discovery"
+    category = "hypothesis"
+    default_priority = 28
+    confidence_threshold = 0.4
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # game_key -> {(x, y) -> list of observed state changes}
+        self._modifier_map: Dict[str, Dict[Tuple[int, int], List[Dict[str, Any]]]] = {}
+        # Track agent position by correlating with frame changes
+        self._estimated_position: Optional[Tuple[int, int]] = None
+        # Track the "tool state" as a hash of non-position frame elements
+        self._last_tool_state_hash: str = ""
+        # Track state transitions: (old_state_hash, new_state_hash) -> position
+        self._state_transitions: Dict[str, List[Dict[str, Any]]] = {}
+        # Known modifier positions per game
+        self._known_modifiers: Dict[str, List[Tuple[int, int]]] = {}
+        # Count of property changes detected (to know when we've discovered modifiers)
+        self._property_changes_detected: Dict[str, int] = {}
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        available = context.get('available_actions', [])
+        has_directional = any(
+            (a in [1, 2, 3, 4] if isinstance(a, int) else a in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'])
+            for a in available
+        )
+        if not has_directional:
+            return RungResult()
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # If we've discovered modifier tiles, suggest moving toward them
+        modifiers = self._known_modifiers.get(game_key, [])
+        if modifiers and self._estimated_position:
+            # Find nearest unvisited-recently modifier
+            ex, ey = self._estimated_position
+            nearest = None
+            nearest_dist = float('inf')
+            for mx, my in modifiers:
+                dist = abs(mx - ex) + abs(my - ey)  # Manhattan distance
+                if 0 < dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest = (mx, my)
+
+            if nearest:
+                # Suggest direction toward the modifier
+                dx = nearest[0] - ex
+                dy = nearest[1] - ey
+
+                # Map displacement to action
+                if abs(dx) > abs(dy):
+                    action = 'ACTION3' if dx < 0 else 'ACTION4'  # left/right
+                else:
+                    action = 'ACTION1' if dy < 0 else 'ACTION2'  # up/down
+
+                if is_action_available(action, context):
+                    return RungResult(
+                        action=action,
+                        confidence=0.45,
+                        reason=f"Moving toward modifier tile at {nearest} (dist={nearest_dist:.0f})",
+                        metadata={
+                            'target_modifier': nearest,
+                            'source': 'interactable_tile_discovery',
+                        }
+                    )
+
+        # If we haven't found modifiers yet, inject discovery metadata
+        changes = self._property_changes_detected.get(game_key, 0)
+        if changes > 0:
+            return RungResult(
+                reason=f"Discovered {changes} property-changing tiles in {game_key}",
+                metadata={
+                    'modifier_count': changes,
+                    'known_modifiers': modifiers,
+                }
+            )
+
+        return RungResult()
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Detect when movement causes state changes beyond position."""
+        if not action or action not in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4']:
+            return
+        if frame_before is None or frame_after is None:
+            return
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        try:
+            # Compute frame diff
+            changes = self._compute_change_regions(frame_before, frame_after)
+            if not changes:
+                return  # No change = wall hit
+
+            # Separate position changes from state changes
+            # Position change: a colored cluster moved (disappeared + reappeared)
+            # State change: colors changed WITHOUT corresponding position change
+            position_changes = []
+            state_changes = []
+
+            for change in changes:
+                if change['type'] == 'moved':
+                    position_changes.append(change)
+                elif change['type'] == 'color_changed':
+                    state_changes.append(change)
+
+            # Update estimated position from position changes
+            if position_changes:
+                # Agent likely moved — update position estimate
+                for pc in position_changes:
+                    if pc.get('new_pos'):
+                        self._estimated_position = pc['new_pos']
+
+            # KEY INSIGHT: If we see state_changes (color modifications) concurrent
+            # with position_changes, the tile at the agent's new position likely
+            # caused the state change
+            if state_changes and self._estimated_position:
+                if game_key not in self._modifier_map:
+                    self._modifier_map[game_key] = {}
+                if game_key not in self._known_modifiers:
+                    self._known_modifiers[game_key] = []
+
+                pos = self._estimated_position
+                if pos not in self._modifier_map[game_key]:
+                    self._modifier_map[game_key][pos] = []
+
+                self._modifier_map[game_key][pos].append({
+                    'state_changes': state_changes,
+                    'action': action,
+                })
+
+                # After 2+ observations at same position, mark as confirmed modifier
+                if len(self._modifier_map[game_key][pos]) >= 1:
+                    if pos not in self._known_modifiers[game_key]:
+                        self._known_modifiers[game_key].append(pos)
+                        self._property_changes_detected[game_key] = \
+                            self._property_changes_detected.get(game_key, 0) + 1
+
+        except Exception:
+            pass
+
+    def _compute_change_regions(
+        self, frame_before: Any, frame_after: Any
+    ) -> List[Dict[str, Any]]:
+        """Analyze frame diff to separate position changes from state changes."""
+        changes: List[Dict[str, Any]] = []
+        try:
+            disappeared: Dict[int, List[Tuple[int, int]]] = {}  # color -> positions
+            appeared: Dict[int, List[Tuple[int, int]]] = {}     # color -> positions
+            color_changed: List[Tuple[int, int, int, int]] = []  # (x, y, old, new)
+
+            if isinstance(frame_before, list):
+                h = min(len(frame_before), len(frame_after))
+                for y in range(h):
+                    w = min(len(frame_before[y]), len(frame_after[y]))
+                    for x in range(w):
+                        old = int(frame_before[y][x]) if hasattr(frame_before[y][x], '__int__') else frame_before[y][x]
+                        new = int(frame_after[y][x]) if hasattr(frame_after[y][x], '__int__') else frame_after[y][x]
+                        if old != new:
+                            if old != 0 and new == 0:
+                                disappeared.setdefault(old, []).append((x, y))
+                            elif old == 0 and new != 0:
+                                appeared.setdefault(new, []).append((x, y))
+                            elif old != 0 and new != 0:
+                                color_changed.append((x, y, old, new))
+            else:
+                import numpy as np
+                fb, fa = np.array(frame_before), np.array(frame_after)
+                diff_mask = fb != fa
+                ys, xs = np.where(diff_mask)
+                for yi, xi in zip(ys, xs):
+                    old, new = int(fb[yi, xi]), int(fa[yi, xi])
+                    if old != 0 and new == 0:
+                        disappeared.setdefault(old, []).append((int(xi), int(yi)))
+                    elif old == 0 and new != 0:
+                        appeared.setdefault(new, []).append((int(xi), int(yi)))
+                    elif old != 0 and new != 0:
+                        color_changed.append((int(xi), int(yi), old, new))
+
+            # Classify: same-color disappeared+appeared = movement
+            for color in set(disappeared.keys()) & set(appeared.keys()):
+                d_pts = disappeared[color]
+                a_pts = appeared[color]
+                if d_pts and a_pts:
+                    d_cx = sum(p[0] for p in d_pts) // len(d_pts)
+                    d_cy = sum(p[1] for p in d_pts) // len(d_pts)
+                    a_cx = sum(p[0] for p in a_pts) // len(a_pts)
+                    a_cy = sum(p[1] for p in a_pts) // len(a_pts)
+                    changes.append({
+                        'type': 'moved',
+                        'color': color,
+                        'old_pos': (d_cx, d_cy),
+                        'new_pos': (a_cx, a_cy),
+                    })
+
+            # Color changes at same position = state modification
+            if color_changed:
+                changes.append({
+                    'type': 'color_changed',
+                    'positions': [(x, y) for x, y, _, _ in color_changed],
+                    'transitions': [(old, new) for _, _, old, new in color_changed],
+                    'count': len(color_changed),
+                })
+
+        except Exception:
+            pass
+        return changes
+
+
+class SpatialMapRung(DecisionRung):
+    """Build and use a spatial map for pathfinding - EXPLOITATION
+
+    For maze/navigation games like LS20:
+    1. Build a map of explored positions (open/wall/unknown)
+    2. Track which positions have been visited
+    3. Use BFS pathfinding to route toward unexplored regions or targets
+    4. Avoid known walls and dead-ends
+
+    ROOT CAUSE ADDRESSED: LS20 agents random-walk through mazes with 96%
+    wall-hit rate. A spatial map enables efficient navigation.
+    """
+    name = "spatial_map"
+    category = "exploitation"
+    default_priority = 31
+    confidence_threshold = 0.4
+
+    # Action to direction mapping (standard ARC grid)
+    ACTION_DELTAS = {
+        'ACTION1': (0, -1),   # Up
+        'ACTION2': (0, 1),    # Down
+        'ACTION3': (-1, 0),   # Left
+        'ACTION4': (1, 0),    # Right
+    }
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # game_key -> {(x, y) -> 'open'|'wall'|'visited'|'modifier'}
+        self._maps: Dict[str, Dict[Tuple[int, int], str]] = {}
+        # Estimated agent position
+        self._position: Dict[str, Tuple[int, int]] = {}  # game_key -> (x, y)
+        # Path queue: game_key -> list of actions to follow
+        self._planned_path: Dict[str, List[str]] = {}
+        # Frontier: unexplored positions adjacent to visited positions
+        self._frontier: Dict[str, Set[Tuple[int, int]]] = {}
+        # Track consecutive no-change actions to detect walls
+        self._last_action_moved: Dict[str, bool] = {}
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        available = context.get('available_actions', [])
+        has_directional = any(
+            (a in [1, 2, 3, 4] if isinstance(a, int) else a in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'])
+            for a in available
+        )
+        if not has_directional:
+            return RungResult()
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # Initialize map if needed
+        if game_key not in self._maps:
+            self._maps[game_key] = {}
+            self._frontier[game_key] = set()
+
+        # If we have a planned path, follow it
+        planned = self._planned_path.get(game_key, [])
+        if planned:
+            next_action = planned[0]
+            if is_action_available(next_action, context):
+                self._planned_path[game_key] = planned[1:]
+                return RungResult(
+                    action=next_action,
+                    confidence=0.50,
+                    reason=f"Following planned path ({len(planned)} steps remaining)",
+                    metadata={'source': 'spatial_map_path'}
+                )
+
+        pos = self._position.get(game_key)
+        if pos is None:
+            return RungResult()
+
+        spatial_map = self._maps[game_key]
+
+        # Strategy: BFS to nearest frontier (unexplored) position
+        frontier = self._frontier.get(game_key, set())
+        if frontier:
+            path = self._bfs_to_nearest(pos, frontier, spatial_map)
+            if path and len(path) > 0:
+                self._planned_path[game_key] = path[1:]  # Save rest for later
+                first_action = path[0]
+                if is_action_available(first_action, context):
+                    return RungResult(
+                        action=first_action,
+                        confidence=0.50,
+                        reason=f"Pathfinding to frontier (path length {len(path)})",
+                        metadata={
+                            'source': 'spatial_map_bfs',
+                            'path_length': len(path),
+                            'map_size': len(spatial_map),
+                            'frontier_size': len(frontier),
+                        }
+                    )
+
+        # No frontier or path found — explore randomly among non-wall directions
+        safe_actions = []
+        for action, (dx, dy) in self.ACTION_DELTAS.items():
+            if not is_action_available(action, context):
+                continue
+            neighbor = (pos[0] + dx, pos[1] + dy)
+            if spatial_map.get(neighbor) != 'wall':
+                safe_actions.append(action)
+
+        if safe_actions:
+            chosen = random.choice(safe_actions)
+            return RungResult(
+                action=chosen,
+                confidence=0.35,
+                reason=f"Exploring non-wall direction (map has {len(spatial_map)} cells)",
+                metadata={'source': 'spatial_map_explore'}
+            )
+
+        return RungResult()
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Update spatial map based on movement results."""
+        if action not in self.ACTION_DELTAS:
+            return
+        if frame_before is None or frame_after is None:
+            return
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # Detect if movement occurred
+        frame_changed = False
+        try:
+            if isinstance(frame_before, list) and isinstance(frame_after, list):
+                frame_changed = frame_before != frame_after
+            else:
+                import numpy as np
+                frame_changed = not np.array_equal(frame_before, frame_after)
+        except Exception:
+            pass
+
+        if game_key not in self._maps:
+            self._maps[game_key] = {}
+        if game_key not in self._frontier:
+            self._frontier[game_key] = set()
+
+        dx, dy = self.ACTION_DELTAS[action]
+        current_pos = self._position.get(game_key)
+
+        if current_pos is None:
+            # Initialize position at center-ish
+            current_pos = (32, 32)
+            self._position[game_key] = current_pos
+            self._maps[game_key][current_pos] = 'visited'
+
+        target_pos = (current_pos[0] + dx, current_pos[1] + dy)
+
+        if frame_changed:
+            # Movement succeeded — target is open
+            self._maps[game_key][target_pos] = 'visited'
+            self._position[game_key] = target_pos
+            self._last_action_moved[game_key] = True
+
+            # Remove from frontier
+            self._frontier[game_key].discard(target_pos)
+
+            # Add new neighbors to frontier
+            for adx, ady in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+                neighbor = (target_pos[0] + adx, target_pos[1] + ady)
+                if neighbor not in self._maps[game_key]:
+                    self._frontier[game_key].add(neighbor)
+
+            # Invalidate planned path if we took an unplanned detour
+            planned = self._planned_path.get(game_key, [])
+            if planned and planned[0] != action:
+                self._planned_path[game_key] = []
+        else:
+            # Movement failed — target is a wall
+            self._maps[game_key][target_pos] = 'wall'
+            self._last_action_moved[game_key] = False
+            self._frontier[game_key].discard(target_pos)
+
+    def _bfs_to_nearest(
+        self,
+        start: Tuple[int, int],
+        targets: Set[Tuple[int, int]],
+        spatial_map: Dict[Tuple[int, int], str]
+    ) -> List[str]:
+        """BFS pathfinding from start to nearest target, avoiding walls."""
+        from collections import deque
+
+        queue: deque = deque()
+        queue.append((start, []))
+        visited: Set[Tuple[int, int]] = {start}
+
+        # Limit search to prevent hanging
+        max_iterations = 2000
+
+        for _ in range(max_iterations):
+            if not queue:
+                break
+
+            pos, path = queue.popleft()
+
+            if pos in targets:
+                return path
+
+            for action, (dx, dy) in self.ACTION_DELTAS.items():
+                neighbor = (pos[0] + dx, pos[1] + dy)
+                if neighbor in visited:
+                    continue
+                if spatial_map.get(neighbor) == 'wall':
+                    continue
+
+                visited.add(neighbor)
+                queue.append((neighbor, path + [action]))
+
+        return []  # No path found
+
+
+class ConstraintSatisfactionRung(DecisionRung):
+    """Solve constraint satisfaction puzzles using learned causal maps - EXPLOITATION
+
+    For Lights Out-style games like FT09:
+    1. Read the causal map built by CausalClickMappingRung
+    2. Read the current grid state and target state
+    3. Solve: find a set of clicks that transforms current -> target
+    4. Use greedy algorithm: each click should reduce total error
+
+    The key insight for Lights Out puzzles: each click toggles a known set
+    of neighbors through a color cycle. The puzzle is solvable by working
+    backwards from the goal state.
+
+    ROOT CAUSE ADDRESSED: FT09 requires simultaneous constraint satisfaction.
+    CausalClickMappingRung learns individual click effects, but doesn't
+    combine them into a solution plan. This rung does the planning.
+    """
+    name = "constraint_satisfaction"
+    category = "exploitation"
+    default_priority = 30
+    confidence_threshold = 0.5
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # game_key -> planned click sequence
+        self._planned_clicks: Dict[str, List[Tuple[int, int]]] = {}
+        # game_key -> learned effect kernels {(click_x, click_y) -> [(cx, cy, old, new)]}
+        self._effect_kernels: Dict[str, Dict[Tuple[int, int], List[Tuple[int, int, int, int]]]] = {}
+        # Track: for this game, how many colors cycle? (e.g., [9, 8] = 2-cycle)
+        self._color_cycles: Dict[str, Dict[int, List[int]]] = {}
+        # Attempts at solving
+        self._solve_attempts: Dict[str, int] = {}
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        available = context.get('available_actions', [])
+        if 6 not in available and 'ACTION6' not in available:
+            return RungResult()
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # Check if we have a planned click sequence
+        planned = self._planned_clicks.get(game_key, [])
+        if planned:
+            next_click = planned[0]
+            self._planned_clicks[game_key] = planned[1:]
+            return RungResult(
+                action='ACTION6',
+                confidence=0.65,
+                reason=f"Constraint solver: planned click at {next_click} ({len(planned)-1} remaining)",
+                metadata={
+                    'x': next_click[0],
+                    'y': next_click[1],
+                    'source': 'constraint_satisfaction',
+                }
+            )
+
+        # Need causal map to plan — check if any CausalClickMappingRung
+        # has built one (it's stored as instance state, accessible via the
+        # rung system's shared rungs)
+        kernels = self._effect_kernels.get(game_key, {})
+        if len(kernels) < 3:
+            # Not enough causal data yet to solve
+            return RungResult()
+
+        # Get current frame
+        frame = getattr(game_state, 'frame', None)
+        if frame is None:
+            return RungResult()
+
+        # Try lookahead solver first (better solutions via forward simulation),
+        # then fall back to greedy if lookahead finds nothing
+        solution = self._lookahead_solve(frame, kernels, game_key, depth=3)
+        solver_name = 'lookahead'
+        if not solution:
+            solution = self._greedy_solve(frame, kernels, game_key)
+            solver_name = 'greedy'
+
+        if solution:
+            self._planned_clicks[game_key] = solution[1:]
+            first = solution[0]
+            self._solve_attempts[game_key] = self._solve_attempts.get(game_key, 0) + 1
+            return RungResult(
+                action='ACTION6',
+                confidence=0.65 if solver_name == 'lookahead' else 0.60,
+                reason=f"Constraint solver ({solver_name}): {len(solution)}-click solution, starting at {first}",
+                metadata={
+                    'x': first[0],
+                    'y': first[1],
+                    'solution_length': len(solution),
+                    'source': f'constraint_{solver_name}',
+                }
+            )
+
+        return RungResult()
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Learn effect kernels from click outcomes (shared with CausalClickMappingRung)."""
+        if action != 'ACTION6':
+            return
+        if frame_before is None or frame_after is None:
+            return
+
+        click_x = action_data.get('x', 0)
+        click_y = action_data.get('y', 0)
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        changes: List[Tuple[int, int, int, int]] = []
+        try:
+            if isinstance(frame_before, list) and isinstance(frame_after, list):
+                for y in range(min(len(frame_before), len(frame_after))):
+                    for x in range(min(len(frame_before[y]), len(frame_after[y]))):
+                        old = int(frame_before[y][x]) if hasattr(frame_before[y][x], '__int__') else frame_before[y][x]
+                        new = int(frame_after[y][x]) if hasattr(frame_after[y][x], '__int__') else frame_after[y][x]
+                        if old != new:
+                            changes.append((x, y, old, new))
+            else:
+                import numpy as np
+                diff = np.array(frame_before) != np.array(frame_after)
+                ys, xs = np.where(diff)
+                for yi, xi in zip(ys, xs):
+                    changes.append((
+                        int(xi), int(yi),
+                        int(frame_before[yi][xi]),
+                        int(frame_after[yi][xi])
+                    ))
+        except Exception:
+            return
+
+        if not changes:
+            return
+
+        if game_key not in self._effect_kernels:
+            self._effect_kernels[game_key] = {}
+        self._effect_kernels[game_key][(click_x, click_y)] = changes
+
+        # Learn color cycles
+        if game_key not in self._color_cycles:
+            self._color_cycles[game_key] = {}
+        for _, _, old_color, new_color in changes:
+            if old_color not in self._color_cycles[game_key]:
+                self._color_cycles[game_key][old_color] = []
+            cycle = self._color_cycles[game_key][old_color]
+            if new_color not in cycle:
+                cycle.append(new_color)
+
+    def _lookahead_solve(
+        self,
+        frame: List[List[int]],
+        kernels: Dict[Tuple[int, int], List[Tuple[int, int, int, int]]],
+        game_key: str,
+        depth: int = 3
+    ) -> List[Tuple[int, int]]:
+        """Lookahead solver: simulate N-step click sequences via DFS.
+
+        Instead of greedily picking the single best next click, this explores
+        all possible sequences up to `depth` clicks and returns the one that
+        minimizes total error. This is the 'lookahead planning' architectural
+        primitive - forward-simulating future states before committing.
+
+        Complexity: O(K^depth) where K = number of click positions.
+        Capped at depth=3 with max 15 click positions to stay under 3375 evals.
+        """
+        try:
+            # Extract current state
+            current: Dict[Tuple[int, int], int] = {}
+            for y, row in enumerate(frame):
+                for x, pixel in enumerate(row):
+                    val = int(pixel) if hasattr(pixel, '__int__') else pixel
+                    if val != 0:
+                        current[(x, y)] = val
+
+            if not current:
+                return []
+
+            # Determine target color
+            color_counts: Dict[int, int] = {}
+            for color in current.values():
+                color_counts[color] = color_counts.get(color, 0) + 1
+            if not color_counts:
+                return []
+            target_color = max(color_counts, key=color_counts.get)  # type: ignore[arg-type]
+
+            initial_error = sum(1 for c in current.values() if c != target_color)
+            if initial_error == 0:
+                return []
+
+            # Limit click positions to most impactful (sort by effect count)
+            sorted_clicks = sorted(
+                kernels.items(), key=lambda kv: len(kv[1]), reverse=True
+            )[:15]
+            click_positions = [pos for pos, _ in sorted_clicks]
+
+            # DFS with pruning
+            best_sequence: List[Tuple[int, int]] = []
+            best_remaining_error = initial_error
+
+            def _simulate_click(
+                state: Dict[Tuple[int, int], int],
+                click_pos: Tuple[int, int]
+            ) -> Dict[Tuple[int, int], int]:
+                """Apply click effects to simulated state."""
+                new_state = dict(state)
+                effects = kernels.get(click_pos, [])
+                for cx, cy, _old, new in effects:
+                    if (cx, cy) in new_state:
+                        new_state[(cx, cy)] = new
+                return new_state
+
+            def _dfs(
+                state: Dict[Tuple[int, int], int],
+                sequence: List[Tuple[int, int]],
+                current_depth: int
+            ) -> None:
+                nonlocal best_sequence, best_remaining_error
+
+                error = sum(1 for c in state.values() if c != target_color)
+
+                if error < best_remaining_error:
+                    best_remaining_error = error
+                    best_sequence = list(sequence)
+
+                if error == 0 or current_depth >= depth:
+                    return
+
+                for click_pos in click_positions:
+                    new_state = _simulate_click(state, click_pos)
+                    new_error = sum(1 for c in new_state.values() if c != target_color)
+                    # Prune: only explore if this click improves error
+                    if new_error < error:
+                        _dfs(new_state, sequence + [click_pos], current_depth + 1)
+
+            _dfs(current, [], 0)
+
+            if best_sequence and best_remaining_error < initial_error:
+                return best_sequence
+
+        except Exception:
+            pass
+
+        return []
+
+    def _greedy_solve(
+        self,
+        frame: List[List[int]],
+        kernels: Dict[Tuple[int, int], List[Tuple[int, int, int, int]]],
+        game_key: str
+    ) -> List[Tuple[int, int]]:
+        """Greedy solver: pick clicks that reduce error most.
+
+        For Lights Out: the goal is typically all cells the same color (or
+        matching a reference pattern). We greedily pick the click that
+        reduces the most differences from the target.
+        """
+        try:
+            # Extract current state as flat dict: (x,y) -> color
+            current: Dict[Tuple[int, int], int] = {}
+            for y, row in enumerate(frame):
+                for x, pixel in enumerate(row):
+                    val = int(pixel) if hasattr(pixel, '__int__') else pixel
+                    if val != 0:
+                        current[(x, y)] = val
+
+            if not current:
+                return []
+
+            # Determine target: most common non-zero color = likely "solved" state
+            # (For Lights Out, winning = all same color)
+            color_counts: Dict[int, int] = {}
+            for color in current.values():
+                color_counts[color] = color_counts.get(color, 0) + 1
+            if not color_counts:
+                return []
+            target_color = max(color_counts, key=color_counts.get)  # type: ignore[arg-type]
+
+            # Count how many cells differ from target
+            error_positions = {pos for pos, c in current.items() if c != target_color}
+            if not error_positions:
+                return []  # Already solved
+
+            # Build relative kernel: for each click position, what's the relative
+            # offset pattern of affected cells?
+            solution: List[Tuple[int, int]] = []
+            max_clicks = min(20, len(kernels) * 3)  # Safety limit
+
+            # Copy current state for simulation
+            sim_state = dict(current)
+
+            for _ in range(max_clicks):
+                # Find click that resolves the most errors
+                best_click = None
+                best_improvement = 0
+
+                for click_pos, effects in kernels.items():
+                    improvement = 0
+                    for cx, cy, old, new in effects:
+                        if (cx, cy) in sim_state:
+                            was_wrong = sim_state[(cx, cy)] != target_color
+                            would_be = new  # Predict next color
+                            would_be_right = would_be == target_color
+                            if was_wrong and would_be_right:
+                                improvement += 1
+                            elif not was_wrong and not would_be_right:
+                                improvement -= 1
+
+                    if improvement > best_improvement:
+                        best_improvement = improvement
+                        best_click = click_pos
+
+                if best_click is None or best_improvement <= 0:
+                    break
+
+                # Apply click to simulated state
+                effects = kernels[best_click]
+                for cx, cy, old, new in effects:
+                    if (cx, cy) in sim_state:
+                        sim_state[(cx, cy)] = new
+
+                solution.append(best_click)
+
+                # Check if solved
+                remaining_errors = sum(1 for c in sim_state.values() if c != target_color)
+                if remaining_errors == 0:
+                    break
+
+            return solution if solution else []
+
+        except Exception:
+            return []
+
+
+class DestructiveActionDetectionRung(DecisionRung):
+    """Detect and penalize irreversible/destructive actions - FILTER
+
+    For games like VC33 where:
+    - Platform shrinking is one-directional (irreversible)
+    - Random clicking gradually destroys the level state
+    - Some actions reduce the number of interactive objects
+
+    This rung:
+    1. Track "entropy" of the game state over time
+    2. Detect when actions DECREASE the number of objects or increase uniformity
+    3. Penalize actions that historically produce entropy increase
+    4. Suggest the system be more conservative with clicks
+
+    ROOT CAUSE ADDRESSED: VC33 random clicking gradually destroys level
+    state without recovery. The agent doesn't know which clicks are
+    destructive vs productive.
+    """
+    name = "destructive_action_detection"
+    category = "filter"
+    default_priority = 16
+    confidence_threshold = 0.3
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # Track state complexity over time: game_key -> [complexity_score, ...]
+        self._complexity_history: Dict[str, List[float]] = {}
+        # Track which click positions caused complexity decrease
+        self._destructive_positions: Dict[str, Set[Tuple[int, int]]] = {}
+        # Count of destructive actions detected
+        self._destruction_count: Dict[str, int] = {}
+        # Total clicks tracked
+        self._total_clicks: Dict[str, int] = {}
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        available = context.get('available_actions', [])
+        if 6 not in available and 'ACTION6' not in available:
+            return RungResult()
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        total = self._total_clicks.get(game_key, 0)
+        destructive = self._destruction_count.get(game_key, 0)
+
+        if total < 5:
+            return RungResult()  # Not enough data
+
+        destruction_rate = destructive / max(total, 1)
+        destructive_positions = self._destructive_positions.get(game_key, set())
+
+        # If destruction rate is high, apply penalty weights
+        if destruction_rate > 0.3:
+            # Reduce confidence in all click actions
+            weights: Dict[str, float] = {}
+            for a in available:
+                action_name = f'ACTION{a}' if isinstance(a, int) else a
+                if action_name == 'ACTION6':
+                    # Penalize clicks based on destruction rate
+                    weights[action_name] = max(0.2, 1.0 - destruction_rate)
+                else:
+                    weights[action_name] = 1.0
+
+            return RungResult(
+                weights=weights,
+                reason=f"Destructive action detection: {destruction_rate:.0%} of clicks are destructive ({destructive}/{total})",
+                metadata={
+                    'destruction_rate': destruction_rate,
+                    'destructive_positions': len(destructive_positions),
+                }
+            )
+
+        return RungResult()
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Track whether clicks increase or decrease state complexity."""
+        if action != 'ACTION6':
+            return
+        if frame_before is None or frame_after is None:
+            return
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        click_x = action_data.get('x', 0)
+        click_y = action_data.get('y', 0)
+
+        self._total_clicks[game_key] = self._total_clicks.get(game_key, 0) + 1
+
+        # Measure complexity before and after
+        complexity_before = self._measure_complexity(frame_before)
+        complexity_after = self._measure_complexity(frame_after)
+
+        if game_key not in self._complexity_history:
+            self._complexity_history[game_key] = []
+        self._complexity_history[game_key].append(complexity_after)
+
+        # Detect destruction: complexity decreased significantly
+        if complexity_before > 0 and complexity_after < complexity_before * 0.9:
+            if game_key not in self._destructive_positions:
+                self._destructive_positions[game_key] = set()
+            self._destructive_positions[game_key].add((click_x // 4, click_y // 4))
+            self._destruction_count[game_key] = self._destruction_count.get(game_key, 0) + 1
+
+    @staticmethod
+    def _measure_complexity(frame: Any) -> float:
+        """Measure frame complexity as number of distinct non-zero colored regions."""
+        try:
+            colors: Set[int] = set()
+            non_zero = 0
+            if isinstance(frame, list):
+                for row in frame:
+                    for pixel in row:
+                        val = int(pixel) if hasattr(pixel, '__int__') else pixel
+                        if val != 0:
+                            colors.add(val)
+                            non_zero += 1
+            else:
+                import numpy as np
+                arr = np.array(frame)
+                non_zero_mask = arr != 0
+                colors = set(int(v) for v in np.unique(arr[non_zero_mask]))
+                non_zero = int(np.sum(non_zero_mask))
+
+            return len(colors) * 10 + non_zero * 0.01
+        except Exception:
+            return 0.0
+
+
+class GoalRelationshipModelingRung(DecisionRung):
+    """Model spatial relationships between game objects for win conditions - HYPOTHESIS
+
+    For puzzle games like VC33 where the win condition involves spatial
+    relationships between object types:
+    - Passenger blocks (HQB) must be on correct conveyor tracks
+    - Tracks are identified by color markers (fZK)
+    - Colors must MATCH between passenger and marker
+
+    This rung:
+    1. Detect object "groups" by color in the frame
+    2. Track which groups change position when actions are taken
+    3. Infer goal relationships: "object A needs to be near object B"
+    4. Suggest actions that move objects toward their goal positions
+    5. Learn from score changes which relationships matter
+
+    ROOT CAUSE ADDRESSED: VC33's win condition requires understanding
+    spatial relationships between multiple sprite types simultaneously.
+    """
+    name = "goal_relationship_modeling"
+    category = "hypothesis"
+    default_priority = 29
+    confidence_threshold = 0.4
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # Track object positions over time: game_key -> color -> [(x, y, step)]
+        self._object_trajectories: Dict[str, Dict[int, List[Tuple[int, int, int]]]] = {}
+        # Track which objects moved in response to clicks
+        self._click_object_response: Dict[str, Dict[Tuple[int, int], Set[int]]] = {}
+        # Hypothesized goal pairs: (movable_color, target_color)
+        self._goal_pairs: Dict[str, List[Tuple[int, int]]] = {}
+        # Step counter
+        self._step: Dict[str, int] = {}
+        # Score at each step
+        self._score_history: Dict[str, List[float]] = {}
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        available = context.get('available_actions', [])
+        if 6 not in available and 'ACTION6' not in available:
+            return RungResult()
+
+        frame = getattr(game_state, 'frame', None)
+        if frame is None:
+            return RungResult()
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # Need some click response data first
+        responses = self._click_object_response.get(game_key, {})
+        if len(responses) < 3:
+            return RungResult()
+
+        # Find which click positions move which objects
+        # Strategy: click positions that move objects TOWARD color-matched targets
+        goal_pairs = self._goal_pairs.get(game_key, [])
+        if not goal_pairs:
+            # Try to infer goal pairs from color matching
+            objects = self._detect_color_groups(frame)
+            if len(objects) >= 4:
+                # Hypothesis: pairs of same-ish color groups are related
+                colors = sorted(objects.keys())
+                for i, c1 in enumerate(colors):
+                    for c2 in colors[i+1:]:
+                        # Colors within small range might be related
+                        if abs(c1 - c2) <= 2 and c1 != c2:
+                            if game_key not in self._goal_pairs:
+                                self._goal_pairs[game_key] = []
+                            self._goal_pairs[game_key].append((c1, c2))
+
+        # Suggest clicking positions that historically moved objects
+        movable_clicks = []
+        for click_pos, moved_colors in responses.items():
+            if moved_colors:  # This click moved something
+                movable_clicks.append((click_pos, len(moved_colors)))
+
+        if movable_clicks:
+            # Pick click that moves the most objects
+            movable_clicks.sort(key=lambda x: x[1], reverse=True)
+            best_click = movable_clicks[0][0]
+            return RungResult(
+                action='ACTION6',
+                confidence=0.40,
+                reason=f"Goal modeling: click at {best_click} moves {movable_clicks[0][1]} object(s)",
+                metadata={
+                    'x': best_click[0],
+                    'y': best_click[1],
+                    'source': 'goal_relationship_modeling',
+                    'moved_objects': movable_clicks[0][1],
+                }
+            )
+
+        return RungResult()
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Track object movement in response to actions."""
+        if action != 'ACTION6':
+            return
+        if frame_before is None or frame_after is None:
+            return
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        click_x = action_data.get('x', 0)
+        click_y = action_data.get('y', 0)
+        click_pos = (click_x, click_y)
+
+        self._step[game_key] = self._step.get(game_key, 0) + 1
+        step = self._step[game_key]
+
+        # Detect which objects moved
+        objects_before = self._detect_color_groups(frame_before)
+        objects_after = self._detect_color_groups(frame_after)
+
+        moved_colors: Set[int] = set()
+        for color in set(objects_before.keys()) & set(objects_after.keys()):
+            before_center = objects_before[color]
+            after_center = objects_after[color]
+            # Check if center moved significantly (>2 pixels)
+            dist = abs(before_center[0] - after_center[0]) + abs(before_center[1] - after_center[1])
+            if dist > 2:
+                moved_colors.add(color)
+
+                # Record trajectory
+                if game_key not in self._object_trajectories:
+                    self._object_trajectories[game_key] = {}
+                if color not in self._object_trajectories[game_key]:
+                    self._object_trajectories[game_key][color] = []
+                self._object_trajectories[game_key][color].append(
+                    (after_center[0], after_center[1], step)
+                )
+
+        # Record which click moved which objects
+        if game_key not in self._click_object_response:
+            self._click_object_response[game_key] = {}
+        self._click_object_response[game_key][click_pos] = moved_colors
+
+    @staticmethod
+    def _detect_color_groups(frame: Any) -> Dict[int, Tuple[int, int]]:
+        """Detect color groups and their centroids."""
+        groups: Dict[int, List[Tuple[int, int]]] = {}
+        try:
+            if isinstance(frame, list):
+                for y, row in enumerate(frame):
+                    for x, pixel in enumerate(row):
+                        val = int(pixel) if hasattr(pixel, '__int__') else pixel
+                        if val != 0:
+                            groups.setdefault(val, []).append((x, y))
+            else:
+                import numpy as np
+                arr = np.array(frame)
+                for color in np.unique(arr):
+                    if color == 0:
+                        continue
+                    ys, xs = np.where(arr == color)
+                    groups[int(color)] = list(zip(xs.tolist(), ys.tolist()))
+        except Exception:
+            return {}
+
+        # Filter to reasonable-sized groups and compute centroids
+        centroids: Dict[int, Tuple[int, int]] = {}
+        for color, positions in groups.items():
+            size = len(positions)
+            if 2 <= size <= 500:
+                cx = sum(p[0] for p in positions) // size
+                cy = sum(p[1] for p in positions) // size
+                centroids[color] = (cx, cy)
+
+        return centroids
+
+
+class BudgetAwarePlanningRung(DecisionRung):
+    """Adjust behavior based on remaining action budget - FILTER
+
+    Cross-cutting fix for all games but especially LS20 (42 moves/level):
+    1. Early game (0-30% budget): Encourage exploration, tolerate failures
+    2. Mid game (30-70% budget): Balance explore/exploit
+    3. Late game (70-100% budget): Maximize exploitation, minimize waste
+    4. Critical (>90% budget): Emergency mode - only proven actions
+
+    Also tracks "progress per action" efficiency to detect when the agent
+    is wasting its budget on unproductive actions.
+
+    ROOT CAUSE ADDRESSED: LS20's timer pressure kills exploration.
+    ~42 moves per level means every action must count. The system needs
+    to shift from exploration to exploitation as budget depletes.
+    """
+    name = "budget_aware_planning"
+    category = "filter"
+    default_priority = 6
+    confidence_threshold = 0.2  # Low threshold - mostly provides weights
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # Track productive vs wasted actions
+        self._productive_actions: Dict[str, int] = {}
+        self._total_actions: Dict[str, int] = {}
+
+    def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
+        budget_used = context.get('budget_used_percent', 0)
+        action_count = context.get('action_count', 0)
+        action_budget = context.get('action_budget', 400)
+
+        if action_budget <= 0:
+            return RungResult()
+
+        remaining_pct = 1.0 - budget_used
+
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        # Calculate efficiency
+        productive = self._productive_actions.get(game_key, 0)
+        total = self._total_actions.get(game_key, 0)
+        efficiency = productive / max(total, 1)
+
+        # Phase-based behavior modification
+        if remaining_pct < 0.10:
+            # CRITICAL: Less than 10% budget remaining
+            # Only allow actions with known positive outcomes
+            return RungResult(
+                confidence=0.3,
+                reason=f"CRITICAL budget: {remaining_pct:.0%} remaining, {action_count}/{action_budget} used. Efficiency: {efficiency:.0%}",
+                metadata={
+                    'budget_phase': 'critical',
+                    'budget_remaining_pct': remaining_pct,
+                    'efficiency': efficiency,
+                    'confidence_boost': 0.3,  # Boost confidence of exploitation rungs
+                }
+            )
+        elif remaining_pct < 0.30:
+            # LATE: Shift strongly toward exploitation
+            weights: Dict[str, float] = {}
+            available = context.get('available_actions', [])
+            # Don't penalize specific actions, but inject metadata for other rungs
+            return RungResult(
+                reason=f"Late budget: {remaining_pct:.0%} remaining. Efficiency: {efficiency:.0%}",
+                metadata={
+                    'budget_phase': 'late',
+                    'budget_remaining_pct': remaining_pct,
+                    'efficiency': efficiency,
+                    'exploration_penalty': 0.5,  # Downstream rungs can read this
+                }
+            )
+        elif remaining_pct < 0.70:
+            # MID: Balanced
+            return RungResult(
+                reason=f"Mid budget: {remaining_pct:.0%} remaining. Efficiency: {efficiency:.0%}",
+                metadata={
+                    'budget_phase': 'mid',
+                    'budget_remaining_pct': remaining_pct,
+                    'efficiency': efficiency,
+                }
+            )
+
+        # EARLY: Full exploration allowed
+        return RungResult(
+            metadata={
+                'budget_phase': 'early',
+                'budget_remaining_pct': remaining_pct,
+            }
+        )
+
+    def on_action_complete(
+        self,
+        action: str,
+        action_data: Dict[str, Any],
+        frame_before: Any,
+        frame_after: Any,
+        context: Dict[str, Any]
+    ) -> None:
+        """Track action productivity."""
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        self._total_actions[game_key] = self._total_actions.get(game_key, 0) + 1
+
+        # Count as productive if frame changed
+        frame_changed = False
+        try:
+            if frame_before is not None and frame_after is not None:
+                if isinstance(frame_before, list) and isinstance(frame_after, list):
+                    frame_changed = frame_before != frame_after
+                else:
+                    import numpy as np
+                    frame_changed = not np.array_equal(frame_before, frame_after)
+        except Exception:
+            pass
+
+        if frame_changed:
+            self._productive_actions[game_key] = self._productive_actions.get(game_key, 0) + 1
 
 
 class ControlTrackerRung(DecisionRung):
@@ -5941,6 +8249,8 @@ ORDERING_PRESETS = {
         ('palette_detection', 3),  # Two-stage: extract objects + detect palette FIRST
         ('self_trust_boost', 4),  # Manage wA based on frontier/replay context
         ('control_tracker', 5),  # "I am this object" - self-model
+        ('budget_aware_planning', 5),  # Budget-phase awareness
+        ('affordance_detection', 6),  # Wire seed affordance primitives
         ('imagination_budget', 6),
         ('breakthrough_budget', 6),
         ('regulatory_signal', 7),
@@ -5988,7 +8298,16 @@ ORDERING_PRESETS = {
         ('network_object_inventory', 62),
         ('action6_object_exploration', 64),  # Use Action6BehaviorEngine for click targets
         ('click_behavior_learning', 65),  # Learn click patterns (collectibles, triggers)
-        ('near_miss_analyzer', 66),
+        ('causal_click_mapping', 66),     # FT09/VC33: Click->effect causal models
+        ('constraint_satisfaction', 66),  # FT09: Lights Out greedy solver
+        ('destructive_action_detection', 66),  # VC33: Penalize irreversible clicks
+        ('goal_relationship_modeling', 67),  # VC33: Passenger->marker goal modeling
+        ('interactable_tile_discovery', 67),  # LS20: Modifier tile discovery
+        ('object_color_targeting', 66),   # FT09/VC33: Target colored objects systematically
+        ('wall_aware_navigation', 67),    # LS20: Penalize wall-hitting directions
+        ('controlled_movement_planning', 67),  # LS20: ACTION->direction mapping
+        ('spatial_map', 68),  # LS20: BFS pathfinding
+        ('near_miss_analyzer', 68),
         ('completion_prediction', 68),
         ('frontier_topology', 70),
         ('map_intel_collision', 72),
@@ -6033,19 +8352,23 @@ ORDERING_PRESETS = {
         ('frame_interpretation', 5),  # Context setting for dramatic frame changes
 
         # ORIENTATION - Understanding the world (Priority 5-20)
+        ('budget_aware_planning', 6),  # Cross-cutting: budget-phase awareness
         ('imagination_budget', 6),
         ('breakthrough_budget', 7),
+        ('affordance_detection', 8),  # Wire seed affordance primitives
         ('control_tracker', 8),  # "I am this object" - self-model
-        ('regulatory_signal', 9),
-        ('survey', 10),
-        ('network_exploration_stats', 11),
-        ('questioning_engine', 12),
+        ('wall_aware_navigation', 9),  # LS20: Penalize wall-hitting directions
+        ('regulatory_signal', 10),
+        ('survey', 11),
+        ('network_exploration_stats', 12),
+        ('questioning_engine', 13),
         ('exploration_phase', 13),
         ('frustration_detection', 14),
 
         # FILTER - Modify action weights (Priority 15-25)
         ('contextual_failure', 15),   # Context-aware failure avoidance (before death_avoidance)
         ('metacognitive_elimination', 15),  # Penalize globally-eliminated actions
+        ('destructive_action_detection', 16),  # VC33: Penalize irreversible clicks
         ('death_avoidance', 16),
         ('terminal_pattern', 17),
         ('theory_contradiction', 18),  # Filter contradicted actions
@@ -6057,6 +8380,8 @@ ORDERING_PRESETS = {
         ('event_understanding', 23),  # Causal world model
         ('symbolic_tracker', 24),  # Key/lock symbolic matching
         ('assumption_formation', 25), # Form assumptions from observations
+        ('interactable_tile_discovery', 25),  # LS20: Discover gsu/gic/bgt modifier tiles
+        ('goal_relationship_modeling', 26),  # VC33: Color-matched passenger->marker goals
         ('belief_system', 26),  # Belief tracking
         ('hypothesis_system', 27),  # Agent-initiated hypothesis testing
         ('scientific_method', 28),
@@ -6078,7 +8403,12 @@ ORDERING_PRESETS = {
         ('discovery_exploitation', 44),
         ('embedding_matcher', 45),  # Neural frame similarity
         ('spatial_relationship', 46),  # Click effect patterns for puzzles
-        ('embedding_suggestion', 47),
+        ('causal_click_mapping', 46),  # FT09/VC33: Click->effect causal models
+        ('constraint_satisfaction', 46),  # FT09: Lights Out greedy solver
+        ('object_color_targeting', 47),  # FT09/VC33: Target colored objects systematically
+        ('controlled_movement_planning', 47),  # LS20: ACTION->direction mapping
+        ('spatial_map', 47),  # LS20: BFS pathfinding through maze
+        ('embedding_suggestion', 48),
         ('multi_stage_matching', 48),
         ('primitive_suggester', 49),  # Direct primitive-to-action
         ('network_sharing', 50),  # Network control hypotheses
@@ -6180,6 +8510,8 @@ ORDERING_PRESETS = {
         ('palette_detection', 3),  # Extract objects and colors from frame
         ('sparse_grid', 4),        # Efficient spatial representation
         ('visual_analyzer', 5),    # Deep frame analysis
+        ('affordance_detection', 5),  # Wire seed affordance primitives
+        ('budget_aware_planning', 5),  # Budget-phase awareness
 
         # SELF-MODEL - What do I control? What can I select?
         ('control_tracker', 6),    # "I am this object" / "I can select these"
@@ -6187,14 +8519,19 @@ ORDERING_PRESETS = {
 
         # WORLD MODEL - What are the rules of this world?
         ('event_understanding', 8),  # Causal chains: click X -> Y happens
-        ('trigger_sequences', 9),   # Learn trigger/button chains
-        ('click_behavior_learning', 10),  # What do clicks DO in this game?
-        ('belief_system', 11),      # Current beliefs about the world
-        ('symbolic_tracker', 12),   # Key/lock, button/door relationships
+        ('causal_click_mapping', 9),  # Build click->effect causal models
+        ('trigger_sequences', 10),   # Learn trigger/button chains
+        ('click_behavior_learning', 11),  # What do clicks DO in this game?
+        ('object_color_targeting', 12),  # Systematically target colored objects
+        ('constraint_satisfaction', 12),  # Lights Out solver
+        ('destructive_action_detection', 12),  # Detect irreversible clicks
+        ('goal_relationship_modeling', 13),  # Color-matched goal modeling
+        ('belief_system', 13),      # Current beliefs about the world
+        ('symbolic_tracker', 14),   # Key/lock, button/door relationships
 
         # OBJECT TARGETING - Find meaningful click targets
-        ('action6_object_exploration', 13),  # Find clickable objects
-        ('network_object_inventory', 14),    # What objects does network know?
+        ('action6_object_exploration', 15),  # Find clickable objects
+        ('network_object_inventory', 16),    # What objects does network know?
         ('primitive_suggester', 15),         # Primitive-to-action mapping
 
         # HYPOTHESIS - Form theories about unknown objects
@@ -6238,15 +8575,22 @@ ORDERING_PRESETS = {
         ('palette_detection', 3),
         ('sparse_grid', 4),
         ('visual_analyzer', 5),
+        ('affordance_detection', 5),  # Wire seed affordance primitives
+        ('budget_aware_planning', 5),  # Budget-phase awareness
 
         # OBJECT UNDERSTANDING - This is the core for click-only games
         ('action6_object_exploration', 6),  # ELEVATED: Primary action
         ('click_behavior_learning', 7),     # ELEVATED: Learn what clicks do
-        ('trigger_sequences', 8),           # ELEVATED: Button chains
-        ('network_object_inventory', 9),    # What objects exist?
+        ('object_color_targeting', 7),      # Systematically target colored objects
+        ('causal_click_mapping', 8),        # Build click->effect causal models
+        ('constraint_satisfaction', 8),     # FT09: Lights Out greedy solver
+        ('destructive_action_detection', 9),  # VC33: Detect irreversible clicks
+        ('goal_relationship_modeling', 9),  # VC33: Passenger->marker goals
+        ('trigger_sequences', 9),           # ELEVATED: Button chains
+        ('network_object_inventory', 10),   # What objects exist?
 
         # WORLD MODEL - Causality is everything
-        ('event_understanding', 10),  # What causes what?
+        ('event_understanding', 11),  # What causes what?
         ('belief_system', 11),
         ('symbolic_tracker', 12),     # Key/lock relationships
         ('control_tracker', 13),      # What can I select/control?
@@ -6282,19 +8626,30 @@ ORDERING_PRESETS = {
         ('coordinate_oscillation', 2),
         ('palette_detection', 3),  # Two-stage: objects + palette FIRST
         ('self_trust_boost', 4),  # Boost wA on frontier entry
+        ('budget_aware_planning', 4),  # Budget-phase awareness
+        ('affordance_detection', 5),  # Wire seed affordance primitives
         ('frontier_checkpoint', 5),  # Replay best known progress on frontier
         ('survey', 6),
         ('network_exploration_stats', 8),
         ('exploration_phase', 10),
-        ('assumption_formation', 11),  # Form assumptions during exploration
-        ('hypothesis_testing', 12),  # Test assumptions during exploration
-        ('contextual_failure', 13),  # Avoid contextual failures (not global)
+        ('wall_aware_navigation', 11),  # LS20: Learn which directions are blocked
+        ('controlled_movement_planning', 12),  # LS20: Build action->direction maps
+        ('assumption_formation', 13),  # Form assumptions during exploration
+        ('hypothesis_testing', 14),  # Test assumptions during exploration
+        ('contextual_failure', 15),  # Avoid contextual failures (not global)
         ('questioning_engine', 15),
         ('scientific_method', 20),
         ('rule_transfer', 22),  # Apply rules from similar games
         ('action6_object_exploration', 24),  # Use Action6BehaviorEngine for click targets
         ('click_behavior_learning', 25),  # Learn click patterns for ACTION6 games
-        ('grid_exploration', 26),  # Fallback: systematic grid walking
+        ('causal_click_mapping', 26),     # Build click->effect causal models
+        ('constraint_satisfaction', 26),  # FT09: Lights Out greedy solver
+        ('interactable_tile_discovery', 27),  # LS20: Modifier tile discovery
+        ('object_color_targeting', 27),   # Target colored objects systematically
+        ('destructive_action_detection', 27),  # VC33: Irreversible click detection
+        ('goal_relationship_modeling', 28),  # VC33: Passenger->marker goals
+        ('spatial_map', 28),  # LS20: BFS pathfinding
+        ('grid_exploration', 28),  # Fallback: systematic grid walking
         ('metacognitive_elimination', 35),  # Penalize eliminated actions
         ('viral_package_weights', 36),  # Viral package weights
         ('death_avoidance', 40),  # Lower priority on frontier
@@ -6365,6 +8720,21 @@ class DecisionRungSystem:
         'network_object_inventory': NetworkObjectInventoryRung,
         'action6_object_exploration': Action6ObjectExplorationRung,  # Use Action6BehaviorEngine for click targets
         'click_behavior_learning': ClickBehaviorLearningRung,  # Learn click patterns (collectibles, triggers)
+
+        # Long-term solutions for unbeaten games (LS20, FT09, VC33) - Feb 2026
+        'wall_aware_navigation': WallAwareNavigationRung,        # LS20: Stop hitting walls (96% wasted actions)
+        'object_color_targeting': ObjectColorTargetingRung,      # FT09/VC33: Systematically target colored objects
+        'causal_click_mapping': CausalClickMappingRung,          # FT09/VC33: Build click->effect causal models
+        'controlled_movement_planning': ControlledMovementPlanningRung,  # LS20: Learn ACTION->direction mapping
+
+        # Deeper algorithmic fixes for LS20, FT09, VC33 (Feb 2026 Phase 2)
+        'affordance_detection': AffordanceDetectionRung,              # Wire seed affordance primitives into gameplay
+        'interactable_tile_discovery': InteractableTileDiscoveryRung,  # LS20: Learn gsu/gic/bgt modifier tiles
+        'spatial_map': SpatialMapRung,                                # LS20: BFS pathfinding through maze
+        'constraint_satisfaction': ConstraintSatisfactionRung,        # FT09: Lights Out greedy solver
+        'destructive_action_detection': DestructiveActionDetectionRung,  # VC33: Detect irreversible clicks
+        'goal_relationship_modeling': GoalRelationshipModelingRung,   # VC33: Passenger->marker color matching
+        'budget_aware_planning': BudgetAwarePlanningRung,             # Cross-cutting: budget-phase behavior
 
         # Self-model and symbolic reasoning (Feb 2026 wiring)
         'control_tracker': ControlTrackerRung,      # "I am this object" tracking
