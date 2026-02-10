@@ -1483,10 +1483,14 @@ def main():
         args.max_generations = 1
         args.max_actions = 300
 
-    # Log file redirect
+    # Log file redirect - always write to log/ directory (Rule 2 exception for CLI debug)
     log_file_handle = None
     if args.log_file:
-        log_file_handle = open(args.log_file, 'w', encoding='utf-8', buffering=1)
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'log')
+        os.makedirs(log_dir, exist_ok=True)
+        log_filename = os.path.basename(args.log_file)
+        log_path = os.path.join(log_dir, log_filename)
+        log_file_handle = open(log_path, 'w', encoding='utf-8', buffering=1)
         sys.stdout = log_file_handle
         sys.stderr = log_file_handle
         import logging

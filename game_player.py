@@ -177,6 +177,63 @@ class GamePlayer:
             return None
 
     # ------------------------------------------------------------------
+    # Reasoning payload for API recordings
+    # ------------------------------------------------------------------
+
+    def _build_reasoning_payload(
+        self,
+        action: Any,
+        reason: str,
+        agent: Any,
+        game_id: str,
+        actions_taken: int,
+        context: dict,
+    ) -> Dict[str, Any]:
+        """Build reasoning payload to send with each API step.
+
+        This data is included in ARC API recordings so our decision
+        logic is visible when reviewing replays.
+
+        Args:
+            action: The chosen GameAction.
+            reason: Decision reason string from the rung system.
+            agent: The agent playing (has agent_id).
+            game_id: Current game identifier.
+            actions_taken: Number of actions taken so far.
+            context: The full decision context dict.
+
+        Returns:
+            Dict with reasoning metadata for the API.
+        """
+        action_name = action.name if hasattr(action, 'name') else str(action)
+        payload: Dict[str, Any] = {
+            "action": action_name,
+            "reason": (reason[:200] if reason else "unknown"),
+            "agent_id": getattr(agent, 'agent_id', 'unknown'),
+            "game_id": game_id,
+            "step": actions_taken,
+            "level": context.get('current_level', 0),
+            "score": context.get('score', 0.0),
+        }
+
+        # Add rung / decision metadata if available
+        if hasattr(self.decision_system, 'last_decision_metadata'):
+            metadata = self.decision_system.last_decision_metadata or {}
+            rung = metadata.get("rung_name") or metadata.get("rung")
+            if rung:
+                payload["rung"] = str(rung)[:100]
+            confidence = metadata.get("confidence")
+            if confidence is not None:
+                payload["confidence"] = float(confidence)
+
+        # Replay mode flag
+        if context.get('is_replay_mode'):
+            payload["replay_mode"] = True
+            payload["sequence_position"] = context.get('sequence_position', 0)
+
+        return payload
+
+    # ------------------------------------------------------------------
     # Frame / observation utilities
     # ------------------------------------------------------------------
 
@@ -826,10 +883,20 @@ class GamePlayer:
             max_step_retries = 3
             step_retry_delay = 2.0
 
+            # Build reasoning payload for API recording
+            reasoning_payload = self._build_reasoning_payload(
+                action=action,
+                reason=reason if 'reason' in dir() and reason else 'unknown',
+                agent=agent,
+                game_id=game_id,
+                actions_taken=actions_taken,
+                context=context,
+            )
+
             for step_attempt in range(max_step_retries):
                 try:
                     obs_before = last_obs if last_obs else initial_obs
-                    obs = env.step(action, data=action_data)
+                    obs = env.step(action, data=action_data, reasoning=reasoning_payload)
                     if obs is None:
                         if step_attempt < max_step_retries - 1:
                             wait_time = step_retry_delay * (2 ** step_attempt)

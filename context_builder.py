@@ -36,6 +36,13 @@ from arcengine import GameAction, GameState
 from arc_api_adapter import Observation
 from outcome_processor import ActionOutcome, LoopState
 
+# Visual cortex for scene understanding
+try:
+    from engines.perception.visual_cortex import SceneDescription, VisualCortex
+    VISUAL_CORTEX_AVAILABLE = True
+except ImportError:
+    VISUAL_CORTEX_AVAILABLE = False
+
 
 @dataclass
 class AgentConfig:
@@ -147,6 +154,13 @@ class DecisionContext:
     # Event understanding (from OutcomeProcessor's EventDetector)
     recent_events: List[Dict[str, Any]] = field(default_factory=lambda: [])
     frame_delta_count: int = 0
+
+    # =====================================================================
+    # Visual Cortex scene understanding (populated by ContextBuilder)
+    # Full hierarchical visual analysis: panels, tiles, objects, symmetry,
+    # transformation hypotheses, reference detection, scene narrative.
+    # =====================================================================
+    visual_scene: Optional[Dict[str, Any]] = None  # SceneDescription.to_dict()
 
     # Two-stage analysis (extract objects THEN detect transformations)
     # Populated by PaletteDetectionRung
@@ -281,6 +295,9 @@ class DecisionContext:
             'recent_events': self.recent_events,
             'frame_delta_count': self.frame_delta_count,
 
+            # Visual cortex scene understanding
+            'visual_scene': self.visual_scene,
+
             # Two-stage analysis
             'detected_palette': self.detected_palette,
             'extracted_objects': self.extracted_objects,
@@ -381,6 +398,16 @@ class ContextBuilder:
         # Event understanding state (populated from OutcomeProcessor)
         self._recent_events: List[Dict[str, Any]] = []
         self._last_frame_delta_count: int = 0
+
+        # Visual cortex for scene understanding
+        self._visual_cortex: Optional[Any] = None
+        if VISUAL_CORTEX_AVAILABLE:
+            try:
+                self._visual_cortex = VisualCortex()
+                logger.info("[CORTEX] Visual cortex initialized - scene understanding enabled")
+            except Exception as e:
+                logger.warning(f"Visual cortex init failed: {e}")
+                self._visual_cortex = None
 
     def build(
         self,
@@ -572,6 +599,19 @@ class ContextBuilder:
         is_stuck = self._detect_stuck()
         is_oscillating = self._detect_oscillation()
 
+        # Visual cortex scene analysis
+        visual_scene_dict = None
+        if self._visual_cortex is not None and frame is not None:
+            try:
+                frame_list = frame
+                if hasattr(frame, 'tolist'):
+                    frame_list = frame.tolist()
+                if isinstance(frame_list, list) and len(frame_list) > 0:
+                    scene = self._visual_cortex.analyze(frame_list)
+                    visual_scene_dict = scene.to_dict()
+            except Exception as e:
+                logger.debug(f"Visual cortex analysis failed: {e}")
+
         return DecisionContext(
             # Game
             game_id=game_id,
@@ -630,6 +670,9 @@ class ContextBuilder:
             # Event understanding
             recent_events=self._recent_events.copy(),
             frame_delta_count=self._last_frame_delta_count,
+
+            # Visual cortex scene understanding
+            visual_scene=visual_scene_dict,
 
             # Runtime fields (unique to evolution_runner path)
             frame_data=obs,

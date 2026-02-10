@@ -41,6 +41,12 @@ def get_multi_object_goal_tracker():
     return MultiObjectGoalTracker
 
 
+def get_visual_cortex():
+    """Lazy-load VisualCortex for scene understanding."""
+    from engines.perception.visual_cortex import VisualCortex
+    return VisualCortex
+
+
 __all__ = [
     'VisualAnalyzer',
     'TerminalPatternDetector',
@@ -49,6 +55,7 @@ __all__ = [
     'get_event_detector',
     'get_spatial_effect_learner',
     'get_multi_object_goal_tracker',
+    'get_visual_cortex',
     'VisualReasoningEngine',
     'PlayerLocalizer',
     'PropertyExtractor',

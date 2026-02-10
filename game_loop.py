@@ -234,8 +234,13 @@ class GameLoop:
         # Get action from decision system
         action, _reason = self._decide(state, context)
 
+        # Build reasoning payload for API recording
+        reasoning_payload = self._build_reasoning_payload(
+            action, _reason, state, agent_config
+        )
+
         # Execute action
-        new_obs = self._execute(action)
+        new_obs = self._execute(action, reasoning=reasoning_payload)
 
         if new_obs is None:
             # API failure - track consecutive failures
@@ -450,8 +455,20 @@ class GameLoop:
         # Fallback to first available
         return available[0]
 
-    def _execute(self, action: GameAction) -> Optional[Observation]:
-        """Execute an action and return the new observation."""
+    def _execute(
+        self,
+        action: GameAction,
+        reasoning: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Observation]:
+        """Execute an action and return the new observation.
+
+        Args:
+            action: The GameAction to take.
+            reasoning: Optional reasoning payload for API recordings.
+
+        Returns:
+            Observation with updated game state, or None on failure.
+        """
         # Handle complex actions
         data = None
         if action.is_complex():
@@ -484,7 +501,51 @@ class GameLoop:
         # Store actual click coordinates for rung feedback loop
         self._last_execute_data = data or {}
 
-        return self._env.step(action, data=data)
+        return self._env.step(action, data=data, reasoning=reasoning)
+
+    def _build_reasoning_payload(
+        self,
+        action: GameAction,
+        reason: str,
+        state: LoopState,
+        agent_config: AgentConfig,
+    ) -> Dict[str, Any]:
+        """Build reasoning payload to send with each API step.
+
+        This data is included in ARC API recordings so our decision
+        logic is visible when reviewing replays.
+
+        Args:
+            action: The chosen GameAction.
+            reason: Decision reason string from the rung system.
+            state: Current loop state (game, level, score, etc.).
+            agent_config: Agent configuration (agent_id).
+
+        Returns:
+            Dict with reasoning metadata for the API.
+        """
+        payload: Dict[str, Any] = {
+            "action": action.name,
+            "reason": reason[:200] if reason else "unknown",
+            "agent_id": agent_config.agent_id,
+            "game_id": state.game_id,
+            "step": self._action_count,
+            "level": state.current_level,
+            "score": state.score,
+            "levels_completed": state.levels_completed,
+        }
+
+        # Add decision metadata if available (rung info, coordinates, etc.)
+        metadata = self._get_decision_metadata()
+        if metadata:
+            rung = metadata.get("rung_name") or metadata.get("rung")
+            if rung:
+                payload["rung"] = str(rung)[:100]
+            confidence = metadata.get("confidence")
+            if confidence is not None:
+                payload["confidence"] = float(confidence)
+
+        return payload
 
     def _update_state(self, obs: Observation, outcome: ActionOutcome) -> None:
         """Update internal state based on outcome."""

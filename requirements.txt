@@ -27,6 +27,12 @@ pre-commit>=3.6.0  # Git hooks for automated checks
 torch>=2.0.0  # For learned representations (Self-Supervised Dynamics)
 
 # =============================================================================
+# Visual Cortex (Scene Understanding)
+# =============================================================================
+Pillow>=10.0.0  # Grid-to-image rendering, visual debugging
+scipy>=1.11.0   # Image processing, advanced spatial analysis
+
+# =============================================================================
 # Optional: Install Graphviz separately to view dependency graphs as SVG
 # Windows: https://graphviz.org/download/ (add to PATH)
 # Linux: sudo apt-get install graphviz

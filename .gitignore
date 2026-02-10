@@ -1,6 +1,5 @@
 # Environment variables - exclude .env but keep .env.example
 .env
-*.log
 #serena
 .serena
 
@@ -63,6 +62,10 @@ cover/
 
 # Log files
 *.log
+log/
+
+#images
+*.png
 
 # IDE files
 .vscode/
