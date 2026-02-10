@@ -72,6 +72,43 @@ from datetime import datetime, timedelta
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 
+def _strip_oscillations(actions):
+    """Remove consecutive back-and-forth oscillation pairs from an action list.
+
+    Oscillation = same two-action pattern repeated: e.g. [1,2,1,2,1,2] -> [1,2].
+    Also removes immediate self-reversal pairs: [1,2,1] -> [1] when 2 undoes nothing.
+
+    Returns a cleaned list of actions (may be shorter).
+    """
+    if len(actions) <= 2:
+        return list(actions)
+
+    # OPPOSITE_PAIRS: actions that cancel each other (up/down, left/right)
+    # ACTION1=up, ACTION2=down, ACTION3=left, ACTION4=right
+    opposites = {1: 2, 2: 1, 3: 4, 4: 3}
+
+    cleaned = []
+    i = 0
+    while i < len(actions):
+        a = actions[i]
+        # Look ahead: if next action is the opposite, skip both
+        if i + 1 < len(actions) and opposites.get(a) == actions[i + 1]:
+            # Check if this is part of a longer oscillation run
+            j = i
+            while (j + 1 < len(actions)
+                   and opposites.get(actions[j]) == actions[j + 1]):
+                j += 2
+            # Keep just the first pair (directional intent), skip repeats
+            cleaned.append(a)
+            cleaned.append(actions[i + 1])
+            i = j
+        else:
+            cleaned.append(a)
+            i += 1
+
+    return cleaned if cleaned else list(actions)
+
+
 class SafeDatabaseCleaner:
     """
     Safe database cleanup that preserves all critical learning data.
@@ -176,6 +213,149 @@ class SafeDatabaseCleaner:
         self.pattern_low_confidence_threshold = 0.10
         self.pattern_min_attempts_for_deprecation = 20
 
+    # ------------------------------------------------------------------
+    # Phase 5.4: Adaptive Cleanup Thresholds
+    # ------------------------------------------------------------------
+
+    _AGGRESSIVE_DB_SIZE_GB = 50  # Switch to aggressive mode above this
+    _AGGRESSIVE_FACTOR = 0.70    # Lower all thresholds by 30%
+    _DENSITY_HIGH = 0.5          # If >50% useful rows -> increase retention 20%
+    _DENSITY_LOW = 0.1           # If <10% useful rows -> decrease retention 20%
+
+    # Map threshold attribute name -> (table, useful_condition_sql)
+    # useful_condition_sql is a WHERE clause that identifies "useful" rows.
+    _DENSITY_TABLES = {
+        'action_traces_retention': (
+            'action_traces',
+            "outcome = 'success' OR positive_reward = 1",
+        ),
+        'sensation_events_retention': (
+            'sensation_learning_events',
+            "learning_delta > 0.01",
+        ),
+        'navigation_retention': (
+            'navigation_state_history',
+            "score_delta > 0",
+        ),
+        'system_logs_retention': (
+            'system_logs',
+            "log_level IN ('ERROR', 'WARNING')",
+        ),
+        'operating_modes_retention': (
+            'agent_operating_modes',
+            "1=1",  # All modes are useful context
+        ),
+    }
+
+    def _apply_adaptive_thresholds(self, cursor, verbose: bool = False) -> None:
+        """Adjust retention thresholds based on knowledge density & DB size.
+
+        Called at the start of every ``cleanup()`` run.
+
+        * **Knowledge density**: For each table in ``_DENSITY_TABLES``, compute
+          ``useful_rows / total_rows``.  High density (>0.5) -> grow threshold
+          +20%.  Low density (<0.1) -> shrink threshold -20%.
+        * **Aggressive mode**: If DB size > 50 GB, reduce all count-based
+          thresholds by 30%.
+        * Stores the latest compression ratio in ``_last_compression_ratio``
+          for trend tracking.
+        """
+        # ----- knowledge density per table -----
+        adjustments_made = 0
+        for attr, (table, useful_sql) in self._DENSITY_TABLES.items():
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                total = cursor.fetchone()[0]
+                if total < 100:
+                    continue  # Not enough data to judge
+
+                cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE {useful_sql}")
+                useful = cursor.fetchone()[0]
+
+                density = useful / total
+                current = getattr(self, attr, 0)
+
+                if density > self._DENSITY_HIGH:
+                    new_val = int(current * 1.20)
+                    setattr(self, attr, new_val)
+                    adjustments_made += 1
+                    if verbose:
+                        print(f'   [ADAPTIVE] {attr}: {current:,} -> {new_val:,} '
+                              f'(density={density:.2f}, high -> +20%)')
+                elif density < self._DENSITY_LOW:
+                    new_val = max(1000, int(current * 0.80))
+                    setattr(self, attr, new_val)
+                    adjustments_made += 1
+                    if verbose:
+                        print(f'   [ADAPTIVE] {attr}: {current:,} -> {new_val:,} '
+                              f'(density={density:.2f}, low -> -20%)')
+            except Exception:
+                pass  # Table may not exist yet
+
+        # ----- aggressive mode when DB exceeds 50 GB -----
+        try:
+            db_size_gb = os.path.getsize(self.db_path) / (1024 ** 3)
+        except OSError:
+            db_size_gb = 0.0
+
+        if db_size_gb > self._AGGRESSIVE_DB_SIZE_GB:
+            if verbose:
+                print(f'   [ADAPTIVE] AGGRESSIVE MODE: DB={db_size_gb:.1f}GB > '
+                      f'{self._AGGRESSIVE_DB_SIZE_GB}GB -- lowering all thresholds 30%')
+            for attr in (
+                'action_traces_retention', 'sensation_events_retention',
+                'navigation_retention', 'system_logs_retention',
+                'operating_modes_retention', 'weaving_reports_retention',
+                'failure_hypotheses_retention', 'player_state_history_retention',
+            ):
+                current = getattr(self, attr, 0)
+                new_val = max(1000, int(current * self._AGGRESSIVE_FACTOR))
+                setattr(self, attr, new_val)
+
+            # Also reduce generation-based retention windows
+            self.raw_data_generation_retention = max(5, int(
+                self.raw_data_generation_retention * self._AGGRESSIVE_FACTOR
+            ))
+            self.score_history_retention_days = max(1, int(
+                self.score_history_retention_days * self._AGGRESSIVE_FACTOR
+            ))
+            adjustments_made += 1
+
+        # ----- compression ratio tracking -----
+        self._last_compression_ratio = self._compute_compression_ratio(cursor)
+        if verbose and adjustments_made:
+            print(f'   [ADAPTIVE] {adjustments_made} threshold adjustment(s) applied, '
+                  f'compression ratio={self._last_compression_ratio:.3f}')
+
+    def _compute_compression_ratio(self, cursor) -> float:
+        """Compute knowledge-per-byte metric: abstractions / raw traces.
+
+        Returns the ratio of high-value rows (patterns, templates, rules)
+        to total raw data rows.  Higher is better.
+        """
+        knowledge_count = 0
+        raw_count = 0
+        for table in ('interaction_triggers', 'trigger_sequences',
+                       'collision_effects', 'selectability_conditions',
+                       'compressed_templates'):
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                knowledge_count += cursor.fetchone()[0]
+            except Exception:
+                pass
+
+        for table in ('action_traces', 'object_property_snapshots',
+                       'object_property_changes', 'trigger_sequence_events'):
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                raw_count += cursor.fetchone()[0]
+            except Exception:
+                pass
+
+        if raw_count == 0:
+            return 1.0  # No raw data -> perfect compression
+        return knowledge_count / raw_count
+
     def cleanup(self, dry_run=True, verbose=True):
         """
         Run all cleanup operations.
@@ -201,6 +381,9 @@ class SafeDatabaseCleaner:
             db_size = os.path.getsize(self.db_path) / (1024*1024*1024)
             print(f'Database size: {db_size:.2f} GB')
 
+        # Phase 5.4: Adapt thresholds based on knowledge density and DB size
+        self._apply_adaptive_thresholds(c, verbose)
+
         # 1. Zero-score game results
         if verbose:
             print('\n1. Zero-score game results')
@@ -220,6 +403,14 @@ class SafeDatabaseCleaner:
         if verbose:
             print('\n4. Old navigation state history')
         results['tables_cleaned']['navigation_state_history'] = self._clean_navigation_history(c, conn, dry_run, verbose)
+
+        # 4b. KNOWLEDGE COMPRESSION (Phase 2.4 — runs BEFORE deletion)
+        # Order: compress -> deprecate -> delete
+        # Transforms raw experience into transferable principles before cleanup
+        # removes the raw data. "Compression Forces Abstraction."
+        if verbose:
+            print('\n4b. Knowledge compression (compress before delete)')
+        results['tables_cleaned']['knowledge_compression'] = self._compress_knowledge(c, conn, dry_run, verbose)
 
         # 5. Action traces
         if verbose:
@@ -597,6 +788,537 @@ class SafeDatabaseCleaner:
             print(f'   Would delete: {excess:,} rows')
 
         return {'found': excess, 'deleted': 0}
+
+    # =========================================================================
+    # PHASE 2.3: Action Trace Distillation
+    # =========================================================================
+
+    def _distill_action_traces(self, c, conn, dry_run, verbose):
+        """Extract learning patterns from action traces BEFORE they are deleted.
+
+        Groups about-to-be-deleted traces by (game_id, level_number, outcome),
+        extracts minimum viable win sequences and failure signatures, then
+        stores them as game_lessons_learned entries.
+
+        Returns:
+            dict with distillation statistics.
+        """
+        import hashlib
+        import json
+
+        stats = {
+            'traces_analyzed': 0,
+            'win_lessons': 0,
+            'failure_lessons': 0,
+            'dry_run': dry_run,
+        }
+
+        # How many traces exist and what the retention cap is
+        try:
+            c.execute('SELECT COUNT(*) FROM action_traces')
+            total = c.fetchone()[0]
+        except Exception:
+            if verbose:
+                print('   action_traces table not found (skip)')
+            return stats
+
+        excess = total - self.action_traces_retention
+        if excess <= 0:
+            if verbose:
+                print(f'   No excess traces to distill ({total:,} <= {self.action_traces_retention:,})')
+            return stats
+
+        # Identify traces that WILL be deleted (oldest ones beyond retention)
+        # Group by (game_id, level_number, outcome) to find patterns.
+        # outcome = resulted_in_game_over (True = death, False = survived/won)
+        try:
+            doomed_groups = c.execute(f'''
+                SELECT game_id, level_number,
+                       resulted_in_game_over,
+                       COUNT(*) as trace_count,
+                       GROUP_CONCAT(action_number) as actions_csv,
+                       MAX(score_change) as best_score_change,
+                       MIN(score_change) as worst_score_change
+                FROM action_traces
+                WHERE id NOT IN (
+                    SELECT id FROM action_traces
+                    ORDER BY timestamp DESC
+                    LIMIT {self.action_traces_retention}
+                )
+                GROUP BY game_id, level_number, resulted_in_game_over
+                HAVING trace_count >= 3
+                ORDER BY trace_count DESC
+                LIMIT 500
+            ''').fetchall()
+        except Exception as e:
+            if verbose:
+                print(f'   Could not query doomed traces: {e}')
+            return stats
+
+        if not doomed_groups:
+            if verbose:
+                print('   No actionable trace groups found')
+            return stats
+
+        stats['traces_analyzed'] = sum(row[3] for row in doomed_groups)
+
+        for row in doomed_groups:
+            game_id = row[0]
+            level_number = row[1] or 1
+            was_death = bool(row[2])
+            trace_count = row[3]
+            actions_csv = row[4] or ''
+            best_score = row[5] or 0.0
+            worst_score = row[6] or 0.0
+
+            # Parse action sequence from the comma-separated action_numbers
+            actions = []
+            for a in actions_csv.split(','):
+                a = a.strip()
+                if a and a.isdigit():
+                    actions.append(int(a))
+
+            if len(actions) < 2:
+                continue
+
+            game_type = game_id[:4] if len(game_id) >= 4 else game_id
+
+            if was_death:
+                # FAILURE SIGNATURE: last 10 actions before death
+                failure_seq = actions[-10:]
+                lesson_text = (
+                    f"Failure pattern in {game_type} L{level_number}: "
+                    f"last {len(failure_seq)} actions before death = "
+                    f"{failure_seq} (worst_delta={worst_score:.3f})"
+                )
+                lesson_type = 'avoid'
+                key_action = f"ACTION{failure_seq[-1]}" if failure_seq else None
+                lesson_hash = hashlib.md5(
+                    f"{game_type}:{level_number}:death:{','.join(map(str, failure_seq))}".encode()
+                ).hexdigest()[:16]
+
+                if dry_run:
+                    stats['failure_lessons'] += 1
+                    continue
+
+                try:
+                    c.execute('''
+                        INSERT INTO game_lessons_learned (
+                            lesson_id, agent_id, game_type, game_id, generation,
+                            lesson_text, lesson_type,
+                            final_score, was_win, action_count, key_action,
+                            confidence, lesson_hash, occurrence_count,
+                            severity, caused_death
+                        ) VALUES (?, 'system_distiller', ?, ?, 0,
+                                  ?, ?,
+                                  ?, 0, ?, ?,
+                                  ?, ?, ?,
+                                  2, 1)
+                        ON CONFLICT(lesson_id) DO UPDATE SET
+                            occurrence_count = game_lessons_learned.occurrence_count + 1,
+                            last_occurred_at = CURRENT_TIMESTAMP
+                    ''', (
+                        f"distill_{lesson_hash}",
+                        game_type,
+                        game_id,
+                        lesson_text,
+                        lesson_type,
+                        worst_score,
+                        len(actions),
+                        key_action,
+                        min(0.8, 0.3 + trace_count * 0.05),  # More traces = higher confidence
+                        lesson_hash,
+                        trace_count,
+                    ))
+                    stats['failure_lessons'] += 1
+                except Exception:
+                    pass  # Duplicate or schema mismatch -- non-critical
+
+            else:
+                # WIN/SURVIVAL PATTERN: minimum viable action sequence
+                # Strip oscillations: remove consecutive back-and-forth pairs
+                # Oscillation = ACTION1,ACTION2,ACTION1,ACTION2 (up/down/up/down)
+                cleaned = _strip_oscillations(actions)
+
+                lesson_text = (
+                    f"Viable path in {game_type} L{level_number}: "
+                    f"{len(cleaned)} actions (reduced from {len(actions)}), "
+                    f"best_delta={best_score:.3f}"
+                )
+                lesson_type = 'pattern'
+                key_action = f"ACTION{cleaned[0]}" if cleaned else None
+                lesson_hash = hashlib.md5(
+                    f"{game_type}:{level_number}:survive:{','.join(map(str, cleaned[:20]))}".encode()
+                ).hexdigest()[:16]
+
+                if dry_run:
+                    stats['win_lessons'] += 1
+                    continue
+
+                try:
+                    c.execute('''
+                        INSERT INTO game_lessons_learned (
+                            lesson_id, agent_id, game_type, game_id, generation,
+                            lesson_text, lesson_type,
+                            final_score, was_win, action_count, key_action,
+                            confidence, lesson_hash, occurrence_count,
+                            severity, caused_death
+                        ) VALUES (?, 'system_distiller', ?, ?, 0,
+                                  ?, ?,
+                                  ?, 0, ?, ?,
+                                  ?, ?, ?,
+                                  1, 0)
+                        ON CONFLICT(lesson_id) DO UPDATE SET
+                            occurrence_count = game_lessons_learned.occurrence_count + 1,
+                            last_occurred_at = CURRENT_TIMESTAMP
+                    ''', (
+                        f"distill_{lesson_hash}",
+                        game_type,
+                        game_id,
+                        lesson_text,
+                        lesson_type,
+                        best_score,
+                        len(cleaned),
+                        key_action,
+                        min(0.9, 0.4 + trace_count * 0.05),
+                        lesson_hash,
+                        trace_count,
+                    ))
+                    stats['win_lessons'] += 1
+                except Exception:
+                    pass
+
+        if not dry_run:
+            conn.commit()
+
+        if verbose:
+            print(
+                f'   Distilled {stats["traces_analyzed"]:,} traces -> '
+                f'{stats["win_lessons"]} survival lessons, '
+                f'{stats["failure_lessons"]} failure lessons'
+            )
+
+        return stats
+
+    # =========================================================================
+    # PHASE 2.4: Knowledge Compression Orchestrator
+    # =========================================================================
+
+    def _compress_knowledge(self, c, conn, dry_run, verbose):
+        """Orchestrate all compression steps BEFORE deletion.
+
+        Order: compress viral packages -> compress winning sequences ->
+               distill action traces -> merge overlapping learned rules.
+
+        This transforms raw experience into transferable principles.
+        Per Master Ruleset: "Compression Forces Abstraction."
+
+        Returns:
+            dict with aggregate compression statistics.
+        """
+        stats = {
+            'packages': {'templates_created': 0, 'packages_merged': 0},
+            'sequences': {'concepts_created': 0},
+            'traces': {'win_lessons': 0, 'failure_lessons': 0},
+            'rules': {'merged': 0},
+            'dry_run': dry_run,
+        }
+
+        # ------------------------------------------------------------------
+        # Step A: Cluster similar viral packages (from package_compressor)
+        # ------------------------------------------------------------------
+        try:
+            from database_interface import DatabaseInterface
+            from engines.social.package_compressor import PackageCompressor
+
+            db = DatabaseInterface()
+            compressor = PackageCompressor(db)
+
+            # Compress across all game types
+            pkg_stats = compressor.compress_packages(
+                game_type=None,
+                similarity_threshold=0.85,
+                min_cluster_size=2,
+                dry_run=dry_run,
+            )
+            stats['packages']['templates_created'] = pkg_stats.get('templates_created', 0)
+            stats['packages']['packages_merged'] = pkg_stats.get('packages_merged', 0)
+
+            if verbose and stats['packages']['templates_created'] > 0:
+                print(f'     Packages: {stats["packages"]["templates_created"]} templates '
+                      f'from {stats["packages"]["packages_merged"]} packages')
+        except Exception as e:
+            if verbose:
+                print(f'     Package compression skipped: {e}')
+
+        # ------------------------------------------------------------------
+        # Step B: Generalize winning sequences into concepts
+        # ------------------------------------------------------------------
+        try:
+            # Reuse compressor from Step A (or create if A failed)
+            if 'compressor' not in dir() or compressor is None:
+                from database_interface import DatabaseInterface
+                from engines.social.package_compressor import PackageCompressor
+                db = DatabaseInterface()
+                compressor = PackageCompressor(db)
+
+            seq_stats = compressor.compress_winning_sequences(
+                game_type=None,
+                similarity_threshold=0.85,
+                min_cluster_size=3,
+                dry_run=dry_run,
+            )
+            stats['sequences']['concepts_created'] = seq_stats.get('concepts_created', 0)
+
+            if verbose and stats['sequences']['concepts_created'] > 0:
+                print(f'     Sequences: {stats["sequences"]["concepts_created"]} concepts created')
+        except Exception as e:
+            if verbose:
+                print(f'     Sequence compression skipped: {e}')
+
+        # ------------------------------------------------------------------
+        # Step C: Distill action traces before deletion
+        # ------------------------------------------------------------------
+        try:
+            trace_stats = self._distill_action_traces(c, conn, dry_run, verbose=False)
+            stats['traces']['win_lessons'] = trace_stats.get('win_lessons', 0)
+            stats['traces']['failure_lessons'] = trace_stats.get('failure_lessons', 0)
+
+            if verbose and (trace_stats.get('win_lessons', 0) + trace_stats.get('failure_lessons', 0)) > 0:
+                print(f'     Traces: {trace_stats["win_lessons"]} survival + '
+                      f'{trace_stats["failure_lessons"]} failure lessons')
+        except Exception as e:
+            if verbose:
+                print(f'     Trace distillation skipped: {e}')
+
+        # ------------------------------------------------------------------
+        # Step D: Merge overlapping learned rules
+        # ------------------------------------------------------------------
+        try:
+            rule_stats = self._merge_learned_rules(c, conn, dry_run, verbose=False)
+            stats['rules']['merged'] = rule_stats.get('merged', 0)
+
+            if verbose and stats['rules']['merged'] > 0:
+                print(f'     Rules: {stats["rules"]["merged"]} redundant rules merged')
+        except Exception as e:
+            if verbose:
+                print(f'     Rule merging skipped: {e}')
+
+        # ------------------------------------------------------------------
+        # Step E: Merge duplicate game_lessons_learned
+        # ------------------------------------------------------------------
+        try:
+            lesson_stats = self._merge_duplicate_lessons(c, conn, dry_run, verbose=False)
+            if verbose and lesson_stats.get('merged', 0) > 0:
+                print(f'     Lessons: {lesson_stats["merged"]} duplicates merged')
+        except Exception as e:
+            if verbose:
+                print(f'     Lesson merging skipped: {e}')
+
+        return stats
+
+    def _merge_learned_rules(self, c, conn, dry_run, verbose):
+        """Merge overlapping learned_rules: if rule A is a strict subset of rule B, deprecate A.
+
+        Two rules overlap when they share the same game, same expected_outcome,
+        and rule A's action_template is a prefix of rule B's (B is more complete).
+        The more general rule (higher generality_score or success_rate) survives.
+
+        Returns:
+            dict with merge statistics.
+        """
+        import json
+
+        stats = {'scanned': 0, 'merged': 0}
+
+        try:
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='learned_rules'")
+            if not c.fetchone():
+                return stats
+        except Exception:
+            return stats
+
+        # Load active rules grouped by expected_outcome
+        try:
+            rules = c.execute('''
+                SELECT rule_id, agent_id, source_game_id,
+                       action_template, expected_outcome,
+                       confidence, success_count, failure_count,
+                       generality_score
+                FROM learned_rules
+                ORDER BY generality_score DESC, confidence DESC
+            ''').fetchall()
+        except Exception:
+            return stats
+
+        if len(rules) < 2:
+            return stats
+
+        stats['scanned'] = len(rules)
+
+        # Parse action_templates into comparable lists
+        parsed = []
+        for row in rules:
+            rule_id = row[0]
+            try:
+                template = json.loads(row[3]) if isinstance(row[3], str) else row[3]
+            except (json.JSONDecodeError, TypeError):
+                template = []
+            parsed.append({
+                'rule_id': rule_id,
+                'outcome': row[4],
+                'template': template if isinstance(template, list) else [],
+                'confidence': row[5] or 0.0,
+                'success_count': row[6] or 0,
+                'generality': row[8] or 0.0,
+            })
+
+        # Find subset relationships: A is subset of B if A's template
+        # is a prefix of B's template AND they share the same outcome
+        to_delete = set()
+        for i, rule_a in enumerate(parsed):
+            if rule_a['rule_id'] in to_delete:
+                continue
+            for j, rule_b in enumerate(parsed):
+                if i == j or rule_b['rule_id'] in to_delete:
+                    continue
+                if rule_a['outcome'] != rule_b['outcome']:
+                    continue
+
+                tmpl_a = rule_a['template']
+                tmpl_b = rule_b['template']
+
+                if not tmpl_a or not tmpl_b:
+                    continue
+
+                # Check if A is a prefix of B (A is less complete)
+                if (len(tmpl_a) < len(tmpl_b)
+                        and tmpl_b[:len(tmpl_a)] == tmpl_a):
+                    # A is a strict prefix of B -- deprecate A (less complete)
+                    to_delete.add(rule_a['rule_id'])
+                    break
+                # Check if B is a prefix of A
+                elif (len(tmpl_b) < len(tmpl_a)
+                      and tmpl_a[:len(tmpl_b)] == tmpl_b):
+                    to_delete.add(rule_b['rule_id'])
+
+        if not to_delete:
+            return stats
+
+        stats['merged'] = len(to_delete)
+
+        if dry_run:
+            if verbose:
+                print(f'   Would merge {len(to_delete)} redundant rules')
+            return stats
+
+        # Delete the subsumed rules
+        placeholders = ','.join('?' for _ in to_delete)
+        c.execute(f'DELETE FROM learned_rules WHERE rule_id IN ({placeholders})',
+                  list(to_delete))
+        conn.commit()
+
+        if verbose:
+            print(f'   Merged {len(to_delete)} redundant rules')
+
+        return stats
+
+    def _merge_duplicate_lessons(self, c, conn, dry_run, verbose):
+        """Merge game_lessons_learned entries with the same lesson_hash.
+
+        When multiple lessons share the same hash (same game_type + level +
+        lesson_type + key pattern), keep only the one with highest confidence
+        and accumulate occurrence_count from all duplicates.
+
+        Returns:
+            dict with merge statistics.
+        """
+        stats = {'scanned': 0, 'merged': 0}
+
+        try:
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='game_lessons_learned'")
+            if not c.fetchone():
+                return stats
+        except Exception:
+            return stats
+
+        # Find duplicate lesson_hashes (where hash is not null)
+        try:
+            dupes = c.execute('''
+                SELECT lesson_hash, COUNT(*) as cnt,
+                       SUM(occurrence_count) as total_occ,
+                       MAX(confidence) as best_conf
+                FROM game_lessons_learned
+                WHERE lesson_hash IS NOT NULL AND lesson_hash != ''
+                GROUP BY lesson_hash
+                HAVING cnt > 1
+                ORDER BY cnt DESC
+                LIMIT 1000
+            ''').fetchall()
+        except Exception:
+            return stats
+
+        if not dupes:
+            return stats
+
+        stats['scanned'] = sum(row[1] for row in dupes)
+        merged_count = 0
+
+        for row in dupes:
+            lesson_hash = row[0]
+            total_occ = row[2] or 1
+            best_conf = row[3] or 0.5
+
+            if dry_run:
+                merged_count += row[1] - 1  # All but the survivor
+                continue
+
+            # Keep the one with highest confidence, delete the rest
+            try:
+                # Get the survivor (highest confidence, most recent)
+                survivor = c.execute('''
+                    SELECT lesson_id FROM game_lessons_learned
+                    WHERE lesson_hash = ?
+                    ORDER BY confidence DESC, created_at DESC
+                    LIMIT 1
+                ''', (lesson_hash,)).fetchone()
+
+                if not survivor:
+                    continue
+
+                survivor_id = survivor[0]
+
+                # Update survivor with accumulated counts
+                c.execute('''
+                    UPDATE game_lessons_learned
+                    SET occurrence_count = ?,
+                        confidence = ?
+                    WHERE lesson_id = ?
+                ''', (total_occ, best_conf, survivor_id))
+
+                # Delete duplicates
+                c.execute('''
+                    DELETE FROM game_lessons_learned
+                    WHERE lesson_hash = ? AND lesson_id != ?
+                ''', (lesson_hash, survivor_id))
+
+                merged_count += row[1] - 1
+
+            except Exception:
+                pass
+
+        if not dry_run and merged_count > 0:
+            conn.commit()
+
+        stats['merged'] = merged_count
+
+        if verbose:
+            if dry_run:
+                print(f'   Would merge {merged_count} duplicate lessons')
+            elif merged_count > 0:
+                print(f'   Merged {merged_count} duplicate lessons')
+
+        return stats
 
     def _clean_sensation_events(self, c, conn, dry_run, verbose):
         """Keep only the most recent sensation learning events."""

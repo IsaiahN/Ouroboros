@@ -251,6 +251,9 @@ class GameLoop:
         # Reset failure counter on success
         self._consecutive_api_failures = 0
 
+        # Store click coordinates for feedback to rungs (set by _execute)
+        self._last_action_data = getattr(self, '_last_execute_data', {}) or {}
+
         # Process outcome
         outcome = self._outcome_processor.process(state, action, new_obs)
 
@@ -344,10 +347,10 @@ class GameLoop:
 
         try:
             action_name = action.name if hasattr(action, 'name') else str(action)
-            action_data = {
-                'x': getattr(action, 'x', 0),
-                'y': getattr(action, 'y', 0),
-            }
+            # Use stored click coordinates from _execute(), NOT getattr(action, 'x', 0)
+            # GameAction is an enum without x/y attributes, so getattr always returns 0.
+            # The actual click coordinates are stored by _execute() in _last_action_data.
+            action_data = getattr(self, '_last_action_data', {}) or {}
             frame_before = getattr(outcome, 'frame_before', None)
             frame_after = getattr(outcome, 'frame_after', None)
 
@@ -477,6 +480,9 @@ class GameLoop:
         else:
             # Log non-coordinate actions when verbose
             self._log(f"Action #{self._action_count + 1}: {action.name}")
+
+        # Store actual click coordinates for rung feedback loop
+        self._last_execute_data = data or {}
 
         return self._env.step(action, data=data)
 

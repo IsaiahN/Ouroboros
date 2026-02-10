@@ -7,15 +7,24 @@ Integration wrapper for GameScheduler with autonomous_evolution_runner.py
 
 This provides a simple interface for the evolution runner to get games
 for agents without duplicating effort on the same game types.
+
+Phase 3.4: Resonance-informed scheduling - game-type pairs with high
+resonance are prioritized for optimizers/generalists and deprioritized
+for pioneers (forces genuinely novel territory).
 """
 import os
 
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
+import json
+import logging
+import random
 from typing import Dict, List, Optional
 
 from database_interface import DatabaseInterface
 from game_scheduler import GameScheduler
+
+logger = logging.getLogger(__name__)
 
 
 class EvolutionGameScheduler:
@@ -33,6 +42,9 @@ class EvolutionGameScheduler:
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self.scheduler = GameScheduler(db)
+        # Resonance priority cache: refreshed each generation
+        self._resonance_cache: Optional[Dict[str, float]] = None
+        self._resonance_cache_gen: Optional[int] = None
 
     def shutdown(self):
         """Initiate graceful shutdown."""
@@ -139,6 +151,13 @@ class EvolutionGameScheduler:
         # Assign games to each agent
         assignments: Dict[str, List[str]] = {}
 
+        # Phase 3.4: Load resonance priorities once per batch
+        generation = agents[0].get('generation', 0) if agents else 0
+        resonance_priorities = self._get_resonance_game_priorities(generation)
+        if resonance_priorities:
+            n_resonant = sum(1 for v in resonance_priorities.values() if v > 0)
+            print(f"  [RESONANCE-SCHED] {n_resonant} game type(s) with resonance signal")
+
         for agent in selected_agents:
             # Check for shutdown before each agent assignment
             if self.scheduler.is_shutting_down:
@@ -151,6 +170,11 @@ class EvolutionGameScheduler:
 
             agent_mode = agent.get('mode', agent.get('operating_mode', 'generalist'))
 
+            # Phase 3.4: Reorder available games by resonance for this role
+            role_games = self._reorder_games_by_resonance(
+                available_game_ids, agent_mode, resonance_priorities
+            )
+
             # Get games for this agent
             agent_games = []
             agent_generation = agent.get('generation', 0)
@@ -159,7 +183,7 @@ class EvolutionGameScheduler:
                     agent_id=agent_id,
                     agent_mode=agent_mode,
                     session_id=f"gen_{agent_generation}{'_mixed' if mixed_domain else ''}",
-                    available_games=available_game_ids,
+                    available_games=role_games,
                     generation=agent_generation  # Pass generation for rotation
                 )
 
@@ -244,6 +268,108 @@ class EvolutionGameScheduler:
 
         return game_ids
 
+    # =========================================================================
+    # PHASE 3.4: Resonance-Informed Game Scheduling
+    # =========================================================================
+
+    def _get_resonance_game_priorities(
+        self, generation: int
+    ) -> Dict[str, float]:
+        """Load resonance scores per game type from resonance_patterns.
+
+        Returns a dict mapping ``game_type`` -> max resonance score across
+        all resonance patterns that mention that game type.  Cached per
+        generation to avoid repeated DB queries within the same batch.
+
+        Args:
+            generation: Current generation (for cache key).
+
+        Returns:
+            Dict mapping game_type -> max resonance_score (0.0 = no signal).
+        """
+        if (self._resonance_cache is not None
+                and self._resonance_cache_gen == generation):
+            return self._resonance_cache
+
+        priorities: Dict[str, float] = {}
+
+        try:
+            rows = self.db.execute_query("""
+                SELECT game_types, resonance_score
+                FROM resonance_patterns
+                WHERE resonance_score > 0
+                ORDER BY resonance_score DESC
+                LIMIT 200
+            """)
+        except Exception as e:
+            logger.debug(f"Resonance priority query failed: {e}")
+            self._resonance_cache = priorities
+            self._resonance_cache_gen = generation
+            return priorities
+
+        if not rows:
+            self._resonance_cache = priorities
+            self._resonance_cache_gen = generation
+            return priorities
+
+        for row in rows:
+            try:
+                game_types = json.loads(row['game_types']) if row['game_types'] else []
+            except (json.JSONDecodeError, TypeError):
+                game_types = []
+
+            score = row.get('resonance_score', 0.0) or 0.0
+            for gt in game_types:
+                priorities[gt] = max(priorities.get(gt, 0.0), score)
+
+        self._resonance_cache = priorities
+        self._resonance_cache_gen = generation
+        return priorities
+
+    def _reorder_games_by_resonance(
+        self,
+        available_game_ids: List[str],
+        agent_mode: str,
+        resonance_priorities: Dict[str, float],
+    ) -> List[str]:
+        """Reorder available games based on resonance signal and agent role.
+
+        - **Optimizers / Generalists**: Front-load games with high resonance
+          (leverage cross-game knowledge transfer).
+        - **Pioneers**: Push resonant games to the back (force genuinely novel
+          territory where no cross-game shortcut exists).
+        - **Exploiters**: No reordering (micro-optimisation, not discovery).
+
+        The underlying ``GameScheduler._select_game_by_rules`` still applies
+        its own priority + 30% randomness, so this is a *soft* bias, not a
+        hard override.
+
+        Args:
+            available_game_ids: List of game IDs in their current order.
+            agent_mode: Agent role string.
+            resonance_priorities: From ``_get_resonance_game_priorities()``.
+
+        Returns:
+            Reordered copy of ``available_game_ids``.
+        """
+        if not resonance_priorities or agent_mode == 'exploiter':
+            return available_game_ids  # No change
+
+        def _game_type(game_id: str) -> str:
+            return game_id.split('-')[0] if '-' in game_id else game_id
+
+        def _resonance_key(game_id: str) -> float:
+            return resonance_priorities.get(_game_type(game_id), 0.0)
+
+        if agent_mode in ('optimizer', 'generalist'):
+            # Front-load: highest resonance first (descending)
+            return sorted(available_game_ids, key=_resonance_key, reverse=True)
+        elif agent_mode == 'pioneer':
+            # Push back: lowest resonance first (ascending — novel territory)
+            return sorted(available_game_ids, key=_resonance_key)
+        else:
+            return available_game_ids
+
     def _count_modes(self, agents: List[Dict]) -> Dict[str, int]:
         """Count agents by mode."""
         counts = {}
@@ -251,6 +377,75 @@ class EvolutionGameScheduler:
             mode = agent.get('mode', agent.get('operating_mode', 'generalist'))
             counts[mode] = counts.get(mode, 0) + 1
         return counts
+
+    # ------------------------------------------------------------------
+    # Phase 3.4: Scheduling outcome tracking
+    # ------------------------------------------------------------------
+
+    def record_scheduling_outcome(
+        self,
+        agent_id: str,
+        game_id: str,
+        was_resonant: bool,
+        score: float,
+        generation: int,
+    ) -> None:
+        """Record whether a resonance-scheduled game produced a better outcome.
+
+        Stores results in ``scheduling_outcomes`` so we can later compare
+        win-rate / average score for resonant vs non-resonant assignments.
+        """
+        try:
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS scheduling_outcomes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL,
+                    game_id TEXT NOT NULL,
+                    was_resonant INTEGER NOT NULL,
+                    score REAL NOT NULL,
+                    generation INTEGER NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            self.db.execute_query("""
+                INSERT INTO scheduling_outcomes
+                    (agent_id, game_id, was_resonant, score, generation)
+                VALUES (?, ?, ?, ?, ?)
+            """, (agent_id, game_id, 1 if was_resonant else 0, score, generation))
+        except Exception as e:
+            logger.debug(f"[SCHED-OUTCOME] Could not record: {e}")
+
+    def get_scheduling_effectiveness(self, last_n_generations: int = 10) -> Dict:
+        """Compare outcomes for resonance-scheduled vs non-resonant games.
+
+        Returns dict with avg scores and win rates for each category.
+        """
+        try:
+            rows = self.db.execute_query("""
+                SELECT
+                    was_resonant,
+                    AVG(score) as avg_score,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN score > 0 THEN 1 ELSE 0 END) as wins
+                FROM scheduling_outcomes
+                WHERE generation >= (
+                    SELECT MAX(generation) - ? FROM scheduling_outcomes
+                )
+                GROUP BY was_resonant
+            """, (last_n_generations,))
+
+            stats = {'resonant': {}, 'non_resonant': {}}
+            for row in (rows or []):
+                key = 'resonant' if row['was_resonant'] else 'non_resonant'
+                count = row['count'] or 1
+                stats[key] = {
+                    'avg_score': row['avg_score'] or 0.0,
+                    'count': count,
+                    'win_rate': (row['wins'] or 0) / count,
+                }
+            return stats
+        except Exception:
+            return {}
 
 
 # Example usage

@@ -594,6 +594,46 @@ class CognitiveRouter:
         self._total_fallbacks = 0
         self._algorithm_usage: Dict[str, int] = defaultdict(int)
 
+        # Phase 0.2: Epistemic signal quality tracking
+        # Counts genuine (from resolved_questions) vs synthetic (from confidence)
+        self._genuine_epistemic_signals = 0
+        self._synthetic_epistemic_signals = 0
+
+    # -------------------------------------------------------------------------
+    # Phase 0.2: Epistemic ratio persistence
+    # -------------------------------------------------------------------------
+
+    def get_epistemic_signal_ratio(self) -> Dict[str, Any]:
+        """Return genuine vs synthetic epistemic signal counts and ratio."""
+        total = self._genuine_epistemic_signals + self._synthetic_epistemic_signals
+        return {
+            'genuine': self._genuine_epistemic_signals,
+            'synthetic': self._synthetic_epistemic_signals,
+            'total': total,
+            'genuine_ratio': (
+                self._genuine_epistemic_signals / total if total > 0 else 0.0
+            ),
+        }
+
+    def persist_epistemic_ratio(self) -> None:
+        """Log genuine/synthetic ratio via standard logger (goes to system_logs via DatabaseLogHandler).
+
+        Call at end-of-game or generation boundary so the ratio is persisted
+        in the database without requiring a dedicated table.
+        """
+        stats = self.get_epistemic_signal_ratio()
+        if stats['total'] > 0:
+            logger.info(
+                "[EPISTEMIC-RATIO] game=%s genuine=%d synthetic=%d ratio=%.2f",
+                self._game_id,
+                stats['genuine'],
+                stats['synthetic'],
+                stats['genuine_ratio'],
+            )
+        # Reset counters for next game / generation
+        self._genuine_epistemic_signals = 0
+        self._synthetic_epistemic_signals = 0
+
         # Game context
         self._game_id = ""
         self._decision_id = 0
@@ -1327,11 +1367,24 @@ class CognitiveRouter:
                 elif isinstance(metadata, dict) and metadata.get('contradiction_detected'):
                     surprise = 0.5  # Contradiction found
 
+                # Phase 0.2: Transfer genuine resolved_questions from DRS
+                # result into epistemic answers_questions. When present, the
+                # epistemic tracker uses these for real KU->KK transitions
+                # instead of synthesizing from confidence alone.
+                genuine_answers = getattr(result, 'resolved_questions', []) or []
+
+                # Track signal quality
+                if genuine_answers:
+                    self._genuine_epistemic_signals += 1
+                else:
+                    self._synthetic_epistemic_signals += 1
+
                 return RungResult(
                     rung_name=rung_name,
                     slot_name=f"rung_{rung_name}",  # Enable KK accumulation
                     value=getattr(result, 'action', None),
                     confidence=adapted_confidence,
+                    answers_questions=genuine_answers,
                     surprise_level=surprise,
                     contradiction_detected=metadata.get('contradiction_detected', False) if isinstance(metadata, dict) else False,
                 )

@@ -39,7 +39,6 @@ import json
 import logging
 import random
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from database_interface import DatabaseInterface
@@ -399,6 +398,449 @@ class ResonanceDetector:
 
         except Exception as e:
             logger.debug(f"Storing resonance pattern failed: {e}")
+
+    # =========================================================================
+    # PHASE 3.1: Template-based Resonance Scanning
+    # =========================================================================
+
+    def scan_compressed_templates(self, generation: int = 0) -> List[Dict[str, Any]]:
+        """Detect cross-game resonance from Phase 2 compressed templates.
+
+        Loads sequence_concepts (generalized winning sequences) and viral
+        package templates, then computes structural similarity between
+        different game types.  If two game types share template structure
+        (>70 % positional overlap), a resonance pattern is recorded.
+
+        This provides a SECOND, complementary resonance signal:
+        - ``detect_resonance()`` finds role-diverse belief convergence
+        - ``scan_compressed_templates()`` finds structural sequence overlap
+
+        Args:
+            generation: Current generation number (for logging).
+
+        Returns:
+            List of newly-detected resonance patterns.
+        """
+        import math
+
+        new_patterns: List[Dict[str, Any]] = []
+
+        # ------------------------------------------------------------------
+        # Step A: Load sequence concepts grouped by game_type
+        # ------------------------------------------------------------------
+        try:
+            concepts = self.db.execute_query("""
+                SELECT concept_id, goal_type, layout_signature,
+                       movement_pattern, constraints, abstraction_level
+                FROM sequence_concepts
+                ORDER BY abstraction_level DESC
+            """)
+        except Exception:
+            concepts = []
+
+        if not concepts:
+            logger.debug("[RESONANCE] No sequence_concepts to scan")
+            return new_patterns
+
+        # Group by game_type prefix (goal_type stores "<game_type>_L<n>")
+        by_game: Dict[str, List[Dict]] = {}
+        for c in concepts:
+            gt = (c.get('goal_type') or '').split('_L')[0]
+            if gt:
+                by_game.setdefault(gt, []).append(c)
+
+        game_types = list(by_game.keys())
+        if len(game_types) < 2:
+            logger.debug(f"[RESONANCE] Only {len(game_types)} game type(s) with concepts, need 2+")
+            return new_patterns
+
+        # ------------------------------------------------------------------
+        # Step B: Load viral package templates as supplementary signal
+        # ------------------------------------------------------------------
+        try:
+            templates = self.db.execute_query("""
+                SELECT package_id, action_sequence, frontier_game_type
+                FROM viral_information_packages
+                WHERE package_type = 'template' AND is_active = 1
+            """)
+        except Exception:
+            templates = []
+
+        template_by_game: Dict[str, List[List]] = {}
+        for t in templates:
+            gt = t.get('frontier_game_type', '')
+            if gt:
+                try:
+                    seq = json.loads(t['action_sequence']) if isinstance(t['action_sequence'], str) else t['action_sequence']
+                    template_by_game.setdefault(gt, []).append(seq or [])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # ------------------------------------------------------------------
+        # Step C: Pairwise comparison between game types
+        # ------------------------------------------------------------------
+        for i, gt_a in enumerate(game_types):
+            for gt_b in game_types[i + 1:]:
+                sim_score = self._template_similarity(
+                    by_game[gt_a], by_game[gt_b],
+                    template_by_game.get(gt_a, []),
+                    template_by_game.get(gt_b, []),
+                )
+
+                if sim_score < 0.70:
+                    continue  # Below threshold
+
+                # Build pattern hash from the pair
+                pair_key = ':'.join(sorted([gt_a, gt_b]))
+                pattern_hash = hashlib.md5(
+                    f"template_resonance:{pair_key}".encode()
+                ).hexdigest()[:16]
+
+                # Count how many agents independently solved both game types
+                try:
+                    disc_row = self.db.execute_query("""
+                        SELECT COUNT(DISTINCT agent_id) as cnt
+                        FROM winning_sequences
+                        WHERE is_active = 1
+                          AND (game_type = ? OR game_type = ?)
+                        GROUP BY agent_id
+                        HAVING COUNT(DISTINCT game_type) = 2
+                    """, (gt_a, gt_b))
+                    independent = len(disc_row) if disc_row else 1
+                except Exception:
+                    independent = 1
+
+                resonance_score = sim_score * math.log(independent + 1) * 1.2
+
+                pattern = {
+                    'pattern_hash': pattern_hash,
+                    'resonance_score': resonance_score,
+                    'role_diversity': 0,  # Unknown at template level
+                    'independent_discoverers': independent,
+                    'roles_found': [],
+                    'game_types': [gt_a, gt_b],
+                    'sequence_ids': [],
+                    'theory_type': 'template_overlap',
+                    'control_type': 'structural',
+                    'strategy_type': 'general',
+                }
+
+                self._store_resonance_pattern(pattern, {
+                    'working_theory_required': f'template_overlap:{pair_key}',
+                    'self_model_required': 'structural',
+                })
+
+                new_patterns.append(pattern)
+
+                logger.info(
+                    f"[RESONANCE-TEMPLATE] {gt_a}<->{gt_b} "
+                    f"sim={sim_score:.2f} score={resonance_score:.2f} "
+                    f"discoverers={independent}"
+                )
+
+        return new_patterns
+
+    @staticmethod
+    def _template_similarity(
+        concepts_a: List[Dict],
+        concepts_b: List[Dict],
+        templates_a: List[List],
+        templates_b: List[List],
+    ) -> float:
+        """Compute structural similarity between two game types.
+
+        Combines two signals:
+        1. Layout-signature overlap (invariant positions in sequence_concepts)
+        2. Viral package template positional match
+
+        Returns 0.0-1.0 similarity score.
+        """
+        scores: List[float] = []
+
+        # --- Signal 1: concept layout_signature overlap ---
+        for ca in concepts_a:
+            sig_a_raw = ca.get('layout_signature', '[]')
+            try:
+                sig_a = json.loads(sig_a_raw) if isinstance(sig_a_raw, str) else sig_a_raw
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not sig_a:
+                continue
+
+            for cb in concepts_b:
+                sig_b_raw = cb.get('layout_signature', '[]')
+                try:
+                    sig_b = json.loads(sig_b_raw) if isinstance(sig_b_raw, str) else sig_b_raw
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if not sig_b:
+                    continue
+
+                # Positional overlap ratio
+                min_len = min(len(sig_a), len(sig_b))
+                if min_len == 0:
+                    continue
+                matches = sum(1 for k in range(min_len) if sig_a[k] == sig_b[k])
+                scores.append(matches / min_len)
+
+        # --- Signal 2: viral package template overlap ---
+        for ta in templates_a:
+            if not ta:
+                continue
+            for tb in templates_b:
+                if not tb:
+                    continue
+                min_len = min(len(ta), len(tb))
+                if min_len == 0:
+                    continue
+                # Strip wildcard prefixes for comparison
+                def _clean(x):
+                    return x.lstrip('*') if isinstance(x, str) else x
+                matches = sum(1 for k in range(min_len) if _clean(ta[k]) == _clean(tb[k]))
+                scores.append(matches / min_len)
+
+        if not scores:
+            return 0.0
+        return sum(scores) / len(scores)
+
+    # =========================================================================
+    # PHASE 3.3: Visual Embedding Resonance
+    # =========================================================================
+
+    def detect_visual_resonance(
+        self,
+        generation: int = 0,
+        similarity_threshold: float = 0.80,
+        min_embeddings_per_game: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Detect cross-game resonance from visual embedding similarity.
+
+        Reads pre-computed frame_embeddings (positive score_delta) from the DB,
+        computes a centroid per game_type, then finds game-type pairs whose
+        centroids exceed ``similarity_threshold`` in cosine space.
+
+        This is the THIRD resonance signal:
+        - ``detect_resonance()``: belief-based (role-diverse convergence)
+        - ``scan_compressed_templates()``: structural (sequence concept overlap)
+        - ``detect_visual_resonance()``: visual (embedding space proximity)
+
+        No torch dependency -- only numpy for centroid arithmetic.
+
+        Args:
+            generation: Current generation (for logging).
+            similarity_threshold: Cosine similarity threshold (default 0.80).
+            min_embeddings_per_game: Minimum embeddings required per game type
+                to form a meaningful centroid.
+
+        Returns:
+            List of newly-detected visual resonance patterns.
+        """
+        import math
+
+        try:
+            import numpy as np
+        except ImportError:
+            logger.debug("[RESONANCE-VISUAL] numpy not available")
+            return []
+
+        new_patterns: List[Dict[str, Any]] = []
+
+        # Load positive-outcome embeddings grouped by game_type
+        try:
+            rows = self.db.execute_query("""
+                SELECT game_type, embedding
+                FROM frame_embeddings
+                WHERE score_delta > 0
+                ORDER BY score_delta DESC
+                LIMIT 4000
+            """)
+        except Exception as e:
+            logger.debug(f"[RESONANCE-VISUAL] Embedding query failed: {e}")
+            return new_patterns
+
+        if not rows:
+            logger.debug("[RESONANCE-VISUAL] No positive-outcome embeddings found")
+            return new_patterns
+
+        # Group embeddings by game_type
+        embeds_by_game: Dict[str, List] = {}
+        for row in rows:
+            gt = row['game_type']
+            try:
+                embed = np.frombuffer(row['embedding'], dtype=np.float32)
+                if embed.shape[0] == 128:
+                    embeds_by_game.setdefault(gt, []).append(embed)
+            except Exception:
+                continue
+
+        # Compute L2-normalized centroid per game_type
+        centroids: Dict[str, Any] = {}
+        for gt, embeds in embeds_by_game.items():
+            if len(embeds) < min_embeddings_per_game:
+                continue
+            stacked = np.stack(embeds)
+            centroid = stacked.mean(axis=0)
+            norm = np.linalg.norm(centroid)
+            if norm > 1e-8:
+                centroids[gt] = centroid / norm
+
+        game_types = list(centroids.keys())
+        if len(game_types) < 2:
+            logger.debug(
+                f"[RESONANCE-VISUAL] Only {len(game_types)} game type(s) "
+                f"with enough embeddings, need 2+"
+            )
+            return new_patterns
+
+        # Pairwise cosine similarity between centroids
+        for i, gt_a in enumerate(game_types):
+            for gt_b in game_types[i + 1:]:
+                sim = float(np.dot(centroids[gt_a], centroids[gt_b]))
+
+                if sim < similarity_threshold:
+                    continue
+
+                # Build pattern hash
+                pair_key = ':'.join(sorted([gt_a, gt_b]))
+                pattern_hash = hashlib.md5(
+                    f"visual_resonance:{pair_key}".encode()
+                ).hexdigest()[:16]
+
+                # Count independent discoverers (agents that beat both games)
+                try:
+                    disc_row = self.db.execute_query("""
+                        SELECT COUNT(DISTINCT agent_id) as cnt
+                        FROM winning_sequences
+                        WHERE is_active = 1
+                          AND (game_type = ? OR game_type = ?)
+                        GROUP BY agent_id
+                        HAVING COUNT(DISTINCT game_type) = 2
+                    """, (gt_a, gt_b))
+                    independent = len(disc_row) if disc_row else 1
+                except Exception:
+                    independent = 1
+
+                resonance_score = sim * math.log(independent + 1) * 1.1
+
+                pattern = {
+                    'pattern_hash': pattern_hash,
+                    'resonance_score': resonance_score,
+                    'role_diversity': 0,
+                    'independent_discoverers': independent,
+                    'roles_found': [],
+                    'game_types': [gt_a, gt_b],
+                    'sequence_ids': [],
+                    'theory_type': 'visual_similarity',
+                    'control_type': 'embedding',
+                    'strategy_type': 'general',
+                }
+
+                self._store_resonance_pattern(pattern, {
+                    'working_theory_required': f'visual_similarity:{pair_key}',
+                    'self_model_required': 'embedding',
+                })
+
+                new_patterns.append(pattern)
+
+                logger.info(
+                    f"[RESONANCE-VISUAL] {gt_a}<->{gt_b} "
+                    f"cosine={sim:.3f} score={resonance_score:.2f}"
+                )
+
+        return new_patterns
+
+    # =========================================================================
+    # COMBINED RESONANCE SCORING (Phase 3.3)
+    # =========================================================================
+
+    def get_combined_resonance(self) -> Dict[str, Dict[str, Any]]:
+        """Aggregate all three resonance signals into a combined score per pair.
+
+        For each game-type pair in ``resonance_patterns``, computes:
+
+        - **belief_score**: from role-diverse convergence (``detect_resonance``)
+        - **template_score**: from structural overlap (``scan_compressed_templates``)
+        - **visual_score**: from embedding similarity (``detect_visual_resonance``)
+        - **combined_score**: ``max(signals) * agreement_bonus``
+
+        Agreement bonus: 1.5x if 2 signals agree, 2.0x if all 3.
+
+        Returns:
+            Dict mapping ``"game_a:game_b"`` -> combined resonance info dict.
+        """
+        try:
+            rows = self.db.execute_query("""
+                SELECT pattern_hash, resonance_score, theory_type, game_types
+                FROM resonance_patterns
+                WHERE resonance_score > 0
+                ORDER BY resonance_score DESC
+            """)
+        except Exception:
+            return {}
+
+        if not rows:
+            return {}
+
+        # Group by game-type pair
+        pair_signals: Dict[str, Dict[str, float]] = {}
+        for row in rows:
+            try:
+                game_types = json.loads(row['game_types']) if row['game_types'] else []
+            except (json.JSONDecodeError, TypeError):
+                game_types = []
+
+            if len(game_types) < 2:
+                continue
+
+            pair_key = ':'.join(sorted(game_types[:2]))
+            if pair_key not in pair_signals:
+                pair_signals[pair_key] = {
+                    'belief': 0.0, 'template': 0.0, 'visual': 0.0
+                }
+
+            theory = row.get('theory_type', '')
+            score = row.get('resonance_score', 0.0) or 0.0
+
+            if theory == 'template_overlap':
+                pair_signals[pair_key]['template'] = max(
+                    pair_signals[pair_key]['template'], score
+                )
+            elif theory == 'visual_similarity':
+                pair_signals[pair_key]['visual'] = max(
+                    pair_signals[pair_key]['visual'], score
+                )
+            else:
+                pair_signals[pair_key]['belief'] = max(
+                    pair_signals[pair_key]['belief'], score
+                )
+
+        # Compute combined scores with agreement bonus
+        combined: Dict[str, Dict[str, Any]] = {}
+        for pair_key, signals in pair_signals.items():
+            active_signals = sum(1 for v in signals.values() if v > 0)
+            max_signal = max(signals.values())
+
+            # 1.5x if 2 signals agree, 2.0x if all 3
+            if active_signals >= 3:
+                agreement_bonus = 2.0
+            elif active_signals >= 2:
+                agreement_bonus = 1.5
+            else:
+                agreement_bonus = 1.0
+
+            combined_score = max_signal * agreement_bonus
+
+            combined[pair_key] = {
+                'game_types': pair_key.split(':'),
+                'belief_score': signals['belief'],
+                'template_score': signals['template'],
+                'visual_score': signals['visual'],
+                'active_signals': active_signals,
+                'agreement_bonus': agreement_bonus,
+                'combined_score': combined_score,
+            }
+
+        return combined
 
     # =========================================================================
     # RESONANCE QUERIES - Role-specific pattern lookups

@@ -1,16 +1,21 @@
 """
-Core Gameplay v2.0 - Clean, Modular Game Engine
-===============================================
+Core Gameplay v3.0 - Convenience Wrapper
+========================================
 
-This is the main entry point for playing ARC-AGI-3 games.
+Thin convenience wrapper around the production ``GamePlayer`` (sync path)
+and the lightweight ``GameLoop`` (async state-machine path).
+
+Both paths feed through ``ContextBuilder`` so that rungs always receive
+an identical ``DecisionContext`` contract.
 
 Architecture:
-- arc_api_adapter.py: Wraps the arc_agi SDK
-- game_loop.py: Game loop state machine
-- decision_rung_system.py: Modular 42-rung decision system
-- context_builder.py: Build context for decisions
-- outcome_processor.py: Process action results
-- learning_systems.py: Coordinate all learning
+    GameplayEngine (this file)
+        |
+        +-- play_single_game()            -> delegates to GamePlayer.play_game_standalone()
+        +-- play_single_game_async()      -> delegates to GameLoop.run() (async)
+        +-- play_multiple_games()         -> sequential calls to play_single_game()
+        |
+        shared: ContextBuilder, DecisionRungSystem, OutcomeProcessor
 
 Usage:
     from core_gameplay import GameplayEngine
@@ -26,11 +31,8 @@ Usage:
     # List available games
     games = engine.list_games()
 
-    # Get scorecard
-    scorecard = engine.get_scorecard()
-
 Key Classes:
-    - GameplayEngine: Main orchestrator
+    - GameplayEngine: Main orchestrator (convenience wrapper)
     - GameResult: Result of a complete game (from learning_systems)
     - AgentConfig: Agent configuration (from context_builder)
 """
@@ -90,13 +92,22 @@ class EngineConfig:
 
 class GameplayEngine:
     """
-    Main entry point for ARC-AGI-3 gameplay.
+    Convenience wrapper for ARC-AGI-3 gameplay.
 
-    This is a thin orchestrator that wires together:
-    - API adapter (arc_agi SDK wrapper)
-    - Game loop (state machine)
-    - Decision system (42 modular rungs)
-    - Learning systems (CODS, replay, self-model)
+    Provides two game-playing paths that share the same ``ContextBuilder``
+    and ``DecisionRungSystem``:
+
+    * **Sync path** (``play_single_game``): Constructs a minimal
+      ``GamePlayer`` instance with no evolution-specific engines.
+      Uses ``ContextBuilder.build_from_runner_state()`` — the same
+      context contract as production evolution runs.
+
+    * **Async path** (``play_single_game_async``): Delegates to
+      ``GameLoop`` for lightweight async execution.  Uses
+      ``ContextBuilder.build()`` with ``LoopState``.
+
+    Both paths produce ``DecisionContext`` → ``decision_rung_system.decide()``
+    so rungs see an identical contract regardless of entry point.
 
     Usage:
         engine = GameplayEngine()
@@ -199,30 +210,111 @@ class GameplayEngine:
         agent_config: Optional[AgentConfig] = None,
         max_actions: Optional[int] = None,
         render_mode: Optional[str] = None,
+        use_async: bool = False,
     ) -> GameResult:
         """
         Play a single game.
+
+        By default uses the sync ``GamePlayer`` path (same context
+        contract as production evolution runs).  Pass ``use_async=True``
+        to use the lightweight ``GameLoop`` state machine instead.
 
         Args:
             game_id: Game identifier (e.g., "ls20", "vc33")
             agent_config: Optional agent configuration
             max_actions: Maximum actions allowed (default from config)
             render_mode: Render mode ("terminal", "human", None)
+            use_async: Use async GameLoop instead of sync GamePlayer
 
         Returns:
             GameResult with final score, levels completed, and action sequence
-
-        Example:
-            result = engine.play_single_game("ls20")
-            print(f"Score: {result.final_score}, Levels: {result.levels_completed}")
         """
-        # Use async version internally
-        return asyncio.run(self.play_single_game_async(
+        if use_async:
+            return asyncio.run(self.play_single_game_async(
+                game_id=game_id,
+                agent_config=agent_config,
+                max_actions=max_actions,
+                render_mode=render_mode,
+            ))
+
+        return self._play_via_game_player(
             game_id=game_id,
             agent_config=agent_config,
             max_actions=max_actions,
-            render_mode=render_mode,
-        ))
+        )
+
+    def _play_via_game_player(
+        self,
+        game_id: str,
+        agent_config: Optional[AgentConfig] = None,
+        max_actions: Optional[int] = None,
+    ) -> GameResult:
+        """Play a game using the sync GamePlayer path.
+
+        Constructs a minimal GamePlayer with no evolution-specific
+        engines and delegates to ``play_game_standalone()``.
+        Uses ``ContextBuilder.build_from_runner_state()`` — same
+        context contract as production evolution.
+        """
+        agent_config = agent_config or AgentConfig(agent_id=f"agent-{self._games_played}")
+        max_actions = max_actions or self._config.default_max_actions
+
+        try:
+            from engines.perception.player_localizer import PlayerLocalizer
+            from engines.perception.property_extractor import PropertyExtractor
+            from event_bus import EventBus
+            from evolution_types import GameResult as EvolutionGameResult
+            from game_player import GamePlayer
+            from pipeline_assertions import PipelineAssertions
+
+            # Minimal dependency set — no mastery, no concept_discovery
+            player = GamePlayer(
+                db=self._db,
+                arcade=self._api._arcade if hasattr(self._api, '_arcade') else self._api,
+                context_builder=self._context_builder,
+                decision_system=self.decision_system,
+                event_bus=EventBus(),
+                pipe=PipelineAssertions(self._db),
+                player_localizer=PlayerLocalizer(),
+                property_extractor=PropertyExtractor(),
+                mastery_system=None,
+                concept_discovery_engine=None,
+                max_actions=max_actions,
+                verbose=self._config.verbose,
+            )
+
+            evo_result: EvolutionGameResult = player.play_game_standalone(
+                game_id=game_id,
+                agent_id=agent_config.agent_id,
+            )
+
+            # Convert evolution_types.GameResult -> learning_systems.GameResult
+            result = GameResult(
+                game_id=evo_result.game_id,
+                final_score=evo_result.score,
+                levels_completed=evo_result.levels_completed,
+                win_levels=evo_result.total_levels,
+                total_actions=evo_result.actions_taken,
+                is_win=evo_result.is_win,
+                is_full_win=evo_result.is_win and evo_result.levels_completed >= evo_result.total_levels,
+                action_sequence=evo_result.action_sequence,
+                agent_id=evo_result.agent_id,
+            )
+
+            # Update session stats
+            self._games_played += 1
+            if result.is_win:
+                self._total_wins += 1
+
+            return result
+        except ImportError as e:
+            # Fallback to async path if GamePlayer dependencies missing
+            print(f"[WARN] GamePlayer not available ({e}), falling back to async path")
+            return asyncio.run(self.play_single_game_async(
+                game_id=game_id,
+                agent_config=agent_config,
+                max_actions=max_actions,
+            ))
 
     async def play_single_game_async(
         self,
@@ -483,8 +575,11 @@ def list_all_games() -> List[str]:
 # =============================================================================
 
 if __name__ == "__main__":
-    print("Core Gameplay v2.0 - Quick Test")
+    print("Core Gameplay v3.0 - Quick Test")
     print("=" * 50)
+    print("  Sync path:  GamePlayer.play_game_standalone()")
+    print("  Async path: GameLoop.run()")
+    print()
 
     # Test in offline mode
     config = EngineConfig(

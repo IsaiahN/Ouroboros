@@ -705,6 +705,74 @@ class RepresentationLearner:
         return results[:top_k]
 
     # ========================================================================
+    # COMPLETION EMBEDDINGS - For resonance detection (Phase 3.3)
+    # ========================================================================
+
+    def get_completion_embeddings(
+        self,
+        game_type: Optional[str] = None,
+        min_score_delta: float = 0.0,
+        limit_per_game: int = 200,
+    ) -> Dict[str, List[np.ndarray]]:
+        """
+        Get embeddings for frames with positive outcomes, grouped by game_type.
+
+        Used by ResonanceDetector to find visual/structural similarity across
+        games.  Completion frames (positive score_delta) represent "what
+        success looks like" in embedding space.
+
+        No model required - reads pre-computed embeddings from DB.
+
+        Args:
+            game_type: Optional filter to a specific game type.
+            min_score_delta: Minimum score improvement to qualify.
+            limit_per_game: Maximum embeddings per game type.
+
+        Returns:
+            Dict mapping game_type -> list of 128-dim numpy arrays.
+        """
+        result: Dict[str, List[np.ndarray]] = {}
+
+        where_clauses = ["score_delta > ?"]
+        params: List[Any] = [min_score_delta]
+
+        if game_type:
+            where_clauses.append("game_type = ?")
+            params.append(game_type)
+
+        where_sql = " AND ".join(where_clauses)
+
+        try:
+            rows = self.db.execute_query(f"""
+                SELECT game_type, embedding
+                FROM frame_embeddings
+                WHERE {where_sql}
+                ORDER BY score_delta DESC
+                LIMIT ?
+            """, (*params, limit_per_game * 20))
+        except Exception as e:
+            logger.debug(f"Completion embedding query failed: {e}")
+            return result
+
+        if not rows:
+            return result
+
+        counts: Dict[str, int] = {}
+        for row in rows:
+            gt = row['game_type']
+            if counts.get(gt, 0) >= limit_per_game:
+                continue
+            try:
+                embed = np.frombuffer(row['embedding'], dtype=np.float32)
+                if embed.shape[0] == self.latent_dim:
+                    result.setdefault(gt, []).append(embed.copy())
+                    counts[gt] = counts.get(gt, 0) + 1
+            except Exception:
+                continue
+
+        return result
+
+    # ========================================================================
     # EMBEDDING COMPUTATION FOR DATABASE
     # ========================================================================
 

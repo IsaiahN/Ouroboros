@@ -75,9 +75,11 @@ class Concept:
     discovered_at: datetime = field(default_factory=datetime.now)
 
 
-# Pre-defined conceptual primitives (from CODS design)
-# These are targets that the system can discover
-CONCEPTUAL_PRIMITIVES = {
+# Pre-defined seed concepts (innate priors from CODS design).
+# Phase 5.2: These are the SEED concepts -- the system can also discover
+# genuinely novel "emergent" concepts at runtime that get stored in the DB
+# with source='emergent'.  The registry is queried via _get_full_concept_registry().
+SEED_CONCEPT_REGISTRY = {
     'containment': {
         'components': ['boundary_detection', 'capacity_estimation', 'overflow_prediction'],
         'semantic_model': 'Bounded regions with finite capacity',
@@ -202,6 +204,18 @@ class ConceptDiscoveryEngine:
             )
         """)
 
+        # Phase 5.2: Add source/lineage columns for emergent concept tracking
+        for col, col_def in [
+            ('source', "TEXT DEFAULT 'seed'"),
+            ('lineage', "TEXT"),  # JSON: which seed concepts contributed
+        ]:
+            try:
+                self.db.execute_query(
+                    f"ALTER TABLE discovered_concepts ADD COLUMN {col} {col_def}"
+                )
+            except Exception:
+                pass  # Column already exists
+
         # Concept-operator associations
         self.db.execute_query("""
             CREATE TABLE IF NOT EXISTS concept_operator_map (
@@ -321,6 +335,10 @@ class ConceptDiscoveryEngine:
         Check if any pattern has emerged as a concept.
         A concept emerges when a pattern succeeds across N different games.
 
+        Phase 5.2: Patterns that meet the emergence threshold but match NO
+        existing concept (seed or emergent) are automatically confirmed as
+        new emergent concepts with ``source='emergent'``.
+
         Args:
             min_games: Minimum games for concept confirmation
             min_operators: Minimum operators using the pattern
@@ -346,7 +364,7 @@ class ConceptDiscoveryEngine:
                 operators_count >= min_operators and
                 success_rate >= min_success_rate):
 
-                # Match to known conceptual primitives
+                # Match to known conceptual primitives (seed + emergent)
                 matched_concept = self._match_to_known_concept(pattern)
 
                 concept_dict = {
@@ -359,19 +377,134 @@ class ConceptDiscoveryEngine:
                 }
                 emerging_concepts.append(concept_dict)
 
-                logger.info(
-                    f"[CONCEPT EMERGE] Pattern '{pattern}' emerged! "
-                    f"{games_count} games, {operators_count} operators, "
-                    f"{success_rate:.0%} success rate"
-                )
+                # Phase 5.2: Auto-confirm as emergent concept when no seed matches
+                if matched_concept is None:
+                    emergent_name = self._generate_emergent_name(
+                        pattern, list(data.operators), list(data.games),
+                    )
+                    lineage = self._compute_concept_lineage(
+                        pattern, list(data.operators),
+                    )
+                    logger.info(
+                        "[CONCEPT EMERGENT] Novel concept '%s' from pattern '%s' "
+                        "(%d games, %d operators, %.0f%% success, lineage=%s)",
+                        emergent_name, pattern, games_count, operators_count,
+                        success_rate * 100, lineage,
+                    )
+                    self.confirm_concept(
+                        pattern,
+                        name=emergent_name,
+                        source='emergent',
+                        lineage=lineage,
+                    )
+                else:
+                    logger.info(
+                        "[CONCEPT EMERGE] Pattern '%s' emerged! "
+                        "%d games, %d operators, %.0f%% success rate",
+                        pattern, games_count, operators_count, success_rate * 100,
+                    )
 
         return emerging_concepts
 
+    # ------------------------------------------------------------------
+    # Phase 5.2: Dynamic Concept Registry
+    # ------------------------------------------------------------------
+
+    def _get_full_concept_registry(self) -> Dict[str, Dict[str, Any]]:
+        """Return merged registry of seed + emergent concepts.
+
+        Seed concepts come from ``SEED_CONCEPT_REGISTRY`` (the 7 innate
+        priors).  Emergent concepts are loaded from the ``discovered_concepts``
+        table where ``source = 'emergent'``.  The merged dict uses concept
+        name as key, matching the seed dict's structure so all callers work
+        unchanged.
+        """
+        registry: Dict[str, Dict[str, Any]] = dict(SEED_CONCEPT_REGISTRY)
+
+        try:
+            rows = self.db.execute_query("""
+                SELECT name, pattern, games_proven, operators_using,
+                       semantic_model, lineage
+                FROM discovered_concepts
+                WHERE source = 'emergent'
+            """)
+            for row in rows or []:
+                name = row['name']
+                if name in registry:
+                    continue  # Seed takes priority
+                registry[name] = {
+                    'components': json.loads(row.get('operators_using') or '[]'),
+                    'semantic_model': row.get('semantic_model') or f"Emergent: {name}",
+                    'organizes_operators': json.loads(row.get('operators_using') or '[]'),
+                    'keywords': self._extract_keywords(row.get('pattern', '')),
+                    'source': 'emergent',
+                    'lineage': json.loads(row.get('lineage') or '[]'),
+                }
+        except Exception as e:
+            logger.debug("Failed to load emergent concepts into registry: %s", e)
+
+        return registry
+
+    @staticmethod
+    def _extract_keywords(pattern: str) -> List[str]:
+        """Derive keyword list from a pattern string for fuzzy matching."""
+        # Split on common delimiters, keep tokens >= 3 chars
+        import re
+        tokens = re.split(r'[\s_\-/+.,:;]+', pattern.lower())
+        return [t for t in tokens if len(t) >= 3]
+
+    @staticmethod
+    def _generate_emergent_name(
+        pattern: str,
+        operators: List[str],
+        games: List[str],
+    ) -> str:
+        """Auto-generate a human-readable name for an emergent concept.
+
+        Combines the first 2 operator stems with a game-count suffix,
+        e.g. ``flow_seal_4g`` (4 games).
+        """
+        # Take first two operator tokens
+        op_tokens: List[str] = []
+        for op in operators[:2]:
+            # e.g. 'boundary_seal_check' -> 'boundary_seal'
+            parts = op.replace('-', '_').split('_')
+            op_tokens.append('_'.join(parts[:2]))
+
+        stem = '_'.join(op_tokens) if op_tokens else pattern[:20]
+        return f"{stem}_{len(games)}g"
+
+    def _compute_concept_lineage(self, pattern: str, operators: List[str]) -> List[str]:
+        """Determine which seed concepts contributed to an emergent concept.
+
+        Checks each seed concept's keywords against the pattern and operators.
+        Returns a list of seed concept names that show overlap.
+        """
+        lineage: List[str] = []
+        combined_text = (pattern + ' ' + ' '.join(operators)).lower()
+
+        for seed_name, seed_data in SEED_CONCEPT_REGISTRY.items():
+            keywords = seed_data.get('keywords', [])
+            if any(kw in combined_text for kw in keywords):
+                lineage.append(seed_name)
+
+        return lineage
+
     def _match_to_known_concept(self, pattern: str) -> Optional[str]:
-        """Check if pattern matches a known conceptual primitive."""
+        """Check if pattern matches a known concept (seed OR emergent)."""
         pattern_lower = pattern.lower()
 
-        for concept_name, concept_data in CONCEPTUAL_PRIMITIVES.items():
+        # Check seed concepts first (higher priority)
+        for concept_name, concept_data in SEED_CONCEPT_REGISTRY.items():
+            keywords = concept_data.get('keywords', [])
+            if any(kw in pattern_lower for kw in keywords):
+                return concept_name
+
+        # Phase 5.2: Also check emergent concepts from DB
+        full_registry = self._get_full_concept_registry()
+        for concept_name, concept_data in full_registry.items():
+            if concept_name in SEED_CONCEPT_REGISTRY:
+                continue  # Already checked above
             keywords = concept_data.get('keywords', [])
             if any(kw in pattern_lower for kw in keywords):
                 return concept_name
@@ -381,7 +514,9 @@ class ConceptDiscoveryEngine:
     def confirm_concept(
         self,
         pattern: str,
-        name: Optional[str] = None
+        name: Optional[str] = None,
+        source: str = 'seed',
+        lineage: Optional[List[str]] = None,
     ) -> Optional[Concept]:
         """
         Confirm a candidate pattern as a concept.
@@ -389,6 +524,9 @@ class ConceptDiscoveryEngine:
         Args:
             pattern: The pattern to confirm
             name: Optional human-readable name
+            source: ``'seed'`` if it matches a seed concept,
+                    ``'emergent'`` if genuinely novel (Phase 5.2)
+            lineage: List of seed concept names that contributed
 
         Returns:
             Confirmed Concept or None if candidate not found
@@ -405,7 +543,7 @@ class ConceptDiscoveryEngine:
 
         # Match to known concept for semantic model
         matched = self._match_to_known_concept(pattern)
-        known_data = CONCEPTUAL_PRIMITIVES.get(matched, {}) if matched else {}
+        known_data = self._get_full_concept_registry().get(matched, {}) if matched else {}
 
         # Create concept
         concept = Concept(
@@ -421,13 +559,14 @@ class ConceptDiscoveryEngine:
             computational_analog=known_data.get('computational_analog')
         )
 
-        # Save to database
+        # Save to database (with Phase 5.2 source/lineage columns)
+        lineage_json = json.dumps(lineage or [])
         self.db.execute_query("""
             INSERT INTO discovered_concepts
             (concept_id, name, pattern, games_proven, operators_using,
              confidence, semantic_model, biological_analog, physical_analog,
-             computational_analog)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             computational_analog, source, lineage)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             concept.concept_id,
             concept.name,
@@ -438,7 +577,9 @@ class ConceptDiscoveryEngine:
             concept.semantic_model,
             concept.biological_analog,
             concept.physical_analog,
-            concept.computational_analog
+            concept.computational_analog,
+            source,
+            lineage_json,
         ))
 
         self.confirmed_concepts[concept_id] = concept
@@ -476,12 +617,12 @@ class ConceptDiscoveryEngine:
         if not self.unlock_manager:
             return 0
 
-        # Find required primitives from CONCEPTUAL_PRIMITIVES
+        # Find required primitives from concept registry
         matched_name = self._match_to_known_concept(concept.pattern)
         if not matched_name:
             return 0
 
-        known_data = CONCEPTUAL_PRIMITIVES.get(matched_name, {})
+        known_data = self._get_full_concept_registry().get(matched_name, {})
         required_components = known_data.get('components', [])
 
         unlock_attempts = 0

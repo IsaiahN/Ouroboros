@@ -17,6 +17,7 @@ without emotional context by sharing WHEN and HOW to use knowledge.
 """
 
 import json
+import logging
 import os
 import sys
 import time
@@ -60,9 +61,11 @@ class HorizontalTransferEngine:
         """Initialize horizontal transfer engine with emotion awareness."""
         self.db = db
         self.sensation_engine = SensationEngine(db)
+        self.logger = logging.getLogger(__name__)
 
-        # Transfer success rate tracking
-        self.transfer_success_rates = {
+        # Base transfer rates (priors) -- Phase 5.1 keeps these as fallbacks
+        # Actual rates are computed adaptively via _get_adaptive_rate()
+        self._base_transfer_rates = {
             'layer_1_genome': 0.15,     # Rare but high impact
             'layer_2_epigenetic': 0.45, # Medium frequency, inherited
             'layer_3_somatic': 0.75     # Frequent, emotion-enhanced
@@ -164,7 +167,8 @@ class HorizontalTransferEngine:
             compatibility = self.calculate_emotional_compatibility(donor_id, recipient_id)
 
             # Determine transfer success probability
-            base_rate = self.transfer_success_rates[transfer_type]
+            # Phase 5.1: Use adaptive rate instead of hardcoded base rate
+            base_rate = self._get_adaptive_rate(transfer_type, generation)
             emotion_bonus = (compatibility - 0.5) * 0.4  # +/-20% based on compatibility
             success_probability = max(0.1, min(base_rate + emotion_bonus, 0.9))
 
@@ -224,6 +228,104 @@ class HorizontalTransferEngine:
         elif 'layer_3' in transfer_type:
             return 3
         return 0
+
+    # ------------------------------------------------------------------
+    # Phase 5.1: Adaptive Transfer Rates
+    # ------------------------------------------------------------------
+
+    def _get_adaptive_rate(self, transfer_type: str, generation: int) -> float:
+        """Compute an adaptive transfer success rate from historical outcomes.
+
+        Queries the last 50 transfers of this layer and blends the observed
+        success rate with the base prior:
+
+            adaptive = 0.7 * historical_rate + 0.3 * base_rate
+
+        Falls back to the base rate when fewer than 5 historical transfers
+        exist (cold-start protection). Clamped to [0.05, 0.95].
+
+        Logs significant rate changes to ``network_regulation_history``.
+        """
+        base_rate = self._base_transfer_rates.get(transfer_type, 0.5)
+
+        try:
+            rows = self.db.execute_query("""
+                SELECT transfer_successful
+                FROM horizontal_transfer_events
+                WHERE transfer_type = ?
+                ORDER BY transfer_timestamp DESC
+                LIMIT 50
+            """, (transfer_type,))
+
+            if not rows or len(rows) < 5:
+                # Not enough history -- stick with the prior
+                return base_rate
+
+            successes = sum(1 for r in rows if r.get('transfer_successful'))
+            historical_rate = successes / len(rows)
+
+            # Blend: 70% evidence, 30% prior
+            adaptive_rate = 0.7 * historical_rate + 0.3 * base_rate
+
+            # Clamp to safe bounds
+            adaptive_rate = max(0.05, min(adaptive_rate, 0.95))
+
+            # Log if the rate has shifted significantly from base
+            if abs(adaptive_rate - base_rate) > 0.05:
+                self._log_rate_adaptation(
+                    transfer_type=transfer_type,
+                    generation=generation,
+                    old_value=base_rate,
+                    new_value=adaptive_rate,
+                    sample_size=len(rows),
+                    historical_rate=historical_rate,
+                )
+
+            return adaptive_rate
+
+        except Exception as e:
+            self.logger.warning(
+                "Adaptive rate query failed for %s, using base rate: %s",
+                transfer_type, e,
+            )
+            return base_rate
+
+    def _log_rate_adaptation(
+        self,
+        transfer_type: str,
+        generation: int,
+        old_value: float,
+        new_value: float,
+        sample_size: int,
+        historical_rate: float,
+    ) -> None:
+        """Record a transfer-rate adaptation in ``network_regulation_history``.
+
+        Only called when the adaptive rate diverges meaningfully from the
+        base prior, so the table stays compact.
+        """
+        try:
+            reg_id = f"reg_xfer_{uuid.uuid4().hex[:12]}"
+            self.db.execute_query("""
+                INSERT INTO network_regulation_history (
+                    regulation_id, generation, parameter_name,
+                    old_value, new_value, adjustment_magnitude,
+                    net_signal_strength, predicted_improvement,
+                    failing_metrics_addressed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                reg_id,
+                generation,
+                f"transfer_rate_{transfer_type}",
+                old_value,
+                new_value,
+                abs(new_value - old_value),
+                historical_rate,
+                f"sample_size={sample_size}",
+                f"adaptive transfer rate for {transfer_type}",
+            ))
+        except Exception as e:
+            self.logger.warning("Failed to log rate adaptation: %s", e)
 
     def _transfer_genome_traits(self, donor_id: str, recipient_id: str, transfer_id: str) -> bool:
         """

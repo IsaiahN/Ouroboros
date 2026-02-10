@@ -45,6 +45,11 @@ def get_primitive_suggester():
     from engines.social.primitive_suggester import get_primitive_suggester as _get
     return PrimitiveSuggester, _get
 
+def get_package_compressor():
+    """Get PackageCompressor for clustering and merging similar viral packages."""
+    from engines.social.package_compressor import PackageCompressor
+    return PackageCompressor
+
 # Backward compatibility stub - raises warning
 def get_cods_engine():
     """DEPRECATED: CODS engine has been replaced by PrimitiveSuggester."""
@@ -57,9 +62,9 @@ def get_cods_engine():
     )
     # Return stub classes that won't break existing code but won't do anything useful
     class CODSEngineStub:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *_args, **_kwargs):
             pass
-        def get_action_suggestion(self, *args, **kwargs):
+        def get_action_suggestion(self, *_args, **_kwargs):
             return None
     class CODSGameContextStub:
         pass

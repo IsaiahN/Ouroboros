@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 class EventType(Enum):
+    # Infrastructure events (original)
     RUN_INIT = auto()
     ACTION_PROPOSALS = auto()
     ACTION_CHOSEN = auto()
@@ -37,6 +38,15 @@ class EventType(Enum):
     SEQUENCE_REPLAY_FINISHED = auto()
     CODS_OPERATOR_USED = auto()
     LESSON_INTERPRETATION_READY = auto()
+
+    # Gameplay domain events (Phase 0.3)
+    LEVEL_UP = auto()         # Payload: game_id, agent_id, level, actions_taken, score
+    GAME_WON = auto()         # Payload: game_id, agent_id, actions_taken, total_score
+    GAME_OVER = auto()        # Payload: game_id, agent_id, actions_taken, levels_completed
+    AGENT_DEATH = auto()      # Payload: game_id, agent_id, action_count, last_action
+    PATTERN_DISCOVERED = auto()   # Payload: pattern_type, game_id, agent_id, details
+    GENERATION_COMPLETE = auto()  # Payload: generation, stats_dict
+    MASTERY_TIER_CHANGE = auto()  # Payload: game_type, level_number, old_tier, new_tier, generation
 
 
 GuardCode = Tuple[str, Dict[str, Any]]  # (code, detail payload)

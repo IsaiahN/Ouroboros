@@ -319,6 +319,204 @@ class PipelineAssertions:
         return ok
 
     # ------------------------------------------------------------------
+    # Phase 6.2: Data Contract Assertions
+    # ------------------------------------------------------------------
+    # Validate that data structures flowing between components match their
+    # expected schema.  Run on a SAMPLE every generation (not every action).
+    # ------------------------------------------------------------------
+
+    # Required keys for a DecisionContext dict (the 11 no-default fields)
+    _CONTEXT_REQUIRED = frozenset({
+        'game_id', 'game_type', 'level', 'score', 'levels_completed',
+        'win_levels', 'game_state', 'action_count', 'budget_remaining',
+        'budget_used_percent', 'phase',
+    })
+
+    def assert_context_contract(self, context) -> bool:
+        """Verify a DecisionContext (dict or dataclass) has all required keys.
+
+        Call on a sample context each generation to detect interface drift.
+        """
+        self.checks_run += 1
+        data = context if isinstance(context, dict) else vars(context)
+        missing = self._CONTEXT_REQUIRED - set(data.keys())
+        if missing:
+            print(f"  {self.TAG_BREAK} DecisionContext missing keys: {missing}")
+            self.checks_failed += 1
+            return False
+        return True
+
+    _VIRAL_REQUIRED = frozenset({
+        'package_id', 'package_name', 'package_type',
+        'discovery_generation', 'generation_discovered',
+    })
+
+    def assert_viral_package_contract(self, package: dict) -> bool:
+        """Verify a viral package dict has all required columns."""
+        self.checks_run += 1
+        if not isinstance(package, dict):
+            print(f"  {self.TAG_BREAK} Viral package is not a dict: {type(package)}")
+            self.checks_failed += 1
+            return False
+        missing = self._VIRAL_REQUIRED - set(package.keys())
+        if missing:
+            print(f"  {self.TAG_BREAK} Viral package missing keys: {missing}")
+            self.checks_failed += 1
+            return False
+        return True
+
+    _RESONANCE_REQUIRED = frozenset({
+        'pattern_hash', 'resonance_score',
+    })
+
+    def assert_resonance_pattern_contract(self, pattern: dict) -> bool:
+        """Verify a resonance pattern dict has required fields."""
+        self.checks_run += 1
+        if not isinstance(pattern, dict):
+            print(f"  {self.TAG_BREAK} Resonance pattern is not a dict: {type(pattern)}")
+            self.checks_failed += 1
+            return False
+        missing = self._RESONANCE_REQUIRED - set(pattern.keys())
+        if missing:
+            print(f"  {self.TAG_BREAK} Resonance pattern missing keys: {missing}")
+            self.checks_failed += 1
+            return False
+        score = pattern.get('resonance_score')
+        if not isinstance(score, (int, float)):
+            print(f"  {self.TAG_BREAK} Resonance score is not numeric: {type(score)}")
+            self.checks_failed += 1
+            return False
+        return True
+
+    _SEQUENCE_REQUIRED = frozenset({
+        'sequence_id', 'game_id', 'level_number',
+        'action_sequence', 'agent_id', 'session_id',
+        'total_actions', 'total_score',
+    })
+
+    def assert_sequence_contract(self, sequence: dict) -> bool:
+        """Verify a winning sequence dict has required fields and valid actions."""
+        self.checks_run += 1
+        if not isinstance(sequence, dict):
+            print(f"  {self.TAG_BREAK} Sequence is not a dict: {type(sequence)}")
+            self.checks_failed += 1
+            return False
+        missing = self._SEQUENCE_REQUIRED - set(sequence.keys())
+        if missing:
+            print(f"  {self.TAG_BREAK} Winning sequence missing keys: {missing}")
+            self.checks_failed += 1
+            return False
+        # Validate action_sequence is a non-empty string/list
+        actions = sequence.get('action_sequence')
+        if not actions:
+            print(f"  {self.TAG_BREAK} Winning sequence has empty action_sequence")
+            self.checks_failed += 1
+            return False
+        return True
+
+    def run_contract_spot_check(self, generation: int) -> dict:
+        """Run contract assertions on a sample of live DB data.
+
+        Checks one random row from each of: viral packages, resonance
+        patterns, and winning sequences.  Returns a summary dict.
+        Persists violation stats to system_logs for historical tracking.
+
+        Call this once per generation from the evolution runner.
+        """
+        stats = {'checked': 0, 'passed': 0, 'failed': 0, 'generation': generation}
+
+        # Sample viral package
+        try:
+            rows = self.db.execute_query("""
+                SELECT * FROM viral_information_packages
+                WHERE is_active = 1
+                ORDER BY RANDOM() LIMIT 1
+            """)
+            if rows:
+                stats['checked'] += 1
+                if self.assert_viral_package_contract(rows[0]):
+                    stats['passed'] += 1
+                else:
+                    stats['failed'] += 1
+        except Exception:
+            pass
+
+        # Sample resonance pattern
+        try:
+            rows = self.db.execute_query("""
+                SELECT * FROM resonance_patterns
+                ORDER BY RANDOM() LIMIT 1
+            """)
+            if rows:
+                stats['checked'] += 1
+                if self.assert_resonance_pattern_contract(rows[0]):
+                    stats['passed'] += 1
+                else:
+                    stats['failed'] += 1
+        except Exception:
+            pass
+
+        # Sample winning sequence
+        try:
+            rows = self.db.execute_query("""
+                SELECT * FROM winning_sequences
+                WHERE is_active = 1
+                ORDER BY RANDOM() LIMIT 1
+            """)
+            if rows:
+                stats['checked'] += 1
+                if self.assert_sequence_contract(rows[0]):
+                    stats['passed'] += 1
+                else:
+                    stats['failed'] += 1
+        except Exception:
+            pass
+
+        # Phase 6.2: Sample decision context from recent action trace
+        try:
+            rows = self.db.execute_query("""
+                SELECT game_id, agent_id, action_number, level_number
+                FROM action_traces
+                ORDER BY ROWID DESC LIMIT 1
+            """)
+            if rows:
+                # Build a minimal context dict that mirrors DecisionContext keys
+                sample_ctx = {
+                    'game_id': rows[0].get('game_id', ''),
+                    'agent_id': rows[0].get('agent_id', ''),
+                    'action_count': rows[0].get('action_number', 0),
+                    'level_number': rows[0].get('level_number', 0),
+                    'available_actions': [1, 2, 3, 4, 5, 6, 7],
+                }
+                stats['checked'] += 1
+                if self.assert_context_contract(sample_ctx):
+                    stats['passed'] += 1
+                else:
+                    stats['failed'] += 1
+        except Exception:
+            pass
+
+        # G4+G5: Persist violation stats to system_logs for historical tracking
+        if stats['checked'] > 0:
+            try:
+                import logging as _logging
+                _logger = _logging.getLogger('pipeline_assertions')
+                if stats['failed'] > 0:
+                    _logger.warning(
+                        "[CONTRACT] Gen %d: %d/%d contract violations",
+                        generation, stats['failed'], stats['checked'],
+                    )
+                else:
+                    _logger.debug(
+                        "[CONTRACT] Gen %d: %d/%d contracts OK",
+                        generation, stats['passed'], stats['checked'],
+                    )
+            except Exception:
+                pass
+
+        return stats
+
+    # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------
     def print_summary(self):

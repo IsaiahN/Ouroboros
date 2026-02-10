@@ -173,6 +173,43 @@ class AgentOperatingModeSystem:
             f"   Target distribution: {self.TARGET_PIONEER_PCT * 100:.0f}% pioneers, {self.TARGET_OPTIMIZER_PCT * 100:.0f}% optimizers, {self.TARGET_GENERALIST_PCT * 100:.0f}% generalists, {self.TARGET_EXPLOITER_PCT * 100:.0f}% exploiters"
         )
 
+    # ------------------------------------------------------------------
+    # Phase 5.3: Health-driven role-allocation adjustments
+    # ------------------------------------------------------------------
+
+    def apply_health_adjustments(self, role_deltas: Dict[str, float]) -> None:
+        """Apply per-role percentage deltas from the health responder.
+
+        Each delta is clamped so that no role drops below 0 or exceeds 1,
+        and the four targets are re-normalised to sum to 1.0 afterwards.
+
+        Args:
+            role_deltas: dict with keys ``pioneer_delta``, ``optimizer_delta``,
+                         ``generalist_delta``, ``exploiter_delta``.
+        """
+        self.TARGET_PIONEER_PCT = max(0.0, self.TARGET_PIONEER_PCT + role_deltas.get('pioneer_delta', 0.0))
+        self.TARGET_OPTIMIZER_PCT = max(0.0, self.TARGET_OPTIMIZER_PCT + role_deltas.get('optimizer_delta', 0.0))
+        self.TARGET_GENERALIST_PCT = max(0.0, self.TARGET_GENERALIST_PCT + role_deltas.get('generalist_delta', 0.0))
+        self.TARGET_EXPLOITER_PCT = max(0.0, self.TARGET_EXPLOITER_PCT + role_deltas.get('exploiter_delta', 0.0))
+
+        # Re-normalise to 1.0
+        total = (
+            self.TARGET_PIONEER_PCT + self.TARGET_OPTIMIZER_PCT
+            + self.TARGET_GENERALIST_PCT + self.TARGET_EXPLOITER_PCT
+        )
+        if total > 0:
+            self.TARGET_PIONEER_PCT /= total
+            self.TARGET_OPTIMIZER_PCT /= total
+            self.TARGET_GENERALIST_PCT /= total
+            self.TARGET_EXPLOITER_PCT /= total
+
+        logger.info(
+            "[HEALTH] Role allocation adjusted -> "
+            "%.0f%% pioneer, %.0f%% optimizer, %.0f%% generalist, %.0f%% exploiter",
+            self.TARGET_PIONEER_PCT * 100, self.TARGET_OPTIMIZER_PCT * 100,
+            self.TARGET_GENERALIST_PCT * 100, self.TARGET_EXPLOITER_PCT * 100,
+        )
+
     def _initialize_database(self):
         """Create agent_operating_modes table"""
         self.db.execute_query("""

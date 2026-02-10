@@ -163,6 +163,49 @@ class DecisionContext:
     sparse_components: List[Dict[str, Any]] = field(default_factory=list)  # Connected components
     sparse_diff: Optional[Dict[str, Any]] = None  # Diff from previous frame
 
+    # =====================================================================
+    # Runtime fields (populated by EvolutionRunner game loop)
+    # These fields exist so that both ContextBuilder.build() (game_loop.py)
+    # and EvolutionRunner.play_game() produce identical context contracts.
+    # =====================================================================
+
+    # Raw observation and available actions
+    frame_data: Optional[Any] = None  # Raw observation object (obs)
+    available_actions: List[int] = field(default_factory=lambda: [1, 2, 3, 4])
+
+    # Action history (evolution_runner tracking)
+    last_action: str = ''
+    last_actions: List[str] = field(default_factory=list)  # Last 5 actions
+    failed_actions: Set[str] = field(default_factory=set)  # Actions that produced no frame change
+
+    # Score tracking
+    score_delta: float = 0.0
+    last_outcome: str = 'neutral'  # 'positive', 'negative', 'neutral', 'death'
+
+    # Mode flags
+    is_novel_game: bool = False  # True for first 50 actions
+    optimization_mode: bool = False  # True when game has a full win
+
+    # Session/scorecard tracking
+    session_id: Optional[str] = None
+    scorecard_id: Optional[str] = None
+
+    # Sequence replay state
+    active_sequence: Optional[List] = None
+    sequence_position: int = 0
+    is_replay: bool = False
+
+    # Stuck tracking
+    recent_stuck_count: int = 0
+
+    # Click exploration (ACTION6)
+    tried_colors: Set = field(default_factory=set)
+    is_action6_only_game: bool = False
+    action6_available: bool = False
+
+    # Progress tracking
+    last_progress_action: int = 0
+
     # Timestamp
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -218,11 +261,6 @@ class DecisionContext:
             'checkpoint_sequence': self.checkpoint_sequence,
             'checkpoint_position': self.checkpoint_position,
 
-            # Active sequence aliases (used by CONTEXT_ADAPTIVE strategy selection)
-            # Maps checkpoint -> active_sequence for unified handling
-            'active_sequence': self.checkpoint_sequence,
-            'sequence_position': self.checkpoint_position,
-
             # Flags
             'is_stuck': self.is_stuck,
             'is_oscillating': self.is_oscillating,
@@ -255,6 +293,37 @@ class DecisionContext:
             'sparse_colors': self.sparse_colors,
             'sparse_components': self.sparse_components,
             'sparse_diff': self.sparse_diff,
+
+            # Runtime fields (evolution_runner game loop)
+            'state': self.game_state.name if hasattr(self.game_state, 'name') else str(self.game_state),
+            'frame_data': self.frame_data,
+            'available_actions': self.available_actions,
+            'level_number': self.level,  # Alias
+            'last_action': self.last_action,
+            'last_actions': self.last_actions,
+            'failed_actions': self.failed_actions,
+            'position': self.agent_position or (32, 32),
+            'player_position': self.agent_position or (32, 32),  # Alias
+            'score_delta': self.score_delta,
+            'last_outcome': self.last_outcome,
+            'frontier_mode': self.is_frontier,  # Alias
+            'is_novel_game': self.is_novel_game,
+            'optimization_mode': self.optimization_mode,
+            'session_id': self.session_id,
+            'scorecard_id': self.scorecard_id,
+            'active_sequence': self.active_sequence,
+            'sequence_position': self.sequence_position,
+            'is_replay': self.is_replay,
+            'replay_mode': self.is_replay,  # Alias
+            'recent_stuck_count': self.recent_stuck_count,
+            'tried_colors': self.tried_colors,
+            'is_action6_only_game': self.is_action6_only_game,
+            'action6_available': self.action6_available,
+            'has_winning_sequence': self.has_winning_sequence,
+            'last_progress_action': self.last_progress_action,
+            'action_budget': self.budget_remaining + self.action_count,  # Total budget
+            'total_budget': self.budget_remaining + self.action_count,  # Alias
+            'frame_changed': True,  # Default; overwritten by runner after action
         }
 
 
@@ -430,6 +499,179 @@ class ContextBuilder:
             recent_events=self._recent_events.copy(),
             frame_delta_count=self._last_frame_delta_count,
         )
+
+    def build_from_runner_state(
+        self,
+        *,
+        game_id: str,
+        obs: Any,
+        agent_id: str,
+        agent_role: str = 'pioneer',
+        w_A: float = 0.5,
+        w_B: float = 0.5,
+        actions_taken: int,
+        max_actions: int,
+        available_actions: List[int],
+        win_levels: int,
+        last_action: str = '',
+        recent_actions: Optional[List[str]] = None,
+        last_frame_changed: bool = True,
+        failed_actions: Optional[set] = None,
+        score: float = 0.0,
+        score_delta: float = 0.0,
+        last_outcome: str = 'neutral',
+        has_full_win: bool = False,
+        active_sequence: Optional[list] = None,
+        sequence_position: int = 0,
+        is_replay_mode: bool = False,
+        has_level_sequence: bool = False,
+        stuck_count: int = 0,
+        tried_colors: Optional[set] = None,
+        frame_hash: str = '',
+        level_start_action_index: int = 0,
+        session_id: Optional[str] = None,
+        scorecard_id: Optional[str] = None,
+    ) -> DecisionContext:
+        """
+        Build context from EvolutionRunner's game loop state.
+
+        This is the single integration point between EvolutionRunner and the
+        decision system. All runtime game state flows through here, ensuring
+        rungs see the same context contract regardless of entry point.
+
+        All parameters are keyword-only to prevent positional argument bugs.
+        """
+        levels_completed = getattr(obs, 'levels_completed', 0) or 0
+        level = levels_completed + 1
+        game_type = game_id[:4] if game_id and len(game_id) >= 4 else game_id
+        budget_remaining = max(0, max_actions - actions_taken)
+        budget_used_percent = actions_taken / max(max_actions, 1)
+        phase = self._determine_phase(budget_used_percent)
+        game_state = getattr(obs, 'state', None)
+
+        # Frame dimensions
+        frame = getattr(obs, 'frame', None)
+        frame_width = 0
+        frame_height = 0
+        if frame is not None:
+            try:
+                if hasattr(frame, 'shape'):
+                    frame_height, frame_width = frame.shape[:2]
+                elif isinstance(frame, list) and len(frame) > 0:
+                    frame_height = len(frame)
+                    frame_width = len(frame[0]) if frame_height > 0 else 0
+            except Exception:
+                pass
+
+        # ACTION6 flags
+        is_action6_only = available_actions == [6]
+        action6_avail = 6 in available_actions
+
+        # Detect frontier and stuck/oscillation from internal state
+        is_frontier = not has_full_win
+        is_stuck = self._detect_stuck()
+        is_oscillating = self._detect_oscillation()
+
+        return DecisionContext(
+            # Game
+            game_id=game_id,
+            game_type=game_type,
+            level=level,
+            score=score,
+            levels_completed=levels_completed,
+            win_levels=win_levels,
+            game_state=game_state,
+
+            # Budget
+            action_count=actions_taken,
+            budget_remaining=budget_remaining,
+            budget_used_percent=budget_used_percent,
+            phase=phase,
+
+            # Agent
+            agent_id=agent_id,
+            agent_role=agent_role,
+            w_A=w_A,
+            w_B=w_B,
+
+            # Position (default center; updated by self-model when available)
+            agent_position=(32, 32),
+            last_position=self._position_history[-1] if self._position_history else None,
+            position_history=self._position_history[-10:],
+
+            # History
+            recent_actions=(recent_actions or [])[-10:],
+            recent_outcomes=self._recent_outcomes[-10:],
+
+            # Exploration
+            is_frontier=is_frontier,
+            exploration_coverage=self._calculate_coverage(),
+            visited_positions=len(self._visited_positions),
+
+            # Sequence
+            has_winning_sequence=has_full_win or has_level_sequence,
+            sequence_step=sequence_position,
+            sequence_length=len(active_sequence) if active_sequence else 0,
+
+            # Frontier checkpoint
+            checkpoint_sequence=self._checkpoint_sequence,
+            checkpoint_position=self._checkpoint_position,
+
+            # Flags
+            is_stuck=is_stuck,
+            is_oscillating=is_oscillating,
+            death_count=self._death_count,
+
+            # Frame
+            frame_width=frame_width,
+            frame_height=frame_height,
+            frame_hash=frame_hash,
+
+            # Event understanding
+            recent_events=self._recent_events.copy(),
+            frame_delta_count=self._last_frame_delta_count,
+
+            # Runtime fields (unique to evolution_runner path)
+            frame_data=obs,
+            available_actions=available_actions,
+            last_action=last_action,
+            last_actions=(recent_actions or [])[-5:],
+            failed_actions=failed_actions or set(),
+            score_delta=score_delta,
+            last_outcome=last_outcome,
+            is_novel_game=actions_taken < 50,
+            optimization_mode=has_full_win,
+            session_id=session_id,
+            scorecard_id=scorecard_id,
+            active_sequence=active_sequence if active_sequence else None,
+            sequence_position=sequence_position,
+            is_replay=is_replay_mode,
+            recent_stuck_count=stuck_count,
+            tried_colors=tried_colors or set(),
+            is_action6_only_game=is_action6_only,
+            action6_available=action6_avail,
+            last_progress_action=level_start_action_index,
+        )
+
+    def update_runner_outcome(self, action: str, outcome_type: str, frame_changed: bool) -> None:
+        """
+        Lightweight update for EvolutionRunner path (no ActionOutcome object).
+
+        Args:
+            action: Action name taken (e.g. 'ACTION4')
+            outcome_type: 'positive', 'negative', 'neutral', 'death'
+            frame_changed: Whether the frame hash changed
+        """
+        self._recent_actions.append(action)
+        if len(self._recent_actions) > 50:
+            self._recent_actions = self._recent_actions[-50:]
+
+        self._recent_outcomes.append(outcome_type)
+        if len(self._recent_outcomes) > 50:
+            self._recent_outcomes = self._recent_outcomes[-50:]
+
+        if outcome_type == 'death':
+            self._death_count += 1
 
     def update(self, action: str, outcome: ActionOutcome, decision_metadata: Optional[Dict[str, Any]] = None) -> None:
         """

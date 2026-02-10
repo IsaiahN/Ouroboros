@@ -18,6 +18,12 @@ Key capabilities:
 The insight: Multiple winning sequences for the same level reveal:
 - INVARIANTS = Actions that appear in ALL sequences (required)
 - VARIANTS = Actions that differ between sequences (adaptable)
+
+Note: A lightweight invariant/variant detector also exists in
+``engines.social.package_compressor.build_template_from_cluster``.
+That version operates on raw action-int lists for viral-package
+clustering, whereas this module provides DB-backed, coordinate-aware,
+relational-pattern analysis with concept-discovery integration.
 """
 
 import os

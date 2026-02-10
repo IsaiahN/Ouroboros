@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Evolution Runner - Clean SDK-based implementation
-=================================================
+Evolution Runner - Thin Orchestrator (Phase 4.1 decomposition)
+==============================================================
 
-Simple, direct implementation using the arc_agi SDK.
-Replaces the bloated autonomous_evolution_runner.py.
+Coordinates agents, games, evolution, and engine cadence.
+Gameplay logic lives in game_player.py.
+Result persistence lives in result_recorder.py.
+Health assertions live in health_monitor.py.
+Shared data types live in evolution_types.py.
 
 Usage:
     python evolution_runner.py --mode=offline --test --game=ls20
@@ -20,18 +23,14 @@ sys.dont_write_bytecode = True
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import argparse
-import asyncio
-import hashlib
 import json
 import random
 import signal
 import uuid
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-import requests
 
 # Load .env
 try:
@@ -44,10 +43,19 @@ except ImportError:
 from arc_agi import Arcade, OperationMode
 from arcengine import GameAction, GameState
 
+from context_builder import ContextBuilder
+
 # Local imports
 from database_interface import DatabaseInterface
 from decision_rung_system import DecisionRungSystem
+from event_bus import EventBus, EventType, make_event
+from evolution_types import AgentState, GameResult
+
+# Extracted modules (Phase 4.1)
+from game_player import GamePlayer
+from health_monitor import HealthMonitor
 from pipeline_assertions import PipelineAssertions
+from result_recorder import ResultRecorder
 
 # Cognitive Router - Full architecture integration (Phases 1-11)
 try:
@@ -66,7 +74,7 @@ except ImportError as e:
 
 # Symbolic reasoning components (Phase 0-1)
 from engines.perception.player_localizer import PlayerLocalizer
-from engines.perception.property_extractor import PropertyExtractor, properties_to_json
+from engines.perception.property_extractor import PropertyExtractor
 from evolutionary_engine import EvolutionaryEngine, calculate_youth_bonus
 
 # Viral package engine for network knowledge sharing
@@ -111,6 +119,27 @@ try:
 except ImportError:
     COLLECTIVE_REASONING_AVAILABLE = False
 
+# Network Health Responder - translates health snapshots into corrective actions
+try:
+    from network_health_responder import NetworkHealthResponder
+    HEALTH_RESPONDER_AVAILABLE = True
+except ImportError:
+    HEALTH_RESPONDER_AVAILABLE = False
+
+# Resonance Detector - cross-game structural similarity (Phase 3.1)
+try:
+    from engines.social.resonance_detector import ResonanceDetector
+    RESONANCE_DETECTOR_AVAILABLE = True
+except ImportError:
+    RESONANCE_DETECTOR_AVAILABLE = False
+
+# Primitive Unlock Manager - bootstrapping mechanism (Phase 3.2)
+try:
+    from primitive_unlock_manager import PrimitiveUnlockManager
+    PRIMITIVE_UNLOCK_AVAILABLE = True
+except ImportError:
+    PRIMITIVE_UNLOCK_AVAILABLE = False
+
 # Concept Discovery Engine - high-level concept discovery (CODS Tier 4)
 try:
     from concept_discovery_engine import ConceptDiscoveryEngine
@@ -146,48 +175,43 @@ try:
 except ImportError:
     OPERATING_MODE_AVAILABLE = False
 
+# Mastery System - mastery-gated replay with stealth ablation (Phase 1.1)
+try:
+    from mastery_system import MasterySystem
+    MASTERY_SYSTEM_AVAILABLE = True
+except ImportError:
+    MASTERY_SYSTEM_AVAILABLE = False
 
-@dataclass
-class AgentState:
-    """Minimal agent state for evolution."""
-    agent_id: str
-    generation: int = 0
-    total_score: float = 0.0
-    games_played: int = 0
-    wins: int = 0
+# System Health Gauges - seven runtime decay detectors (Phase 6.1)
+try:
+    from system_health_gauges import SystemHealthGauges
+    HEALTH_GAUGES_AVAILABLE = True
+except ImportError:
+    HEALTH_GAUGES_AVAILABLE = False
 
-    @property
-    def avg_score(self) -> float:
-        return self.total_score / max(1, self.games_played)
-
-    @property
-    def win_rate(self) -> float:
-        return self.wins / max(1, self.games_played)
-
-
-@dataclass
-class GameResult:
-    """Result of a single game."""
-    game_id: str
-    agent_id: str
-    score: float
-    levels_completed: int
-    total_levels: int
-    is_win: bool
-    actions_taken: int
-    action_sequence: List[str] = field(default_factory=list)
+# System Diagnostic - comprehensive self-diagnostic report (Phase 6.3)
+try:
+    from system_diagnostic import SystemDiagnostic
+    SYSTEM_DIAGNOSTIC_AVAILABLE = True
+except ImportError:
+    SYSTEM_DIAGNOSTIC_AVAILABLE = False
 
 
 class EvolutionRunner:
     """
-    Clean evolution runner using arc_agi SDK directly.
+    Thin orchestrator for the evolution loop.
+
+    Owns engine instantiation and the run/generation/evolve cadence.
+    Delegates gameplay to GamePlayer, result persistence to ResultRecorder,
+    and health assertions to HealthMonitor.
 
     Core loop:
     1. Create agents
-    2. Each agent plays games
-    3. Record results
+    2. Each agent plays games (-> GamePlayer)
+    3. Record results (-> ResultRecorder)
     4. Evolve (select best, mutate, create offspring)
-    5. Repeat
+    5. Post-generation cadence (health, cleanup, engines)
+    6. Repeat
     """
 
     def __init__(
@@ -213,38 +237,32 @@ class EvolutionRunner:
         self.max_actions = max_actions_per_game
         self.target_game = target_game
 
+        # Evolution strategy (mutable -- health responder adjusts between gens)
+        self._evolution_strategy: Dict[str, Any] = {
+            'selection_pressure': 0.5,
+            'crossover_rate': 0.6,
+            'mutation_rate': 0.2,
+            'diversity_mode': True,
+            'focus': 'balanced',
+        }
+
         # SDK setup
         op_mode = {
             'offline': OperationMode.OFFLINE,
             'online': OperationMode.ONLINE,
             'normal': OperationMode.NORMAL,
         }.get(mode.lower(), OperationMode.NORMAL)
-        self.op_mode = op_mode  # Store for tag generation
+        self.op_mode = op_mode
 
         self.arcade = Arcade(operation_mode=op_mode)
 
-        # Scorecard will be created per-agent with proper tags
-        self.current_scorecard_id: Optional[str] = None
-
         # Cognitive Router - Full architecture implementation (Phases 1-11)
-        # This implements the Blackboard + Meta-Planner + Cognitive Graph architecture
-        # with Phenomenology, Epistemic, and Eisenhower layers
         self.cognitive_router: Optional[CognitiveRouter] = None
         self.routing_trace_store: Optional[RoutingTraceStore] = None
-        self._use_cognitive_router = False  # Will be set True if router initializes
+        self._use_cognitive_router = False
 
         if COGNITIVE_ROUTER_AVAILABLE:
             try:
-                # Configure router per architecture spec
-                # max_iterations=15: With 63 rungs, 15 iterations x 5 per call
-                # = 75 rung evals max. Covers full graph in ~13 iterations.
-                # With agreement boost, commits in 2-4 iterations when rungs
-                # agree (0.6+0.15=0.75>0.50).
-                # commit_threshold=0.50: Single confident rung (0.6) can now
-                # commit. Previous 0.65 was unreachable for individual rungs.
-                # time_budget=30.0: First-call engine warm-up (registry init,
-                # DB schema checks) can take 3-8s. 5s budget caused every
-                # cold-start call to timeout, producing 100% fallback.
                 router_config = RouterConfig(
                     max_iterations=15,
                     max_rungs_per_call=5,
@@ -266,39 +284,40 @@ class EvolutionRunner:
                 print(f"[WARN] Could not initialize CognitiveRouter: {e}")
                 self._use_cognitive_router = False
 
-        # Decision system - uses COGNITIVE strategy when router available, LADDER fallback
+        # Decision system
         strategy = 'cognitive' if self._use_cognitive_router else 'ladder'
         self.decision_system = DecisionRungSystem(
             strategy=strategy,
             cognitive_router=self.cognitive_router,
-            routing_trace_store=self.routing_trace_store  # For recording decision traces
+            routing_trace_store=self.routing_trace_store
         )
         self.decision_system.load_ordering(self.rung_ordering)
 
-        if self.verbose and self._use_cognitive_router:
-            print(f"[INIT] DecisionSystem strategy: COGNITIVE (full routing pipeline)")
-        elif self.verbose:
-            print(f"[INIT] DecisionSystem strategy: LADDER (fallback mode)")
+        if self.verbose:
+            strat_name = "COGNITIVE (full routing pipeline)" if self._use_cognitive_router else "LADDER (fallback mode)"
+            print(f"[INIT] DecisionSystem strategy: {strat_name}")
 
-        # Evolutionary engine for sophisticated evolution (youth bonus, prestige, mutation, etc.)
+        # Evolutionary engine
         self.evolutionary_engine = EvolutionaryEngine(self.db)
 
         # State
         self.agents: List[AgentState] = []
         self.current_generation = self._load_generation_from_db()
-        self._start_generation = self.current_generation  # Track where this session began
+        self._start_generation = self.current_generation
         self.running = True
-
-        # Session tracking for action traces
-        self._current_session_id: Optional[str] = None
 
         # Symbolic reasoning components (Phase 0-1)
         self.player_localizer = PlayerLocalizer(confidence_threshold=0.6)
         self.property_extractor = PropertyExtractor(color_quantization=16)
-        self._prev_frame: Optional[np.ndarray] = None  # For localization
-        self._prev_properties: Optional[dict] = None   # For change detection
 
-        # Viral package engine for network knowledge sharing
+        # Context builder - unified context contract (Phase 0.1)
+        self.context_builder = ContextBuilder(db=self.db)
+
+        # Event bus - network-wide pub/sub backbone (Phase 0.3)
+        self.event_bus = EventBus()
+        self.event_bus.set_hook_failure_event(EventType.HOOK_FAILURE_DETECTED)
+
+        # ---- Optional engines (try/except, None if unavailable) ----
         self.viral_package_engine = None
         if VIRAL_PACKAGE_AVAILABLE:
             try:
@@ -308,8 +327,6 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize viral package engine: {e}")
 
-        # Network Intelligence Engine - ecosystem health monitoring
-        # Per Unified Theory: "The database IS the AGI. Agents are temporary cells."
         self.network_intelligence_engine = None
         if NETWORK_INTELLIGENCE_AVAILABLE:
             try:
@@ -319,8 +336,6 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize network intelligence engine: {e}")
 
-        # Horizontal Transfer Engine - viral knowledge spread
-        # Per Unified Theory: "Intelligence spreads through horizontal information transfer"
         self.horizontal_transfer_engine = None
         if HORIZONTAL_TRANSFER_AVAILABLE:
             try:
@@ -330,8 +345,6 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize horizontal transfer engine: {e}")
 
-        # Meta-Learning Curriculum - intelligent game selection
-        # Per Unified Theory: 4-stage curriculum for generalization
         self.meta_learning_curriculum = None
         if META_LEARNING_AVAILABLE:
             try:
@@ -341,8 +354,6 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize meta-learning curriculum: {e}")
 
-        # Agent Lifecycle Manager - safe agent birth/death/revival
-        # Per Unified Theory: "Good players never deleted, just retired"
         self.lifecycle_manager = None
         if LIFECYCLE_MANAGER_AVAILABLE:
             try:
@@ -352,8 +363,6 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize lifecycle manager: {e}")
 
-        # Collective Reasoning Engine - multi-agent ensemble intelligence
-        # Per Unified Theory: "Top performers collaborate on challenging games"
         self.collective_reasoning_engine = None
         if COLLECTIVE_REASONING_AVAILABLE:
             try:
@@ -363,8 +372,15 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize collective reasoning engine: {e}")
 
-        # Concept Discovery Engine - high-level concept discovery (CODS Tier 4)
-        # Per Unified Theory: "Concepts emerge from cross-game pattern recognition"
+        self.health_responder = None
+        if HEALTH_RESPONDER_AVAILABLE:
+            try:
+                self.health_responder = NetworkHealthResponder(self.db)
+                if self.verbose:
+                    print("[INIT] Network health responder initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize health responder: {e}")
+
         self.concept_discovery_engine = None
         if CONCEPT_DISCOVERY_AVAILABLE:
             try:
@@ -374,8 +390,24 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize concept discovery engine: {e}")
 
-        # Universal Pattern Engine - cross-game pattern transfer
-        # Per Unified Theory: "Patterns that transfer across games become universal"
+        self.resonance_detector = None
+        if RESONANCE_DETECTOR_AVAILABLE:
+            try:
+                self.resonance_detector = ResonanceDetector(self.db)
+                if self.verbose:
+                    print("[INIT] Resonance detector initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize resonance detector: {e}")
+
+        self.primitive_unlock_manager = None
+        if PRIMITIVE_UNLOCK_AVAILABLE:
+            try:
+                self.primitive_unlock_manager = PrimitiveUnlockManager(db=self.db)
+                if self.verbose:
+                    print("[INIT] Primitive unlock manager initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize primitive unlock manager: {e}")
+
         self.universal_pattern_engine = None
         if UNIVERSAL_PATTERN_AVAILABLE:
             try:
@@ -385,8 +417,6 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize universal pattern engine: {e}")
 
-        # Games-as-Teachers Engine - lesson extraction from wins
-        # Per Unified Theory: "Games are teachers - each level is a lesson"
         self.games_as_teachers_engine = None
         if GAMES_AS_TEACHERS_AVAILABLE:
             try:
@@ -396,8 +426,6 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize games-as-teachers engine: {e}")
 
-        # Agent Operating Mode System - assigns roles per Unified Theory
-        # Per Unified Theory: "Roles emerge from agent's wA/wB ratios"
         self.operating_mode_system = None
         if OPERATING_MODE_AVAILABLE:
             try:
@@ -407,12 +435,213 @@ class EvolutionRunner:
             except Exception as e:
                 print(f"[WARN] Could not initialize operating mode system: {e}")
 
-    def _load_generation_from_db(self) -> int:
-        """Load the next generation number from database.
+        self.mastery_system = None
+        if MASTERY_SYSTEM_AVAILABLE:
+            try:
+                self.mastery_system = MasterySystem(self.db, event_bus=self.event_bus)
+                if self.verbose:
+                    print("[INIT] Mastery system initialized - replay gating active")
+            except Exception as e:
+                print(f"[WARN] Could not initialize mastery system: {e}")
 
-        Queries the max generation from game_results and agents tables
-        so we continue counting from where the last run left off.
+        # Phase 6.1: System Health Gauges (7 decay detectors)
+        self.health_gauges = None
+        if HEALTH_GAUGES_AVAILABLE:
+            try:
+                self.health_gauges = SystemHealthGauges(self.db)
+                if self.verbose:
+                    print("[INIT] System health gauges initialized (7 gauges)")
+            except Exception as e:
+                print(f"[WARN] Could not initialize health gauges: {e}")
+
+        # Phase 6.3: System Diagnostic (comprehensive self-report)
+        self.system_diagnostic = None
+        if SYSTEM_DIAGNOSTIC_AVAILABLE:
+            try:
+                self.system_diagnostic = SystemDiagnostic(self.db, health_gauges=self.health_gauges)
+                if self.verbose:
+                    print("[INIT] System diagnostic initialized")
+            except Exception as e:
+                print(f"[WARN] Could not initialize system diagnostic: {e}")
+
+        # ---- Extracted sub-systems (Phase 4.1) ----
+        self._game_player = GamePlayer(
+            db=self.db,
+            arcade=self.arcade,
+            context_builder=self.context_builder,
+            decision_system=self.decision_system,
+            event_bus=self.event_bus,
+            pipe=self.pipe,
+            player_localizer=self.player_localizer,
+            property_extractor=self.property_extractor,
+            mastery_system=self.mastery_system,
+            concept_discovery_engine=self.concept_discovery_engine,
+            op_mode=self.op_mode,
+            max_actions=self.max_actions,
+            verbose=self.verbose,
+            use_cognitive_router=self._use_cognitive_router,
+        )
+
+        self._result_recorder = ResultRecorder(
+            db=self.db,
+            pipe=self.pipe,
+            viral_package_engine=self.viral_package_engine,
+            games_as_teachers_engine=self.games_as_teachers_engine,
+            verbose=self.verbose,
+        )
+
+        self._health_monitor = HealthMonitor(
+            db=self.db,
+            population_size=self.population_size,
+            verbose=self.verbose,
+        )
+
+        # Wire event bus subscribers (Phase 0.3)
+        self._wire_event_subscribers()
+
+        # Signal handling (was stray in _record_goal_outcome, now correctly in __init__)
+        signal.signal(signal.SIGINT, self._handle_shutdown)
+
+    # ------------------------------------------------------------------
+    # Event Bus Wiring (Phase 0.3)
+    # ------------------------------------------------------------------
+
+    def _wire_event_subscribers(self) -> None:
+        """Register engine callbacks on the event bus.
+
+        Engines that react to gameplay events subscribe here.
+        All handlers are wrapped so a single subscriber crash
+        never kills the game loop (EventBus catches exceptions).
         """
+        bus = self.event_bus
+
+        # -- Network Intelligence: capture ecosystem snapshot every generation --
+        if self.network_intelligence_engine:
+            _nie = self.network_intelligence_engine
+            def _on_generation_complete_nie(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                gen = payload.get('generation', 0)
+                _nie.capture_ecosystem_snapshot(
+                    generation=gen,
+                )
+            bus.subscribe(EventType.GENERATION_COMPLETE, _on_generation_complete_nie)
+
+        # -- Horizontal Transfer: spread knowledge at generation boundary --
+        if self.horizontal_transfer_engine:
+            _hte = self.horizontal_transfer_engine
+            def _on_generation_complete_hte(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                gen = payload.get('generation', 0)
+                _hte.execute_generation_transfers(
+                    generation=gen,
+                )
+            bus.subscribe(EventType.GENERATION_COMPLETE, _on_generation_complete_hte)
+
+        # -- Concept Discovery: scan for emerging concepts on level-ups --
+        if self.concept_discovery_engine:
+            _cde = self.concept_discovery_engine
+            def _on_level_up_cde(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                _cde.check_concept_emergence()
+            bus.subscribe(EventType.LEVEL_UP, _on_level_up_cde)
+
+        # -- Meta-Learning Curriculum: update stage progress on game outcomes --
+        if self.meta_learning_curriculum:
+            _mlc = self.meta_learning_curriculum
+            def _on_game_won_mlc(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                agent_id = payload.get('agent_id', '')
+                if agent_id:
+                    _mlc.update_stage_progress(agent_id)
+            bus.subscribe(EventType.GAME_WON, _on_game_won_mlc)
+
+            def _on_game_over_mlc(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                agent_id = payload.get('agent_id', '')
+                if agent_id:
+                    _mlc.update_stage_progress(agent_id)
+            bus.subscribe(EventType.GAME_OVER, _on_game_over_mlc)
+
+        # -- Mastery System: recalculate all mastery tiers each generation --
+        if self.mastery_system:
+            _ms = self.mastery_system
+            def _on_generation_complete_ms(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                gen = payload.get('generation', 0)
+                _ms.update_all_mastery(generation=gen)
+            bus.subscribe(EventType.GENERATION_COMPLETE, _on_generation_complete_ms)
+
+        # -- Resonance Detector: opportunistic resonance check on new patterns --
+        if self.resonance_detector:
+            _rd = self.resonance_detector
+            def _on_pattern_discovered_rd(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                game_id = payload.get('game_id', '')
+                if game_id:
+                    beliefs = {
+                        'working_theory_required': payload.get('pattern_type', ''),
+                        'self_model_required': payload.get('details', {}).get('control_type', ''),
+                    }
+                    _rd.get_pattern_resonance(beliefs)
+            bus.subscribe(EventType.PATTERN_DISCOVERED, _on_pattern_discovered_rd)
+
+        # -- Phase 0.3: GAME_WON -> Network Intelligence (immediate snapshot) --
+        if self.network_intelligence_engine:
+            _nie2 = self.network_intelligence_engine
+            def _on_game_won_nie(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                gen = getattr(self, 'current_generation', 0)
+                _nie2.capture_ecosystem_snapshot(
+                    generation=gen,
+                )
+            bus.subscribe(EventType.GAME_WON, _on_game_won_nie)
+
+        # -- Phase 0.3: AGENT_DEATH -> Lifecycle Manager (track death stats) --
+        if self.lifecycle_manager:
+            def _on_agent_death_alm(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                agent_id = payload.get('agent_id', '')
+                game_id = payload.get('game_id', '')
+                if agent_id:
+                    import logging as _logging
+                    _logging.getLogger('lifecycle').info(
+                        "[AGENT-DEATH] agent=%s game=%s action_count=%s",
+                        agent_id, game_id, payload.get('action_count', '?'),
+                    )
+            bus.subscribe(EventType.AGENT_DEATH, _on_agent_death_alm)
+
+        # -- Phase 1.4: GAME_WON -> Concept Discovery (track winning patterns) --
+        if self.concept_discovery_engine:
+            _cde2 = self.concept_discovery_engine
+            def _on_game_won_cde(
+                _et: EventType, payload: Dict[str, Any]
+            ) -> None:
+                _cde2.check_concept_emergence()
+            bus.subscribe(EventType.GAME_WON, _on_game_won_cde)
+
+        count = sum(len(v) for v in bus._subscribers.values())
+        if self.verbose and count > 0:
+            print(f"[INIT] Event bus: {count} subscribers wired across {len(bus._subscribers)} event types")
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _handle_shutdown(self, signum, frame):
+        print("\n[STOP] Shutdown requested...")
+        self.running = False
+
+    def _load_generation_from_db(self) -> int:
+        """Load the next generation number from database."""
         try:
             result = self.db.execute_query("""
                 SELECT MAX(gen) as max_gen FROM (
@@ -429,404 +658,9 @@ class EvolutionRunner:
             print(f"[WARN] Could not load generation from DB: {e}")
         return 0
 
-    def _compute_frame_hash(self, obs: Any) -> str:
-        """Compute hash of frame state for topology matching."""
-        if obs is None:
-            return "null_frame"
-        try:
-            # Get frame data - try multiple attributes
-            frame_data = None
-            for attr in ['frame', 'state', 'grid', 'observation']:
-                if hasattr(obs, attr):
-                    frame_data = getattr(obs, attr)
-                    break
-
-            if frame_data is None:
-                frame_data = str(obs)
-
-            # Convert to string if needed
-            if hasattr(frame_data, 'tolist'):
-                frame_str = str(frame_data.tolist())
-            else:
-                frame_str = str(frame_data)
-
-            return hashlib.md5(frame_str.encode()).hexdigest()[:16]
-        except Exception:
-            return "hash_error"
-
-    def _record_action_trace(
-        self,
-        game_id: str,
-        action_num: int,
-        obs_before: Any,
-        obs_after: Any,
-        score_before: float,
-        score_after: float,
-        level_before: int,
-        level_after: int,
-        is_game_over: bool,
-        coordinates: Optional[Dict] = None,
-    ) -> None:
-        """Record action trace with frame hash and score change.
-
-        This is CRITICAL for learning - without this, the network has no memory.
-        Coordinates are stored for ACTION6 spatial learning.
-        """
-        try:
-            # Compute frame hashes
-            frame_hash_before = self._compute_frame_hash(obs_before)
-            frame_hash_after = self._compute_frame_hash(obs_after)
-            frame_changed = frame_hash_before != frame_hash_after
-
-            # Get frame data as string
-            frame_before_str = None
-            frame_after_str = None
-            try:
-                if obs_before and hasattr(obs_before, 'frame'):
-                    frame_before_str = str(obs_before.frame.tolist() if hasattr(obs_before.frame, 'tolist') else obs_before.frame)
-                if obs_after and hasattr(obs_after, 'frame'):
-                    frame_after_str = str(obs_after.frame.tolist() if hasattr(obs_after.frame, 'tolist') else obs_after.frame)
-            except Exception:
-                pass
-
-            # Serialize coordinates for ACTION6
-            coords_json = None
-            if coordinates:
-                import json as json_lib
-                coords_json = json_lib.dumps(coordinates)
-
-            # Record to database
-            self.db.execute_query("""
-                INSERT INTO action_traces (
-                    session_id, game_id, action_number, coordinates, timestamp,
-                    frame_before, frame_after, frame_changed,
-                    score_before, score_after, score_change,
-                    level_number, resulted_in_game_over,
-                    frame_hash, created_at
-                ) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """, (
-                self._current_session_id,
-                game_id,
-                action_num,
-                coords_json,
-                frame_before_str,
-                frame_after_str,
-                1 if frame_changed else 0,
-                score_before,
-                score_after,
-                score_after - score_before,
-                level_after,
-                1 if is_game_over else 0,
-                frame_hash_before,
-            ))
-        except Exception as e:
-            # Don't let trace recording break gameplay
-            if self.verbose:
-                print(f"    [TRACE-ERR] {e}")
-
-    def _get_frame_array(self, obs: Any) -> Optional[np.ndarray]:
-        """Extract frame as numpy array from observation."""
-        if obs is None:
-            return None
-        try:
-            # Try multiple attributes
-            for attr in ['frame', 'grid', 'observation']:
-                if hasattr(obs, attr):
-                    data = getattr(obs, attr)
-                    if isinstance(data, np.ndarray):
-                        return data
-                    if isinstance(data, list):
-                        # Frame data from ARC games is often a list
-                        return np.array(data, dtype=np.uint8)
-                    if hasattr(data, 'tolist'):
-                        return np.array(data)
-            return None
-        except Exception:
-            return None
-
-    def _record_player_state(
-        self,
-        game_id: str,
-        action_num: int,
-        action_taken: str,
-        obs_before: Any,
-        obs_after: Any,
-        action_result: str,
-        level_number: int,
-    ) -> Optional[dict]:
-        """
-        Record player state for symbolic reasoning (Phase 0-1).
-
-        1. Attempt to localize player sprite
-        2. Extract properties if confident
-        3. Detect property changes
-        4. Record to player_state_history table
-
-        Returns current properties dict or None.
-        """
-        try:
-            # Get frames as numpy arrays
-            frame_before = self._get_frame_array(obs_before)
-            frame_after = self._get_frame_array(obs_after)
-
-            if frame_before is None or frame_after is None:
-                return None
-
-            # Step 1: Attempt player localization
-            localization = self.player_localizer.localize(
-                frame_before, frame_after, action_taken
-            )
-
-            player_region = None
-            player_bbox = localization.get('region')
-            confidence = localization.get('confidence', 0.0)
-
-            # Step 2: Extract properties if confident about player location
-            current_properties = None
-            if confidence >= 0.5 and player_bbox is not None:
-                player_region = self.player_localizer.get_player_region(frame_after)
-                if player_region is not None:
-                    current_properties = self.property_extractor.extract_properties(player_region)
-
-            # Step 3: Detect property changes
-            property_changes = {}
-            if self._prev_properties and current_properties:
-                property_changes = self.property_extractor.properties_changed(
-                    self._prev_properties, current_properties
-                )
-
-                # PHASE 2: Record property transformations to database
-                if property_changes:
-                    self._record_property_transformations(
-                        game_id=game_id,
-                        level_number=level_number,
-                        player_bbox=player_bbox,
-                        property_changes=property_changes
-                    )
-                    if self.verbose:
-                        for prop, change in property_changes.items():
-                            print(f"    [PROP] {prop}: {change['from']} -> {change['to']}")
-
-            # PHASE 3: Track goal outcomes (success/failure at goals)
-            if action_result in ('success', 'win'):
-                self._record_goal_outcome(
-                    game_id=game_id,
-                    level_number=level_number,
-                    player_bbox=player_bbox,
-                    properties=current_properties,
-                    succeeded=True
-                )
-
-            # Step 4: Record to database
-            props_json = properties_to_json(current_properties)
-
-            self.db.execute_query("""
-                INSERT INTO player_state_history (
-                    session_id, game_id, level_number, action_number,
-                    player_region_x, player_region_y, player_region_w, player_region_h,
-                    localization_confidence, properties_json,
-                    dominant_color, shape_phash, orientation,
-                    action_taken, action_resulted_in, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """, (
-                self._current_session_id,
-                game_id,
-                level_number,
-                action_num,
-                player_bbox[0] if player_bbox else None,
-                player_bbox[1] if player_bbox else None,
-                player_bbox[2] if player_bbox else None,
-                player_bbox[3] if player_bbox else None,
-                confidence,
-                props_json,
-                current_properties.get('dominant_color') if current_properties else None,
-                current_properties.get('shape_signature') if current_properties else None,
-                current_properties.get('orientation') if current_properties else None,
-                action_taken,
-                action_result,
-            ))
-
-            # Update state for next iteration
-            self._prev_frame = frame_after
-            self._prev_properties = current_properties
-
-            return current_properties
-
-        except Exception as e:
-            if self.verbose:
-                print(f"    [STATE-ERR] {e}")
-            return None
-
-    def _record_property_transformations(
-        self,
-        game_id: str,
-        level_number: int,
-        player_bbox: Optional[tuple],
-        property_changes: dict
-    ) -> None:
-        """
-        Record property transformations to database (Phase 2).
-
-        When the player's properties change (color, shape, orientation),
-        record what changed and where it happened. This builds a knowledge
-        base of "transformer" locations in the game.
-        """
-        try:
-            for prop_name, change in property_changes.items():
-                # Check if this exact transformation was seen before
-                existing = self.db.execute_query("""
-                    SELECT id, times_observed FROM property_transformations
-                    WHERE game_id = ? AND level_number = ?
-                      AND object_position_x = ? AND object_position_y = ?
-                      AND property_changed = ?
-                      AND value_before = ? AND value_after = ?
-                """, (
-                    game_id, level_number,
-                    player_bbox[0] if player_bbox else None,
-                    player_bbox[1] if player_bbox else None,
-                    prop_name,
-                    str(change.get('from')),
-                    str(change.get('to')),
-                ))
-
-                row = existing[0] if existing else None
-
-                if row:
-                    # Update existing record
-                    new_times = row['times_observed'] + 1
-                    new_confidence = min(0.99, 0.5 + (new_times * 0.1))
-                    self.db.execute_query("""
-                        UPDATE property_transformations SET
-                            times_observed = ?,
-                            confidence = ?,
-                            last_observed = datetime('now')
-                        WHERE id = ?
-                    """, (new_times, new_confidence, row['id']))
-                else:
-                    # Insert new record
-                    self.db.execute_query("""
-                        INSERT INTO property_transformations (
-                            game_id, level_number,
-                            object_position_x, object_position_y,
-                            property_changed, value_before, value_after,
-                            times_observed, confidence, created_at, last_observed
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0.5, datetime('now'), datetime('now'))
-                    """, (
-                        game_id,
-                        level_number,
-                        player_bbox[0] if player_bbox else None,
-                        player_bbox[1] if player_bbox else None,
-                        prop_name,
-                        str(change.get('from')),
-                        str(change.get('to')),
-                    ))
-        except Exception as e:
-            if self.verbose:
-                print(f"    [TRANSFORM-ERR] {e}")
-
-    def _record_goal_outcome(
-        self,
-        game_id: str,
-        level_number: int,
-        player_bbox: Optional[tuple],
-        properties: Optional[dict],
-        succeeded: bool
-    ) -> None:
-        """
-        Record goal outcome to build requirement knowledge (Phase 3).
-
-        When a player succeeds or fails at a goal position, record their
-        properties at that moment. Over time, this reveals what properties
-        are required to complete each goal.
-        """
-        if properties is None:
-            return
-
-        try:
-            # Determine goal_index from level (simplified - could track multiple goals)
-            goal_index = 0  # For now, assume single goal per level
-
-            # Get current stats for this goal
-            existing = self.db.execute_query("""
-                SELECT id, times_succeeded, times_failed
-                FROM goal_requirements
-                WHERE game_id = ? AND level_number = ? AND goal_index = ?
-            """, (game_id, level_number, goal_index))
-
-            row = existing[0] if existing else None
-
-            if row:
-                # Update existing record
-                if succeeded:
-                    new_succeeded = row['times_succeeded'] + 1
-                    new_failed = row['times_failed']
-                else:
-                    new_succeeded = row['times_succeeded']
-                    new_failed = row['times_failed'] + 1
-
-                total = new_succeeded + new_failed
-                new_confidence = new_succeeded / total if total > 0 else 0.0
-
-                self.db.execute_query("""
-                    UPDATE goal_requirements SET
-                        times_succeeded = ?,
-                        times_failed = ?,
-                        confidence = ?,
-                        required_dominant_color = ?,
-                        required_shape_phash = ?,
-                        required_orientation = ?,
-                        last_observed = datetime('now')
-                    WHERE id = ?
-                """, (
-                    new_succeeded,
-                    new_failed,
-                    new_confidence,
-                    str(properties.get('dominant_color')) if succeeded else None,
-                    properties.get('shape_signature') if succeeded else None,
-                    properties.get('orientation') if succeeded else None,
-                    row['id'],
-                ))
-            else:
-                # Insert new record
-                times_succeeded = 1 if succeeded else 0
-                times_failed = 0 if succeeded else 1
-                confidence = 1.0 if succeeded else 0.0
-
-                self.db.execute_query("""
-                    INSERT INTO goal_requirements (
-                        game_id, level_number, goal_index,
-                        goal_position_x, goal_position_y,
-                        required_dominant_color, required_shape_phash, required_orientation,
-                        times_succeeded, times_failed, confidence,
-                        created_at, last_observed
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-                """, (
-                    game_id,
-                    level_number,
-                    goal_index,
-                    player_bbox[0] if player_bbox else None,
-                    player_bbox[1] if player_bbox else None,
-                    str(properties.get('dominant_color')) if succeeded else None,
-                    properties.get('shape_signature') if succeeded else None,
-                    properties.get('orientation') if succeeded else None,
-                    times_succeeded,
-                    times_failed,
-                    confidence,
-                ))
-        except Exception as e:
-            if self.verbose:
-                print(f"    [GOAL-ERR] {e}")
-
-        # Signal handling
-        signal.signal(signal.SIGINT, self._handle_shutdown)
-
-    def _handle_shutdown(self, signum, frame):
-        print("\n[STOP] Shutdown requested...")
-        self.running = False
-
-    def _create_agent_id(self) -> str:
+    @staticmethod
+    def _create_agent_id() -> str:
         """Generate unique agent ID."""
-        import uuid
         return f"agent_{uuid.uuid4().hex[:12]}"
 
     def initialize_population(self) -> List[AgentState]:
@@ -841,10 +675,7 @@ class EvolutionRunner:
             )
             agents.append(agent)
 
-            # Default genome
             genome = '{"exploration_rate": 0.3, "learning_rate": 0.1}'
-
-            # Store in database
             self.db.execute_query("""
                 INSERT OR REPLACE INTO agents (
                     agent_id, generation, agent_type, genome, specialization,
@@ -855,721 +686,239 @@ class EvolutionRunner:
         print(f"[OK] Created {len(agents)} agents")
         return agents
 
-    def _create_scorecard_tags(self, agent: AgentState, game_id: str) -> List[str]:
-        """
-        Generate scorecard tags in the format:
-        branch_Ouroboros-v3, online/offline, game_{type}, agent, agent_{id}, mode_{role}, gen_{n}
-        """
-        # Determine mode string
-        if self.op_mode == OperationMode.ONLINE:
-            mode_tag = "online"
-        elif self.op_mode == OperationMode.OFFLINE:
-            mode_tag = "offline"
-        else:
-            mode_tag = "normal"
-
-        # Get game type (first 4 chars, e.g., "ls20")
-        game_type = game_id[:4] if len(game_id) >= 4 else game_id
-
-        # Get agent role from database (default to generalist)
-        role = "generalist"
-        try:
-            result = self.db.execute_query(
-                "SELECT specialization FROM agents WHERE agent_id = ?",
-                (agent.agent_id,)
-            )
-            if result:
-                role = result[0].get('specialization', 'generalist') or 'generalist'
-        except Exception:
-            pass
-
-        return [
-            "branch_Ouroboros-v3",
-            mode_tag,
-            f"game_{game_type}",
-            "agent",
-            f"agent_{agent.agent_id.replace('agent_', '')}",  # Remove prefix if present
-            f"mode_{role}",
-            f"gen_{agent.generation}",
-        ]
-
-    def _get_or_create_scorecard(self, agent: AgentState, game_id: str) -> Optional[str]:
-        """Get or create a scorecard with proper tags for this agent/game."""
-        try:
-            tags = self._create_scorecard_tags(agent, game_id)
-            scorecard_id = self.arcade.create_scorecard(
-                source_url="https://github.com/BitterTruth-AI/Ouroboros",
-                tags=tags
-            )
-            if self.verbose:
-                print(f"    [SCORECARD] Created: {scorecard_id}")
-                print(f"    [TAGS] {', '.join(tags)}")
-            return scorecard_id
-        except Exception as e:
-            if self.verbose:
-                print(f"    [WARN] Failed to create scorecard: {e}")
-            return None
-
     def get_available_games(self) -> List[str]:
         """Get list of available game IDs."""
         try:
             envs = self.arcade.get_environments()
             game_ids = [e.game_id for e in envs]
-
-            # Filter to target game if specified
             if self.target_game:
                 game_ids = [g for g in game_ids if g.startswith(self.target_game)]
-
             return game_ids
         except Exception as e:
             print(f"[ERROR] Failed to get games: {e}")
             return []
 
+    # ------------------------------------------------------------------
+    # Delegation: play_game -> GamePlayer
+    # ------------------------------------------------------------------
+
     def play_game(self, agent: AgentState, game_id: str) -> GameResult:
-        """
-        Play a single game with an agent.
-
-        Uses the decision system to select actions.
-        Creates a scorecard with proper tags for tracking.
-        """
-        # Create scorecard with proper tags for this agent/game
-        scorecard_id = self._get_or_create_scorecard(agent, game_id)
-
-        env = None
-        try:
-            env = self.arcade.make(game_id, scorecard_id=scorecard_id)
-        except Exception as e:
-            print(f"  [ERROR] Failed to create env for {game_id}: {e}")
-            return GameResult(
-                game_id=game_id,
-                agent_id=agent.agent_id,
-                score=0.0,
-                levels_completed=0,
-                total_levels=1,
-                is_win=False,
-                actions_taken=0,
-            )
-
-        if env is None:
-            print(f"  [ERROR] env is None for {game_id}")
-            return GameResult(
-                game_id=game_id,
-                agent_id=agent.agent_id,
-                score=0.0,
-                levels_completed=0,
-                total_levels=1,
-                is_win=False,
-                actions_taken=0,
-            )
-
-        actions_taken = 0
-        action_sequence = []
-        last_obs = None
-        prev_levels = 0
-        prev_score = 0.0  # Track score for learning
-
-        # Track state for decision context (used by rungs like MapIntelCollisionRung)
-        last_action_str = ''
-        last_frame_changed = True  # Assume first frame is "changed"
-        failed_actions: set = set()  # Track actions that resulted in no change
-        recent_actions: list = []  # Track last N actions for context
-        last_score_delta = 0.0  # Track score change from last action
-        last_outcome_type = 'neutral'  # 'positive', 'negative', 'neutral', 'death'
-        has_full_win = False  # Track if this game type has been fully won before
-        active_sequence: list = []  # Current winning sequence to follow (if any)
-        sequence_position = 0  # Current position in active_sequence
-        is_replay_mode = False  # True when following a known sequence
-        stuck_count = 0  # Count of consecutive stuck frames
-        tried_colors: set = set()  # Colors we've tried clicking (for ACTION6 exploration)
-        level_start_action_index = 0  # Track where current level's actions begin (for per-level winning sequences)
-        current_frame_hash = ''  # Frame hash for FrontierTopologyRung network queries
-        has_level_sequence = False  # Whether a per-level winning sequence exists for the current level
-
-        # Check if game already has a winning sequence (for frontier_mode)
-        try:
-            result = self.db.execute_query("""
-                SELECT action_sequence FROM winning_sequences_full_game
-                WHERE game_id = ? AND is_active = 1
-                ORDER BY efficiency_score DESC LIMIT 1
-            """, (game_id,))
-            if result:
-                has_full_win = True
-                # Load the best sequence for replay
-                seq_data = result[0][0]
-                if seq_data:
-                    import json
-                    if isinstance(seq_data, str):
-                        active_sequence = json.loads(seq_data)
-                    else:
-                        active_sequence = list(seq_data)
-                    is_replay_mode = True
-                    # Track reuse of this sequence
-                    try:
-                        self.db.execute_query("""
-                            UPDATE winning_sequences_full_game
-                            SET times_referenced = COALESCE(times_referenced, 0) + 1,
-                                last_referenced = datetime('now')
-                            WHERE game_id = ? AND is_active = 1
-                        """, (game_id,))
-                    except Exception:
-                        pass  # Non-critical tracking
-        except Exception:
-            has_full_win = False
-
-        # Load per-level winning sequence for level 1 if no full-game sequence
-        if not active_sequence:
-            try:
-                import json as _json
-                game_type = game_id[:4] if len(game_id) >= 4 else game_id
-                level_seq = self.db.execute_query("""
-                    SELECT action_sequence, sequence_id FROM winning_sequences
-                    WHERE game_type = ? AND level_number = 1 AND is_active = 1
-                    ORDER BY efficiency_score DESC LIMIT 1
-                """, (game_type,))
-                if level_seq and level_seq[0].get('action_sequence'):
-                    seq_data = level_seq[0]['action_sequence']
-                    active_sequence = _json.loads(seq_data) if isinstance(seq_data, str) else list(seq_data)
-                    is_replay_mode = True
-                    has_level_sequence = True
-                    # Track sequence reuse (matches winning_sequences_full_game behavior)
-                    try:
-                        self.db.execute_query("""
-                            UPDATE winning_sequences
-                            SET times_referenced = COALESCE(times_referenced, 0) + 1,
-                                last_referenced = datetime('now')
-                            WHERE game_type = ? AND level_number = 1 AND is_active = 1
-                        """, (game_type,))
-                    except Exception:
-                        pass  # Non-critical tracking
-                    if self.verbose:
-                        print(f"    [SEQ-LOAD] Level 1 sequence loaded: {level_seq[0].get('sequence_id', '?')[:16]} ({len(active_sequence)} actions)")
-            except Exception:
-                pass  # No per-level sequences available
-
-        # Reset symbolic reasoning state for new game
-        self.player_localizer.reset()
-        self._prev_frame = None
-        self._prev_properties = None
-
-        # Reset visual analyzer for new game (clear clicked/dead coordinate tracking)
-        try:
-            va = None
-            if hasattr(self, 'decision_system') and hasattr(self.decision_system, '_engine_registry'):
-                registry = self.decision_system._engine_registry
-                if registry:
-                    va = getattr(registry, 'visual_analyzer', None)
-            if va:
-                va.reset_clicked_coordinates()
-                if hasattr(va, 'clear_priority_on_new_game'):
-                    va.clear_priority_on_new_game()
-                # Set agent mode for mode-specific exploration behavior
-                # Read from DB (written by run_generation before play_game is called)
-                try:
-                    agent_row = self.db.execute_query(
-                        "SELECT specialization FROM agents WHERE agent_id = ?",
-                        (agent.agent_id,)
-                    )
-                    agent_mode = agent_row[0]['specialization'] if agent_row and agent_row[0].get('specialization') else 'generalist'
-                except Exception:
-                    agent_mode = 'generalist'
-                if hasattr(va, 'set_agent_mode'):
-                    va.set_agent_mode(agent_mode)
-        except Exception:
-            pass  # Non-critical
-
-        # Create session for action traces (FK requirement)
-        # Junction 4 guard: If this INSERT fails, session_id has no parent row.
-        # With PRAGMA foreign_keys=ON, ALL downstream INSERTs to game_results
-        # and agent_arc_performance will fail with FK violations (silently
-        # caught by try/except). Entire game's data is lost.
-        self._current_session_id = f"session_{uuid.uuid4().hex[:12]}_{int(datetime.now().timestamp())}"
-        try:
-            self.db.execute_query("""
-                INSERT INTO training_sessions (
-                    session_id, game_id, start_time, mode, status, total_actions
-                ) VALUES (?, ?, datetime('now'), 'evolution', 'in_progress', 0)
-            """, (self._current_session_id, game_id))
-        except Exception as e:
-            print(f"    [WARN] Failed to create training session: {e}")
-
-        # Pipeline assertion: verify FK parent row exists before gameplay
-        if not self.pipe.assert_session_exists(self._current_session_id):
-            # FK parent missing -- force-create a fallback session so downstream
-            # writes don't silently fail
-            fallback_id = f"session_fallback_{uuid.uuid4().hex[:8]}"
-            try:
-                self.db.execute_query("""
-                    INSERT INTO training_sessions (
-                        session_id, game_id, start_time, mode, status, total_actions
-                    ) VALUES (?, ?, datetime('now'), 'evolution', 'in_progress', 0)
-                """, (fallback_id, game_id))
-                self._current_session_id = fallback_id
-                print(f"    [PIPE-RECOVER] Created fallback session {fallback_id[:16]}..")
-            except Exception:
-                pass  # Will be caught by downstream assertions
-
-        # Get initial observation and available actions
-        initial_obs = env.observation_space
-        available_actions = getattr(initial_obs, 'available_actions', [1, 2, 3, 4])
-        win_levels = getattr(initial_obs, 'win_levels', 7)
-
-        if self.verbose:
-            print(f"    Game: {game_id} | Available actions: {available_actions} | Win at: {win_levels} levels")
-
-        # Game loop
-        while actions_taken < self.max_actions:
-            if not self.running:
-                break
-
-            # Get current observation from last step (or initial)
-            obs = last_obs if last_obs else initial_obs
-
-            # Get CURRENT available_actions from observation (can change mid-game)
-            current_available = getattr(obs, 'available_actions', None) or available_actions
-
-            # Build context for decision system with available_actions
-            context = {
-                'game_id': game_id,
-                'game_type': game_id[:4] if game_id and len(game_id) >= 4 else '',  # Extract game type prefix
-                'agent_id': agent.agent_id,
-                'actions_taken': actions_taken,
-                'action_count': actions_taken,  # Alias for budget tracking
-                'action_budget': self.max_actions,  # Real budget for fraction computation
-                'budget_used_percent': actions_taken / max(self.max_actions, 1),  # Real fraction
-                'state': str(obs.state) if obs else 'UNKNOWN',
-                'frame_data': obs,
-                'available_actions': current_available,  # Current, not initial
-                'levels_completed': getattr(obs, 'levels_completed', 0),
-                'level': (getattr(obs, 'levels_completed', 0) or 0) + 1,  # Current level (1-indexed)
-                'level_number': (getattr(obs, 'levels_completed', 0) or 0) + 1,  # Alias
-                'win_levels': win_levels,
-                # State tracking for MapIntelCollisionRung and ThreeLayerFilterRung
-                'last_action': last_action_str,
-                'last_actions': recent_actions[-5:] if recent_actions else [],  # Last 5 actions
-                'frame_changed': last_frame_changed,
-                'failed_actions': failed_actions,
-                # Position tracking (default to center if unknown)
-                'position': (32, 32),
-                'player_position': (32, 32),  # Alias
-                # Score tracking
-                'score': getattr(obs, 'score', 0.0),
-                'score_delta': last_score_delta,
-                'last_outcome': last_outcome_type,  # 'positive', 'negative', 'neutral', 'death'
-                # Frontier/mode flags
-                'frontier_mode': not has_full_win,  # Frontier if no full game win yet
-                'is_frontier': not has_full_win,
-                'is_novel_game': actions_taken < 50,  # Novel for first 50 actions
-                'optimization_mode': has_full_win,  # Optimization mode if we have a win
-                # Session tracking
-                'session_id': self._current_session_id,
-                'scorecard_id': scorecard_id,
-                # Sequence tracking (for ThreeTrySequenceRung, MultiStageMatchingRung)
-                'active_sequence': active_sequence,
-                'sequence_position': sequence_position,
-                'is_replay': is_replay_mode,
-                'replay_mode': is_replay_mode,  # Alias
-                # Stuck tracking
-                'recent_stuck_count': stuck_count,
-                # Click exploration tracking
-                'tried_colors': tried_colors,
-                # ACTION6 innate understanding - helps rungs know this is a click-only game
-                # ACTION6 is fundamentally different: it requires (x,y) coordinates
-                'is_action6_only_game': current_available == [6],
-                'action6_available': 6 in current_available,
-                # Frame hash for FrontierTopologyRung network queries
-                'frame_hash': current_frame_hash,
-                # Whether any winning sequence exists for this level
-                'has_winning_sequence': has_full_win or has_level_sequence,
-                # Last action index where progress occurred (for ExplorationPhaseRung staleness)
-                'last_progress_action': level_start_action_index,
-            }
-
-            # Get action from decision system
-            action_data = None  # For ACTION6 coordinates
-            try:
-                # Note: decide(game_state, context) - pass obs as game_state, context as context
-                result = self.decision_system.decide(obs, context)
-
-                # Decision system returns (action_str, reason) tuple
-                if isinstance(result, tuple):
-                    action_str, reason = result
-                    # Extract action number from string like 'ACTION1'
-                    if isinstance(action_str, str) and action_str.startswith('ACTION'):
-                        action_num = int(action_str.replace('ACTION', ''))
-                    else:
-                        action_num = random.choice(current_available)
-
-                    # Extract ACTION6 coordinates from decision system metadata
-                    if action_num == 6 and hasattr(self.decision_system, 'last_decision_metadata'):
-                        metadata = self.decision_system.last_decision_metadata or {}
-                        # Try different coordinate formats from rungs
-                        if 'pixel_position' in metadata:
-                            px, py = metadata['pixel_position']
-                            action_data = {'x': int(px), 'y': int(py)}
-                        elif 'target' in metadata:
-                            target = metadata['target']
-                            action_data = {'x': int(target.get('x', 32)), 'y': int(target.get('y', 32))}
-                        elif 'grid_target' in metadata:
-                            # GridExplorationRung provides coordinates in grid_target
-                            grid_target = metadata['grid_target']
-                            action_data = {'x': int(grid_target.get('x', 32)), 'y': int(grid_target.get('y', 32))}
-                        elif 'x' in metadata and 'y' in metadata:
-                            action_data = {'x': int(metadata['x']), 'y': int(metadata['y'])}
-                        else:
-                            # Fallback: center of screen
-                            action_data = {'x': 32, 'y': 32}
-                            if self.verbose:
-                                print(f"    [WARN] ACTION6 without coordinates, using default (32, 32)")
-
-                elif hasattr(result, 'action'):
-                    action_num = result.action
-                else:
-                    action_num = random.choice(current_available)
-
-                # Ensure action_num is an int
-                if hasattr(action_num, 'value'):
-                    action_num = action_num.value
-
-                # Validate action is in available set - CRITICAL for online mode
-                if action_num not in current_available:
-                    if self.verbose:
-                        # Debug: show which rung returned invalid action
-                        rung_info = reason if 'reason' in dir() and reason else 'unknown'
-                        print(f"    [WARN] Action {action_num} not in {current_available}, picking random | from: {rung_info[:50]}")
-                    action_num = random.choice(current_available)
-
-                action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
-            except Exception as e:
-                # Fallback to random from available actions only
-                if self.verbose:
-                    print(f"    [WARN] Decision failed: {e}, picking random")
-                action_num = random.choice(available_actions)
-                action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
-
-            # Take action with retry logic for transient API errors
-            obs = None
-            max_step_retries = 3
-            step_retry_delay = 2.0
-
-            for step_attempt in range(max_step_retries):
-                try:
-                    obs_before = last_obs if last_obs else initial_obs
-                    # Pass action_data for ACTION6 coordinates
-                    obs = env.step(action, data=action_data)
-
-                    # Check if step returned None (SDK may catch errors internally)
-                    if obs is None:
-                        if step_attempt < max_step_retries - 1:
-                            wait_time = step_retry_delay * (2 ** step_attempt)
-                            print(f"    [API] Step returned None for {action.name}, retry {step_attempt + 1}/{max_step_retries} in {wait_time:.1f}s")
-                            time.sleep(wait_time)
-                            continue
-                        else:
-                            print(f"    [API] Step keeps failing after {max_step_retries} retries, ending game")
-                            break
-
-                    break  # Success - exit retry loop
-
-                except Exception as e:
-                    # Check if it's a server error by inspecting exception message
-                    err_str = str(e)
-                    err_lower = err_str.lower()
-                    is_server_error = any(code in err_lower for code in ['500', '502', '503', '504', 'server error', 'internal server'])
-                    is_rate_limit = '429' in err_lower or 'rate limit' in err_lower
-
-                    if is_server_error or is_rate_limit:
-                        # Transient error - retry with backoff
-                        if step_attempt < max_step_retries - 1:
-                            wait_time = step_retry_delay * (2 ** step_attempt)
-                            print(f"    [API] Server error on {action.name}, retry {step_attempt + 1}/{max_step_retries} in {wait_time:.1f}s")
-                            time.sleep(wait_time)
-                            continue
-                        else:
-                            print(f"    [API] Server error persists after {max_step_retries} retries, ending game")
-                            obs = None
-                            break
-                    else:
-                        # Non-transient error - don't retry
-                        print(f"    [ERROR] Step failed: {type(e).__name__}: {e}")
-                        obs = None
-                        break
-
-            # If step failed completely, end the game
-            if obs is None:
-                print(f"    [ABORT] Ending game {game_id} due to API failure")
-                break
-
-            actions_taken += 1
-            action_sequence.append(action.name)
-
-            # Update state tracking for decision context
-            last_action_str = action.name
-            recent_actions.append(action.name)
-            if len(recent_actions) > 10:
-                recent_actions.pop(0)  # Keep last 10
-
-            # Detect if frame changed (for collision detection)
-            frame_hash_before = self._compute_frame_hash(obs_before)
-            frame_hash_after = self._compute_frame_hash(obs)
-            last_frame_changed = frame_hash_before != frame_hash_after
-            current_frame_hash = frame_hash_after  # Persist for context['frame_hash']
-
-            # CRITICAL FIX: Feed ACTION6 click feedback to visual_analyzer
-            # Without this, the visual_analyzer never learns which coordinates
-            # were tried or which produced frame changes. It generates the same
-            # rigid grid every time, never filtering already-clicked positions.
-            if action.name == 'ACTION6' and action_data:
-                try:
-                    va = None
-                    if hasattr(self, 'decision_system') and hasattr(self.decision_system, '_engine_registry'):
-                        registry = self.decision_system._engine_registry
-                        if registry:
-                            va = getattr(registry, 'visual_analyzer', None)
-                    if va and hasattr(va, 'mark_coordinate_clicked'):
-                        click_x = action_data.get('x', 32)
-                        click_y = action_data.get('y', 32)
-                        va.mark_coordinate_clicked(click_x, click_y, frame_changed=last_frame_changed)
-                except Exception:
-                    pass  # Non-critical - don't break game loop
-
-            # Track failed actions (no change = potential collision/invalid)
-            # EXCEPTION: For ACTION6-only games (click-based like vc33), frame hash
-            # comparison is unreliable - clicks may change game state without visible
-            # frame difference. Don't increment stuck_count for these games to prevent
-            # the InfiniteLoopBreakerRung from firing deterministically at action #18/#34.
-            is_action6_only = current_available == [6]
-            if not last_frame_changed and action.name.startswith('ACTION'):
-                failed_actions.add(action.name)
-                if not is_action6_only:
-                    stuck_count += 1  # Increment stuck counter (movement games only)
-            else:
-                stuck_count = 0  # Reset on successful action
-
-            # Reset stuck counter after emergency fires so the cognitive
-            # router gets a fresh window instead of being permanently locked
-            # out by the self-reinforcing emergency -> no-change -> emergency loop.
-            if 'reason' in dir() and reason and 'EMERGENCY' in reason:
-                stuck_count = 0
-
-            # Update sequence position ONLY if the action taken matches
-            # the expected sequence action. Without this guard, the position
-            # advances every frame regardless of which rung won, "consuming"
-            # the sequence without actually following it.
-            if is_replay_mode and active_sequence and sequence_position < len(active_sequence):
-                expected_action = active_sequence[sequence_position]
-                # Compare action name (e.g. 'ACTION4') to sequence element
-                if action.name == expected_action or action.name == f'ACTION{expected_action}':
-                    sequence_position += 1
-
-            last_obs = obs
-
-            # Track level progress
-            current_levels = getattr(obs, 'levels_completed', 0) or 0
-            level_up = current_levels > prev_levels
-
-            # Calculate score for this step (levels completed as fraction)
-            current_score = current_levels / win_levels if win_levels > 0 else 0.0
-
-            # Update score tracking for context
-            last_score_delta = current_score - prev_score
-            is_game_over = obs and obs.state in (GameState.WIN, GameState.GAME_OVER)
-            is_death = obs and obs.state == GameState.GAME_OVER and not level_up
-
-            # Determine outcome type for context
-            if is_death:
-                last_outcome_type = 'death'
-            elif last_score_delta > 0 or level_up:
-                last_outcome_type = 'positive'
-            elif last_score_delta < 0:
-                last_outcome_type = 'negative'
-            else:
-                last_outcome_type = 'neutral'
-
-            # CRITICAL: Record action trace for learning
-            self._record_action_trace(
-                game_id=game_id,
-                action_num=action_num,
-                obs_before=obs_before,
-                obs_after=obs,
-                score_before=prev_score,
-                score_after=current_score,
-                level_before=prev_levels,
-                level_after=current_levels,
-                is_game_over=is_game_over,
-                coordinates=action_data,
-            )
-
-            # NEW: Record player state for symbolic reasoning (Phase 0-1)
-            action_result = 'continue'
-            if is_game_over:
-                action_result = 'win' if obs.state == GameState.WIN else 'death'
-            elif level_up:
-                action_result = 'success'
-
-            self._record_player_state(
-                game_id=game_id,
-                action_num=actions_taken,
-                action_taken=action.name,
-                obs_before=obs_before,
-                obs_after=obs,
-                action_result=action_result,
-                level_number=current_levels,
-            )
-
-            # CRITICAL FIX: Save per-level winning subsequences on level_up
-            # The architecture requires winning_sequences to store per-level
-            # solutions (winning_sequences table has level_number column).
-            # Previously, only full-game wins were saved, so the matching
-            # pipeline had nothing to replay and no knowledge transferred.
-            if level_up:
-                try:
-                    level_subsequence = action_sequence[level_start_action_index:]
-                    if level_subsequence:
-                        import json as json_lib
-                        level_seq_id = f"seq_{uuid.uuid4().hex[:12]}"
-                        game_type = game_id[:4] if len(game_id) >= 4 else game_id
-                        level_just_beaten = prev_levels + 1  # The level that was just completed
-
-                        self.db.execute_query("""
-                            INSERT INTO winning_sequences (
-                                sequence_id, game_id, game_type, level_number,
-                                action_sequence, total_actions, total_score,
-                                efficiency_score, agent_id, session_id,
-                                generation_discovered, is_active,
-                                initial_frame, final_frame, discovered_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', '[]', datetime('now'))
-                        """, (
-                            level_seq_id,
-                            game_id,
-                            game_type,
-                            level_just_beaten,
-                            json_lib.dumps(level_subsequence),
-                            len(level_subsequence),
-                            current_score,
-                            current_score / max(1, len(level_subsequence)),
-                            agent.agent_id,
-                            self._current_session_id or 'unknown',
-                            self.current_generation,
-                        ))
-                        if self.verbose:
-                            print(f"    [SEQ-SAVE] Level {level_just_beaten} sequence saved: {level_seq_id[:16]} ({len(level_subsequence)} actions)")
-                except Exception as e:
-                    if self.verbose:
-                        print(f"    [SEQ-ERR] Failed to save level sequence: {e}")
-
-                # Reset for next level
-                level_start_action_index = len(action_sequence)
-
-                # Clear visual_analyzer clicked tracking for new level
-                # Coordinates that didn't work on level N may be the
-                # winning click on level N+1 (game state changes)
-                try:
-                    va = None
-                    if hasattr(self, 'decision_system') and hasattr(self.decision_system, '_engine_registry'):
-                        registry = self.decision_system._engine_registry
-                        if registry:
-                            va = getattr(registry, 'visual_analyzer', None)
-                    if va:
-                        va.reset_clicked_coordinates()
-                except Exception:
-                    pass  # Non-critical
-
-                # Load per-level winning sequence for the NEXT level
-                # This is how knowledge from previous agents' level wins
-                # gets reused: after beating level N, load best sequence
-                # for level N+1 from the winning_sequences table.
-                next_level = current_levels + 1  # current_levels already incremented
-                try:
-                    import json as _json_lvl
-                    next_seq = self.db.execute_query("""
-                        SELECT action_sequence, sequence_id FROM winning_sequences
-                        WHERE game_type = ? AND level_number = ? AND is_active = 1
-                        ORDER BY efficiency_score DESC LIMIT 1
-                    """, (game_type, next_level))
-                    if next_seq and next_seq[0].get('action_sequence'):
-                        seq_raw = next_seq[0]['action_sequence']
-                        active_sequence = _json_lvl.loads(seq_raw) if isinstance(seq_raw, str) else list(seq_raw)
-                        sequence_position = 0
-                        is_replay_mode = True
-                        has_level_sequence = True
-                        # Track sequence reuse
-                        try:
-                            self.db.execute_query("""
-                                UPDATE winning_sequences
-                                SET times_referenced = COALESCE(times_referenced, 0) + 1,
-                                    last_referenced = datetime('now')
-                                WHERE game_type = ? AND level_number = ? AND is_active = 1
-                            """, (game_type, next_level))
-                        except Exception:
-                            pass  # Non-critical tracking
-                        if self.verbose:
-                            print(f"    [SEQ-LOAD] Level {next_level} sequence loaded ({len(active_sequence)} actions)")
-                    else:
-                        # No sequence for next level — clear replay state
-                        active_sequence = []
-                        sequence_position = 0
-                        is_replay_mode = False
-                        has_level_sequence = False
-                except Exception:
-                    active_sequence = []
-                    sequence_position = 0
-                    is_replay_mode = False
-                    has_level_sequence = False
-
-            prev_levels = current_levels
-            prev_score = current_score
-
-            # Verbose output
-            if self.verbose:
-                levels = current_levels
-                state_str = str(obs.state).replace('GameState.', '') if obs else '?'
-                level_indicator = ' [LEVEL UP!]' if level_up else ''
-                # Show coordinates for ACTION6
-                coord_str = ''
-                if action.name == 'ACTION6' and action_data:
-                    coord_str = f" @ ({action_data.get('x', '?')}, {action_data.get('y', '?')})"
-
-                # Build routing trace info if using cognitive strategy
-                trace_str = ''
-                if self._use_cognitive_router and 'reason' in dir() and reason:
-                    # Show first 60 chars of reasoning
-                    short_reason = reason[:60] + '...' if len(reason) > 60 else reason
-                    trace_str = f" | {short_reason}"
-
-                print(f"    [{actions_taken:3d}] {action.name:8s}{coord_str} -> levels={levels}/{win_levels} state={state_str}{level_indicator}{trace_str}")
-
-            # Check for game end
-            if obs and obs.state == GameState.WIN:
-                if self.verbose:
-                    print(f"    [WIN!] Game won after {actions_taken} actions!")
-                break
-            if obs and obs.state == GameState.GAME_OVER:
-                if self.verbose:
-                    print(f"    [GAME OVER] after {actions_taken} actions")
-                break
-
-        # Extract results - use levels_completed as the score metric
-        levels_completed = 0
-        total_levels = win_levels
-        is_win = False
-
-        if last_obs:
-            levels_completed = getattr(last_obs, 'levels_completed', 0) or 0
-            is_win = last_obs.state == GameState.WIN
-
-        # Score is based on level progress (0.0 to 1.0)
-        score = levels_completed / total_levels if total_levels > 0 else 0.0
-
-        return GameResult(
+        """Play a single game with an agent (delegates to GamePlayer)."""
+        return self._game_player.play_game(
+            agent=agent,
             game_id=game_id,
-            agent_id=agent.agent_id,
-            score=score,
-            levels_completed=levels_completed,
-            total_levels=total_levels,
-            is_win=is_win,
-            actions_taken=actions_taken,
-            action_sequence=action_sequence,
+            current_generation=self.current_generation,
+            is_running_fn=lambda: self.running,
         )
+
+    # ------------------------------------------------------------------
+    # Collective reasoning helpers
+    # ------------------------------------------------------------------
+
+    def _get_agent_best_action_for_game(self, agent_id: str, game_id: str) -> Optional[Dict]:
+        """Query an agent's most successful action for a given game."""
+        try:
+            rows = self.db.execute_query("""
+                SELECT action_number, coordinates, score_change, level_number
+                FROM action_traces at2
+                JOIN training_sessions ts ON at2.session_id = ts.session_id
+                JOIN game_results gr ON gr.session_id = ts.session_id
+                WHERE at2.game_id = ? AND gr.agent_id = ?
+                  AND at2.score_change > 0
+                ORDER BY at2.score_change DESC
+                LIMIT 1
+            """, (game_id, agent_id))
+
+            if rows:
+                row = rows[0]
+                coords = None
+                if row.get('coordinates'):
+                    try:
+                        coords = json.loads(row['coordinates'])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                return {
+                    'action': row['action_number'],
+                    'coordinates': coords,
+                    'score_change': row['score_change'],
+                    'level': row.get('level_number', 0),
+                }
+
+            rows = self.db.execute_query("""
+                SELECT action_number, COUNT(*) as cnt
+                FROM action_traces at2
+                JOIN training_sessions ts ON at2.session_id = ts.session_id
+                JOIN game_results gr ON gr.session_id = ts.session_id
+                WHERE at2.game_id = ? AND gr.agent_id = ?
+                  AND at2.frame_changed = 1
+                GROUP BY action_number
+                ORDER BY cnt DESC
+                LIMIT 1
+            """, (game_id, agent_id))
+
+            if rows:
+                return {
+                    'action': rows[0]['action_number'],
+                    'coordinates': None,
+                    'score_change': 0.0,
+                    'level': 0,
+                }
+            return None
+        except Exception:
+            return None
+
+    def _run_collective_deliberation(self, game_id: str, results: List) -> Optional[Dict]:
+        """Run full propose/vote/resolve cycle for a stuck game."""
+        cre = self.collective_reasoning_engine
+        if cre is None:
+            return None
+        gen = self.current_generation
+
+        session_id = cre.start_collective_session(
+            game_id=game_id, generation=gen, reasoning_mode='voting',
+        )
+        if not session_id:
+            return None
+
+        session_row = self.db.execute_query("""
+            SELECT agent_ids FROM collective_reasoning_sessions
+            WHERE session_id = ?
+        """, (session_id,))
+        if not session_row:
+            return None
+
+        try:
+            agent_ids = json.loads(session_row[0]['agent_ids'])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            return None
+
+        if len(agent_ids) < 2:
+            return None
+
+        # --- PROPOSE PHASE ---
+        proposal_ids = []
+        proposer_map = {}
+        for aid in agent_ids:
+            best = self._get_agent_best_action_for_game(aid, game_id)
+            if best is None:
+                best = {'action': 1, 'coordinates': None, 'score_change': 0.0}
+
+            confidence = min(1.0, 0.3 + best.get('score_change', 0.0) * 2.0)
+            reasoning = (
+                f"score_delta={best.get('score_change', 0.0):.2f}, "
+                f"level={best.get('level', 0)}"
+            )
+
+            pid = cre.propose_action(
+                session_id=session_id, agent_id=aid,
+                action=best['action'], coordinates=best.get('coordinates'),
+                reasoning=reasoning, confidence=confidence,
+            )
+            if pid:
+                proposal_ids.append(pid)
+                proposer_map[pid] = aid
+
+        if not proposal_ids:
+            cre.complete_session(session_id, final_score=0.0)
+            return None
+
+        # --- VOTE PHASE ---
+        for pid in proposal_ids:
+            proposer = proposer_map[pid]
+            for voter_id in agent_ids:
+                if voter_id == proposer:
+                    continue
+
+                voter_best = self._get_agent_best_action_for_game(voter_id, game_id)
+                voter_score = voter_best.get('score_change', 0.0) if voter_best else 0.0
+
+                proposer_best = self._get_agent_best_action_for_game(proposer, game_id)
+                proposer_score = proposer_best.get('score_change', 0.0) if proposer_best else 0.0
+
+                if proposer_score >= voter_score:
+                    vote_choice = 'for'
+                    vote_reasoning = f"proposer_delta={proposer_score:.2f} >= mine={voter_score:.2f}"
+                elif proposer_score > 0:
+                    vote_choice = 'for'
+                    vote_reasoning = f"positive delta {proposer_score:.2f}"
+                else:
+                    vote_choice = 'against'
+                    vote_reasoning = f"proposer_delta={proposer_score:.2f} < mine={voter_score:.2f}"
+
+                cre.vote_on_proposal(
+                    proposal_id=pid, voting_agent_id=voter_id,
+                    vote_choice=vote_choice, reasoning=vote_reasoning,
+                    confidence=min(1.0, 0.4 + abs(proposer_score - voter_score)),
+                )
+
+        # --- RESOLVE PHASE ---
+        consensus = cre.resolve_voting(session_id, turn_number=0)
+
+        if consensus:
+            cre.record_collective_insight(
+                session_id=session_id, generation=gen,
+                insight_type='consensus_action',
+                description=(
+                    f"Consensus ACTION{consensus.get('proposed_action', '?')} "
+                    f"for {game_id} with "
+                    f"{consensus.get('consensus_ratio', 0)*100:.0f}% agreement"
+                ),
+                contributing_agents=agent_ids,
+                confidence=consensus.get('consensus_ratio', 0.5),
+            )
+            print(f"    [COLLECTIVE] Consensus: ACTION{consensus.get('proposed_action', '?')} "
+                  f"({consensus.get('consensus_ratio', 0)*100:.0f}% agree)")
+
+            # Phase 1.2: Store consensus as a viral package for network distribution
+            try:
+                consensus_action = consensus.get('proposed_action', 1)
+                consensus_ratio = consensus.get('consensus_ratio', 0.5)
+                pkg_id = f"consensus_{game_id}_{gen}_{session_id[:8]}"
+                action_seq = json.dumps([consensus_action])
+                self.db.execute_query("""
+                    INSERT OR IGNORE INTO viral_information_packages (
+                        package_id, package_name, package_type,
+                        action_sequence, virulence, transmission_rate, mutation_rate,
+                        discovery_generation, generation_discovered,
+                        is_active, last_successful_use_generation,
+                        meta_strategy_description
+                    ) VALUES (?, ?, 'consensus_action', ?, ?, 0.3, 0.05, ?, ?, 1, ?, ?)
+                """, (
+                    pkg_id,
+                    f"Consensus_{game_id[:12]}_gen{gen}",
+                    action_seq,
+                    min(1.0, consensus_ratio),  # virulence ~ agreement strength
+                    gen, gen, gen,
+                    f"Collective consensus ACTION{consensus_action} "
+                    f"with {consensus_ratio*100:.0f}% agreement from {len(agent_ids)} agents",
+                ))
+            except Exception as e:
+                import logging as _log
+                _log.getLogger(__name__).debug(
+                    "[COLLECTIVE] Could not store consensus as viral package: %s", e
+                )
+
+        game_results = [r for r in results if r.game_id == game_id]
+        best_score = max((r.score for r in game_results), default=0.0)
+        cre.complete_session(session_id, final_score=best_score)
+
+        return consensus
+
+    def _find_stuck_games(self, results: List[GameResult]) -> List[str]:
+        """Find games where all agents failed to make progress."""
+        game_scores: Dict[str, List[float]] = {}
+        for result in results:
+            game_scores.setdefault(result.game_id, []).append(result.score)
+
+        stuck_games = []
+        for game_id, scores in game_scores.items():
+            if max(scores) < 0.2:
+                stuck_games.append(game_id)
+        return stuck_games
+
+    # ------------------------------------------------------------------
+    # Generation loop
+    # ------------------------------------------------------------------
 
     def run_generation(self) -> Dict[str, Any]:
         """Run one generation of evolution."""
@@ -1585,7 +934,6 @@ class EvolutionRunner:
         print(f"[GAMES] {len(games)} available: {games}")
 
         # ASSIGN OPERATING MODES: Pioneer/Optimizer/Generalist/Exploiter
-        # Per Unified Theory: Roles emerge from agent performance + wA/wB weights
         mode_assignments = {}
         if self.operating_mode_system:
             try:
@@ -1593,36 +941,33 @@ class EvolutionRunner:
                 mode_assignments = self.operating_mode_system.assign_population_modes(
                     generation=self.current_generation,
                     active_agents=agent_ids,
-                    game_id=games[0] if len(games) == 1 else None  # Only pass game_id if single game
+                    game_id=games[0] if len(games) == 1 else None
                 )
-                # Update specialization in agents table so _create_scorecard_tags reads correct mode
-                for agent_id, mode in mode_assignments.items():
+                for agent_id, mode_val in mode_assignments.items():
                     self.db.execute_query(
                         "UPDATE agents SET specialization = ? WHERE agent_id = ?",
-                        (mode, agent_id)
+                        (mode_val, agent_id)
                     )
                 if self.verbose:
-                    mode_counts = {}
+                    mode_counts: Dict[str, int] = {}
                     for m in mode_assignments.values():
                         mode_counts[m] = mode_counts.get(m, 0) + 1
                     print(f"[MODES] Assigned: {mode_counts}")
             except Exception as e:
                 print(f"[WARN] Mode assignment failed, defaulting to generalist: {e}")
 
-        results = []
+        results: List[GameResult] = []
         total_wins = 0
         total_score = 0.0
-
-        # Each agent plays games
         agents_played = 0
         agents_skipped = 0
+
         for agent in self.agents:
             if not self.running:
                 break
 
             try:
-                # Select games for this agent using MetaLearningCurriculum if available
-                # Per Unified Theory: 4-stage curriculum for generalization
+                # Select games for this agent
                 if self.meta_learning_curriculum:
                     try:
                         agent_games = self.meta_learning_curriculum.select_games_for_agent(
@@ -1631,14 +976,12 @@ class EvolutionRunner:
                             num_games=self.games_per_generation
                         )
                         if not agent_games:
-                            # Fallback if curriculum returns empty
                             agent_games = random.sample(games, min(self.games_per_generation, len(games)))
                     except Exception as e:
                         if self.verbose:
                             print(f"    [CURRICULUM] Fallback to random: {e}")
                         agent_games = random.sample(games, min(self.games_per_generation, len(games)))
                 else:
-                    # No curriculum - random selection
                     agent_games = random.sample(games, min(self.games_per_generation, len(games)))
 
                 print(f"\n[AGENT] {agent.agent_id[:12]}... playing {len(agent_games)} games")
@@ -1650,24 +993,25 @@ class EvolutionRunner:
                     result = self.play_game(agent, game_id)
                     results.append(result)
 
-                    # Update agent state
                     agent.games_played += 1
                     agent.total_score += result.score
                     if result.is_win:
                         agent.wins += 1
                         total_wins += 1
-
                     total_score += result.score
 
-                    # Log result
                     status = "[WIN]" if result.is_win else f"[{result.levels_completed}/{result.total_levels}]"
                     print(f"  {game_id}: {status} score={result.score:.1f} actions={result.actions_taken}")
 
-                    # Store in database
-                    self._store_game_result(result)
+                    # Store in database (delegates to ResultRecorder)
+                    self._result_recorder.store_game_result(
+                        result=result,
+                        current_generation=self.current_generation,
+                        session_id=self._game_player.last_session_id,
+                        use_cognitive_router=self._use_cognitive_router,
+                    )
 
-                # Update curriculum progress for this agent after all games
-                # Per Unified Theory: Track stage progression for generalization
+                # Update curriculum progress
                 if self.meta_learning_curriculum:
                     try:
                         self.meta_learning_curriculum.update_stage_progress(agent.agent_id)
@@ -1688,335 +1032,68 @@ class EvolutionRunner:
         avg_score = total_score / max(1, games_played)
         win_rate = total_wins / max(1, games_played)
 
-        print(f"\n[SUMMARY] Gen {self.current_generation}: {agents_played} agents, {games_played} games, {total_wins} wins ({win_rate*100:.1f}%), avg score: {avg_score:.2f}")
+        print(f"\n[SUMMARY] Gen {self.current_generation}: {agents_played} agents, "
+              f"{games_played} games, {total_wins} wins ({win_rate*100:.1f}%), avg score: {avg_score:.2f}")
 
-        # COLLECTIVE REASONING: Try collective approach on stuck games
-        # Per Unified Theory: "Top performers collaborate on challenging games"
+        # COLLECTIVE REASONING on stuck games
         if self.collective_reasoning_engine and total_wins == 0 and self.current_generation > 5:
             try:
-                # Find games with consistent failures
                 stuck_games = self._find_stuck_games(results)
-                if stuck_games and len(stuck_games) > 0:
-                    game_to_try = stuck_games[0]
-                    session_id = self.collective_reasoning_engine.start_collective_session(
-                        game_id=game_to_try,
-                        generation=self.current_generation,
-                        reasoning_mode='voting'
-                    )
-                    if session_id:
-                        print(f"  [COLLECTIVE] Started collective reasoning session for {game_to_try}")
+                for game_to_try in stuck_games[:3]:
+                    consensus = self._run_collective_deliberation(game_to_try, results)
+                    if consensus:
+                        print(f"  [COLLECTIVE] Consensus reached for {game_to_try}")
+                    elif self.verbose:
+                        print(f"  [COLLECTIVE] No consensus for {game_to_try}")
             except Exception as e:
                 if self.verbose:
                     print(f"  [COLLECTIVE-ERR] Collective reasoning failed: {e}")
 
-        # Pipeline assertion: verify generation flow integrity
-        # Detects ANY silent write failure across the entire generation
+        # Pipeline assertions
         self.pipe.assert_generation_flow(self.current_generation, games_played)
         self.pipe.print_summary()
         self.pipe.reset_counters()
 
-        return {
+        # Publish GENERATION_COMPLETE (Phase 0.3)
+        gen_stats = {
             'games_played': games_played,
             'wins': total_wins,
             'win_rate': win_rate,
             'avg_score': avg_score,
+            'agents_played': agents_played,
+            'agents_skipped': agents_skipped,
         }
+        self.event_bus.publish(make_event(
+            EventType.GENERATION_COMPLETE,
+            generation=self.current_generation,
+            stats=gen_stats,
+        ))
 
-    def _find_stuck_games(self, results: List[GameResult]) -> List[str]:
-        """Find games where all agents failed to make progress."""
-        game_scores = {}
-        for result in results:
-            if result.game_id not in game_scores:
-                game_scores[result.game_id] = []
-            game_scores[result.game_id].append(result.score)
+        return gen_stats
 
-        stuck_games = []
-        for game_id, scores in game_scores.items():
-            # Game is "stuck" if max score < 0.2 (didn't complete 2 levels)
-            if max(scores) < 0.2:
-                stuck_games.append(game_id)
-
-        return stuck_games
-
-    def _store_game_result(self, result: GameResult):
-        """Store game result in database."""
-        import uuid
-
-        # Use existing session from play_game (avoids orphan sessions)
-        session_id = self._current_session_id
-        if not session_id:
-            # Fallback: create session if play_game didn't
-            session_id = str(uuid.uuid4())
-            try:
-                self.db.execute_query("""
-                    INSERT INTO training_sessions (
-                        session_id, game_id, start_time, mode, status, total_actions
-                    ) VALUES (?, ?, datetime('now'), 'evolution', 'completed', ?)
-                """, (session_id, result.game_id, result.actions_taken))
-            except Exception:
-                pass
-        else:
-            # Update existing session to completed with final action count
-            try:
-                self.db.execute_query("""
-                    UPDATE training_sessions
-                    SET status = 'completed', total_actions = ?
-                    WHERE session_id = ?
-                """, (result.actions_taken, session_id))
-            except Exception:
-                pass
-
-        # Junction 1 fix: Separate dual writes into independent try blocks.
-        # Previously both INSERTs were in one try block -- if agent_arc_performance
-        # failed (e.g. FK violation, column mismatch), game_results was also lost.
-
-        # WRITE 1: game_results
-        try:
-            self.db.execute_query("""
-                INSERT INTO game_results (
-                    game_id, session_id, start_time, end_time, status,
-                    final_score, total_actions, win_detected,
-                    level_completions, generation
-                ) VALUES (?, ?, datetime('now'), datetime('now'), 'completed',
-                          ?, ?, ?, ?, ?)
-            """, (
-                result.game_id,
-                session_id,
-                result.score,
-                result.actions_taken,
-                result.is_win,
-                result.levels_completed,
-                self.current_generation,
-            ))
-        except Exception as e:
-            print(f"  [PIPE-BREAK] game_results INSERT failed: {e}")
-
-        # WRITE 2: agent_arc_performance (independent -- one failure can't kill both)
-        # CRITICAL: Without this, evolutionary_engine._calculate_standard_fitness()
-        # returns 0.0 for ALL agents. Evolution becomes pure random drift.
-        try:
-            efficiency = result.score / max(1, result.actions_taken)
-            level_bonus = result.levels_completed * 0.1
-            win_bonus = 1.0 if result.is_win else 0.0
-            total_reward = result.score + win_bonus + efficiency + level_bonus
-
-            self.db.execute_query("""
-                INSERT INTO agent_arc_performance (
-                    performance_id, agent_id, game_id, session_id, game_timestamp,
-                    final_score, win_score_threshold, win_achieved, total_actions,
-                    score_efficiency, win_proximity, level_progressions,
-                    strategy_used, genome_config,
-                    base_reward, win_bonus, efficiency_bonus,
-                    level_progression_bonus, total_evolutionary_reward
-                ) VALUES (?, ?, ?, ?, datetime('now'),
-                          ?, ?, ?, ?,
-                          ?, ?, ?,
-                          ?, ?,
-                          ?, ?, ?,
-                          ?, ?)
-            """, (
-                str(uuid.uuid4()),
-                result.agent_id,
-                result.game_id,
-                session_id,
-                result.score,
-                1.0,  # win threshold = perfect score (all levels)
-                result.is_win,
-                result.actions_taken,
-                efficiency,
-                result.score,  # win_proximity = score / 1.0
-                result.levels_completed,
-                'cognitive' if self._use_cognitive_router else 'ladder',
-                '{}',
-                result.score,  # base_reward
-                win_bonus,
-                efficiency,
-                level_bonus,
-                total_reward,
-            ))
-        except Exception as e:
-            print(f"  [PIPE-BREAK] agent_arc_performance INSERT failed: {e}")
-
-        # WRITE 2b: agent_game_diversity UPSERT (feeds 40% diversity fitness)
-        # Without this, _calculate_diversity_fitness_component() returns 0.0
-        # for ALL agents. 40% of evolution signal is dead.
-        try:
-            self.db.execute_query("""
-                INSERT INTO agent_game_diversity (
-                    agent_id, game_id, attempts, first_attempt_score,
-                    best_score, last_attempt_score, is_novel_game,
-                    few_shot_improvement, last_played
-                ) VALUES (?, ?, 1, ?, ?, ?, 1, 0.0, datetime('now'))
-                ON CONFLICT(agent_id, game_id) DO UPDATE SET
-                    attempts = agent_game_diversity.attempts + 1,
-                    last_attempt_score = excluded.last_attempt_score,
-                    best_score = MAX(agent_game_diversity.best_score, excluded.best_score),
-                    is_novel_game = 0,
-                    few_shot_improvement = CASE
-                        WHEN agent_game_diversity.attempts = 1
-                        THEN excluded.last_attempt_score - agent_game_diversity.first_attempt_score
-                        ELSE agent_game_diversity.few_shot_improvement
-                    END,
-                    last_played = datetime('now')
-            """, (
-                result.agent_id,
-                result.game_id,
-                result.score,
-                result.score,
-                result.score,
-            ))
-        except Exception as e:
-            print(f"  [PIPE-BREAK] agent_game_diversity UPSERT failed: {e}")
-
-        # Pipeline assertion: verify BOTH writes landed
-        self.pipe.assert_game_result_stored(session_id, result.game_id, result.agent_id)
-
-        # Store winning sequence if won
-        # NOTE: Each write is in its own try block. The pipeline assertion
-        # is OUTSIDE all try blocks so it ALWAYS fires -- even if the INSERT
-        # threw. This prevents the exact bug pattern we found: assertion
-        # inside a try block gets skipped when the write it guards fails.
-        if result.is_win and result.action_sequence:
-            import json as json_lib
-            sequence_id = f"seq_{uuid.uuid4().hex[:12]}"
-            game_type = result.game_id[:4] if len(result.game_id) >= 4 else result.game_id
-
-            # WRITE 3: winning_sequences (partial)
-            try:
-                self.db.execute_query("""
-                    INSERT INTO winning_sequences (
-                        sequence_id, game_id, game_type, level_number,
-                        action_sequence, total_actions, total_score, efficiency_score,
-                        agent_id, session_id, generation_discovered, is_active,
-                        initial_frame, final_frame, discovered_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', '[]', datetime('now'))
-                """, (
-                    sequence_id,
-                    result.game_id,
-                    game_type,
-                    result.levels_completed,
-                    json_lib.dumps(result.action_sequence),
-                    result.actions_taken,
-                    result.score,
-                    result.score / max(1, result.actions_taken),
-                    result.agent_id,
-                    self._current_session_id or 'unknown',
-                    self.current_generation,
-                ))
-                print(f"    [SAVED] Winning sequence {sequence_id[:12]} for {result.game_id}")
-            except Exception as e:
-                print(f"  [PIPE-BREAK] winning_sequences INSERT failed: {e}")
-
-            # WRITE 4: winning_sequences_full_game (Junction 6 fix)
-            if result.levels_completed >= result.total_levels:
-                try:
-                    full_seq_id = f"fseq_{uuid.uuid4().hex[:12]}"
-                    self.db.execute_query("""
-                        INSERT INTO winning_sequences_full_game (
-                            sequence_id, game_id, total_levels,
-                            agent_id, session_id, action_sequence,
-                            total_actions, total_score, efficiency_score,
-                            game_type, generation_discovered, is_active,
-                            discovered_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
-                    """, (
-                        full_seq_id,
-                        result.game_id,
-                        result.total_levels,
-                        result.agent_id,
-                        self._current_session_id or 'unknown',
-                        json_lib.dumps(result.action_sequence),
-                        result.actions_taken,
-                        result.score,
-                        result.score / max(1, result.actions_taken),
-                        game_type,
-                        self.current_generation,
-                    ))
-                    print(f"    [SAVED] Full-game sequence {full_seq_id[:12]} "
-                          f"for {result.game_id} (replay path now active)")
-                except Exception as fge:
-                    print(f"    [PIPE-BREAK] winning_sequences_full_game INSERT failed: {fge}")
-
-            # Pipeline assertion: ALWAYS fires (outside all try blocks)
-            self.pipe.assert_win_sequence_stored(
-                result.game_id, session_id,
-                is_full_game_win=(result.levels_completed >= result.total_levels),
-            )
-
-            # Non-critical post-win processing (viral packages, lessons)
-            if self.viral_package_engine:
-                try:
-                    package_id = self.viral_package_engine.create_viral_package_from_sequence(
-                        sequence_id=sequence_id,
-                        agent_id=result.agent_id,
-                        generation=self.current_generation,
-                        skip_if_exists=True
-                    )
-                    if package_id:
-                        print(f"    [VIRAL] Created package {package_id[:12]} for network sharing")
-                except Exception as vpe:
-                    if self.verbose:
-                        print(f"    [VIRAL-ERR] Could not create package: {vpe}")
-
-            if self.games_as_teachers_engine:
-                try:
-                    action_ints = []
-                    for act in result.action_sequence:
-                        if isinstance(act, str) and act.startswith('ACTION'):
-                            action_ints.append(int(act.replace('ACTION', '')))
-                        elif isinstance(act, int):
-                            action_ints.append(act)
-
-                    lesson = self.games_as_teachers_engine.extract_lesson(
-                        game_type=game_type,
-                        level_number=result.levels_completed,
-                        winning_sequence=action_ints,
-                        frame_history=None,
-                        working_theory=None
-                    )
-                    if lesson:
-                        concept = lesson.get('concept_demonstrated', 'unknown')
-                        print(f"    [LESSON] Concept demonstrated: {concept}")
-                except Exception as le:
-                    if self.verbose:
-                        print(f"    [LESSON-ERR] Could not extract lesson: {le}")
+    # ------------------------------------------------------------------
+    # Evolve
+    # ------------------------------------------------------------------
 
     def evolve(self):
-        """
-        Evolve population using full EvolutionaryEngine.
+        """Evolve population using full EvolutionaryEngine.
 
-        Features enabled (from Unified Theory):
-        - Youth bonus: Newer agents get breeding opportunities
-        - Prestige system: Network contribution affects breeding priority
-        - Genome mutation: Proper genetic variation with role-based mutation rates
-        - Crossover: Two-parent breeding with epigenetic inheritance
-        - Survival protection: High-prestige agents resist culling
-        - Proper culling: Bottom performers marked inactive (they "die")
+        Features: youth bonus, prestige, genome mutation, crossover,
+        survival protection, proper culling.
 
-        Per Unified Theory:
-        - "Agents die, database persists"
-        - "Anti-Vampire Rule: agents sunset when usefulness wanes"
-        - "Youth Selection Bonus: newer generations get opportunities"
-        - "Prestige affects trust, not access"
+        Cadence dispatches at 5/10/50 gen intervals for network-level engines.
         """
         print(f"\n[EVOLVE] Evolving population via EvolutionaryEngine...")
 
-        # Build evolution strategy with all parameters
         evolution_strategy = {
+            **self._evolution_strategy,
             'generation': self.current_generation,
             'population_size': self.population_size,
-            'selection_pressure': 0.5,
-            'crossover_rate': 0.6,
-            'mutation_rate': 0.2,
-            'diversity_mode': True,  # Enable diversity + meta-learning fitness
-            'focus': 'balanced',
         }
 
         try:
-            # Use full EvolutionaryEngine for sophisticated evolution
             new_population = self.evolutionary_engine.evolve_population(evolution_strategy)
 
-            # Convert database dicts back to AgentState objects for runner
             self.agents = []
             for agent_dict in new_population:
                 agent_state = AgentState(
@@ -2028,17 +1105,16 @@ class EvolutionRunner:
                 )
                 self.agents.append(agent_state)
 
-            # Log evolution results
             print(f"  New population: {len(self.agents)} agents")
             print(f"  Features: youth_bonus, prestige, mutation, crossover, epigenetics")
 
-            # Show top performers with their fitness
             if self.agents:
                 top_agents = sorted(self.agents, key=lambda a: a.avg_score * (1 + a.win_rate), reverse=True)[:3]
                 print(f"  Top performers: {[f'{a.agent_id[:8]}(s={a.avg_score:.1f})' for a in top_agents]}")
 
-            # HORIZONTAL TRANSFER: Spread knowledge between agents
-            # Per Unified Theory: "Intelligence spreads through horizontal information transfer"
+            # ---- Every-generation cadence ----
+
+            # HORIZONTAL TRANSFER
             if self.horizontal_transfer_engine:
                 try:
                     transfers = self.horizontal_transfer_engine.execute_generation_transfers(
@@ -2047,8 +1123,6 @@ class EvolutionRunner:
                     )
                     if transfers > 0:
                         print(f"  [TRANSFER] {transfers} horizontal knowledge transfers completed")
-
-                        # Get transfer statistics
                         if self.verbose:
                             stats = self.horizontal_transfer_engine.get_transfer_statistics(self.current_generation)
                             if stats.get('layer_statistics'):
@@ -2060,58 +1134,219 @@ class EvolutionRunner:
                     if self.verbose:
                         print(f"  [TRANSFER-ERR] Horizontal transfer failed: {e}")
 
-            # NETWORK INTELLIGENCE: Capture ecosystem snapshot
-            # Per Unified Theory: "The database IS the AGI. Agents are temporary cells."
-            if self.network_intelligence_engine and self.current_generation % 5 == 0:
+            # Phase 6.1: HEALTH GAUGES (every generation)
+            if self.health_gauges:
                 try:
-                    snapshot = self.network_intelligence_engine.capture_ecosystem_snapshot(self.current_generation)
-                    health_status = snapshot.get('health_status', 'unknown')
-                    health_score = snapshot.get('health_score', 0.0)
-                    print(f"  [NETWORK] Ecosystem health: {health_status} (score: {health_score:.3f})")
-
-                    # Show key metrics
-                    if self.verbose:
-                        print(f"    Knowledge: {snapshot.get('total_sequences', 0)} sequences, "
-                              f"{snapshot.get('total_patterns', 0)} patterns, "
-                              f"{snapshot.get('unique_games_solved', 0)} games solved")
-                        print(f"    Diversity index: {snapshot.get('knowledge_diversity_index', 0):.3f}")
+                    gauge_result = self.health_gauges.evaluate(self.current_generation)
+                    unhealthy = gauge_result.get('unhealthy_gauges', [])
+                    if unhealthy:
+                        print(f"  [GAUGES] {len(unhealthy)} unhealthy: {', '.join(unhealthy)}")
+                        # Emergency: trigger health responder immediately
+                        if gauge_result.get('emergency') and self.health_responder and self.network_intelligence_engine:
+                            try:
+                                snap = self.network_intelligence_engine.capture_ecosystem_snapshot(self.current_generation)
+                                adj = self.health_responder.get_adjustments(snap, self.current_generation)
+                                if adj.get('triggered_rules'):
+                                    self.health_responder.apply_adjustments(adj, self._evolution_strategy)
+                                    print(f"  [GAUGES] EMERGENCY correction applied: {len(adj['triggered_rules'])} rules")
+                            except Exception:
+                                pass
+                    elif self.verbose:
+                        health = gauge_result.get('memory_retention_score', 0)
+                        print(f"  [GAUGES] All 7 gauges healthy (overall={self.health_gauges._overall_health(gauge_result):.2f})")
                 except Exception as e:
                     if self.verbose:
-                        print(f"  [NETWORK-ERR] Ecosystem snapshot failed: {e}")
+                        print(f"  [GAUGES-ERR] Health gauge evaluation failed: {e}")
 
-            # AGENT LIFECYCLE: Clean up ancient inactive agents periodically
-            # Per Unified Theory: "Good players never deleted, just retired"
-            if self.lifecycle_manager and self.current_generation % 50 == 0:
+            # Phase 6.2: CONTRACT SPOT-CHECK (every generation)
+            if hasattr(self, 'pipe') and self.pipe:
                 try:
-                    cleanup_stats = self.lifecycle_manager.cleanup_ancient_inactive_agents(
-                        current_generation=self.current_generation,
-                        dry_run=False
-                    )
-                    total_deleted = cleanup_stats.get('total_deleted', 0)
-                    if total_deleted > 0:
-                        print(f"  [LIFECYCLE] Cleaned {total_deleted} ancient inactive agents")
+                    cstats = self.pipe.run_contract_spot_check(self.current_generation)
+                    if cstats['failed'] > 0:
+                        print(f"  [CONTRACT] {cstats['failed']}/{cstats['checked']} contract violations detected")
+                    elif self.verbose and cstats['checked'] > 0:
+                        print(f"  [CONTRACT] {cstats['passed']}/{cstats['checked']} contracts OK")
                 except Exception as e:
                     if self.verbose:
-                        print(f"  [LIFECYCLE-ERR] Agent cleanup failed: {e}")
+                        print(f"  [CONTRACT-ERR] Contract spot-check failed: {e}")
 
-            # CONCEPT DISCOVERY: Analyze cross-game patterns periodically
-            # Per Unified Theory: "Concepts emerge from cross-game pattern recognition"
-            if self.concept_discovery_engine and self.current_generation % 10 == 0:
-                try:
-                    # Check for newly emerging concepts from pattern tracking
-                    new_concepts = self.concept_discovery_engine.check_concept_emergence()
-                    if new_concepts:
-                        print(f"  [CONCEPTS] Discovered {len(new_concepts)} concept candidates")
+            # ---- Every-5-gen cadence ----
+
+            if self.current_generation % 5 == 0:
+                # NETWORK INTELLIGENCE: Capture ecosystem snapshot
+                if self.network_intelligence_engine:
+                    try:
+                        snapshot = self.network_intelligence_engine.capture_ecosystem_snapshot(self.current_generation)
+                        health_status = snapshot.get('health_status', 'unknown')
+                        health_score = snapshot.get('health_score', 0.0)
+                        print(f"  [NETWORK] Ecosystem health: {health_status} (score: {health_score:.3f})")
+
                         if self.verbose:
-                            for concept in new_concepts[:3]:  # Show top 3
-                                print(f"    - {concept.get('pattern', 'unnamed')[:20]}: {concept.get('confidence', 0):.2f}")
-                except Exception as e:
-                    if self.verbose:
-                        print(f"  [CONCEPT-ERR] Concept discovery failed: {e}")
+                            print(f"    Knowledge: {snapshot.get('total_sequences', 0)} sequences, "
+                                  f"{snapshot.get('total_patterns', 0)} patterns, "
+                                  f"{snapshot.get('unique_games_solved', 0)} games solved")
+                            print(f"    Diversity index: {snapshot.get('knowledge_diversity_index', 0):.3f}")
+
+                        # Phase 1.3: Health Responder
+                        if self.health_responder:
+                            try:
+                                adj = self.health_responder.get_adjustments(snapshot, self.current_generation)
+                                triggered = adj.get('triggered_rules', [])
+                                if triggered:
+                                    self.health_responder.apply_adjustments(adj, self._evolution_strategy)
+                                    print(f"  [HEALTH] {len(triggered)} corrective rule(s) fired:")
+                                    for rule_desc in triggered:
+                                        print(f"    - {rule_desc}")
+                                elif self.verbose:
+                                    print(f"  [HEALTH] No corrective rules triggered")
+
+                                # Phase 5.3: Fine-grained adaptive parameter tuning
+                                mut_delta = self.health_responder.get_mutation_adjustment(
+                                    snapshot, self.current_generation,
+                                )
+                                if abs(mut_delta) > 0.001:
+                                    old_mr = self._evolution_strategy.get('mutation_rate', 0.2)
+                                    self._evolution_strategy['mutation_rate'] = max(
+                                        0.01, min(0.99, old_mr + mut_delta)
+                                    )
+                                    if self.verbose:
+                                        print(f"  [HEALTH] Mutation rate: {old_mr:.3f} -> {self._evolution_strategy['mutation_rate']:.3f}")
+
+                                role_deltas = self.health_responder.get_role_allocation(
+                                    snapshot, self.current_generation,
+                                )
+                                if self.operating_mode_system and any(
+                                    abs(v) > 0.001 for v in role_deltas.values()
+                                ):
+                                    self.operating_mode_system.apply_health_adjustments(role_deltas)
+                                    if self.verbose:
+                                        print(f"  [HEALTH] Role allocation adjusted: {role_deltas}")
+
+                                explore_mult = self.health_responder.get_exploration_budget_multiplier(
+                                    snapshot, self.current_generation,
+                                )
+                                if abs(explore_mult - 1.0) > 0.01:
+                                    self._evolution_strategy['exploration_budget_mult'] = explore_mult
+                                    if self.verbose:
+                                        print(f"  [HEALTH] Exploration budget multiplier: {explore_mult:.2f}")
+
+                            except Exception as he:
+                                if self.verbose:
+                                    print(f"  [HEALTH-ERR] Responder failed: {he}")
+
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"  [NETWORK-ERR] Ecosystem snapshot failed: {e}")
+
+                # RESONANCE DETECTION: Scan compressed templates
+                if self.resonance_detector:
+                    try:
+                        belief_patterns = self.resonance_detector.detect_resonance(
+                            generation=self.current_generation
+                        )
+                        template_patterns = self.resonance_detector.scan_compressed_templates(
+                            generation=self.current_generation
+                        )
+                        visual_patterns = self.resonance_detector.detect_visual_resonance(
+                            generation=self.current_generation
+                        )
+
+                        total = len(belief_patterns) + len(template_patterns) + len(visual_patterns)
+                        if total > 0:
+                            print(f"  [RESONANCE] {len(belief_patterns)} belief + "
+                                  f"{len(template_patterns)} template + "
+                                  f"{len(visual_patterns)} visual resonance patterns")
+
+                            combined = self.resonance_detector.get_combined_resonance()
+                            multi_signal = sum(
+                                1 for v in combined.values() if v['active_signals'] >= 2
+                            )
+                            if multi_signal > 0:
+                                print(f"  [RESONANCE] {multi_signal} game-type pair(s) "
+                                      f"with multi-signal agreement")
+                        elif self.verbose:
+                            print(f"  [RESONANCE] No new resonance patterns detected")
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"  [RESONANCE-ERR] Resonance detection failed: {e}")
+
+            # ---- Every-10-gen cadence ----
+
+            if self.current_generation % 10 == 0:
+                # CONCEPT DISCOVERY
+                if self.concept_discovery_engine:
+                    try:
+                        new_concepts = self.concept_discovery_engine.check_concept_emergence()
+                        if new_concepts:
+                            print(f"  [CONCEPTS] Discovered {len(new_concepts)} concept candidates")
+                            if self.verbose:
+                                for concept in new_concepts[:3]:
+                                    print(f"    - {concept.get('pattern', 'unnamed')[:20]}: {concept.get('confidence', 0):.2f}")
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"  [CONCEPT-ERR] Concept discovery failed: {e}")
+
+                # PRIMITIVE UNLOCK
+                if self.primitive_unlock_manager:
+                    try:
+                        unlocked = self.primitive_unlock_manager.check_all_unlock_readiness(
+                            generation=self.current_generation
+                        )
+                        if unlocked:
+                            print(f"  [UNLOCK] {len(unlocked)} primitive(s) unlocked: "
+                                  f"{', '.join(unlocked)}")
+                        elif self.verbose:
+                            summary = self.primitive_unlock_manager.get_unlock_summary()
+                            emerging = summary.get('emerging', 0)
+                            if emerging > 0:
+                                print(f"  [UNLOCK] {emerging} primitive(s) emerging, none ready yet")
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"  [UNLOCK-ERR] Primitive unlock check failed: {e}")
+
+                # Phase 6.3: SYSTEM DIAGNOSTIC (every 10 generations)
+                if self.system_diagnostic:
+                    try:
+                        diag = self.system_diagnostic.run(self.current_generation)
+                        status = diag.get('health_status', 'unknown')
+                        score = diag.get('overall_health', 0.0)
+                        print(f"  [DIAGNOSTIC] System health: {status} ({score:.3f})")
+                        disc = diag.get('disconnected_systems', [])
+                        if disc:
+                            names = ', '.join(d['table'] for d in disc[:3])
+                            print(f"  [DIAGNOSTIC] Disconnected: {names}")
+                        bottlenecks = diag.get('bottleneck_systems', [])
+                        if bottlenecks:
+                            names = ', '.join(b['table'] for b in bottlenecks[:3])
+                            print(f"  [DIAGNOSTIC] Bottlenecks: {names}")
+                        util = diag.get('knowledge_utilisation', 0.0)
+                        if self.verbose:
+                            print(f"  [DIAGNOSTIC] Knowledge util: {util:.1%}, "
+                                  f"compression: {diag.get('compression_effectiveness', 0):.3f}, "
+                                  f"resonance conn: {diag.get('resonance_connectivity', 0):.3f}")
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"  [DIAGNOSTIC-ERR] System diagnostic failed: {e}")
+
+            # ---- Every-50-gen cadence ----
+
+            if self.current_generation % 50 == 0:
+                # AGENT LIFECYCLE: Clean up ancient inactive agents
+                if self.lifecycle_manager:
+                    try:
+                        cleanup_stats = self.lifecycle_manager.cleanup_ancient_inactive_agents(
+                            current_generation=self.current_generation,
+                            dry_run=False
+                        )
+                        total_deleted = cleanup_stats.get('total_deleted', 0)
+                        if total_deleted > 0:
+                            print(f"  [LIFECYCLE] Cleaned {total_deleted} ancient inactive agents")
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"  [LIFECYCLE-ERR] Agent cleanup failed: {e}")
 
         except Exception as e:
             print(f"  [WARN] EvolutionaryEngine failed, using fallback: {e}")
-            # Fallback to simple evolution if engine fails
             self._simple_evolve_fallback()
 
         # Pipeline assertion: population size after evolution
@@ -2129,7 +1364,6 @@ class EvolutionRunner:
         survivors = self.agents[:keep_count]
         culled = self.agents[keep_count:]
 
-        # Deactivate culled agents
         if culled:
             culled_ids = [a.agent_id for a in culled]
             placeholders = ','.join(['?' for _ in culled_ids])
@@ -2139,7 +1373,6 @@ class EvolutionRunner:
             """, culled_ids)
             print(f"  [FALLBACK] Culled {len(culled)} underperformers")
 
-        # Simple offspring creation
         offspring = []
         while len(survivors) + len(offspring) < self.population_size:
             parent = random.choice(survivors)
@@ -2159,102 +1392,9 @@ class EvolutionRunner:
         self.agents = survivors + offspring
         print(f"  [FALLBACK] New population: {len(self.agents)}")
 
-    def _run_generation_health_checks(self, stats: Optional[Dict] = None):
-        """
-        Post-generation health assertions — catch silent pipeline bugs early.
-
-        Detects the EXACT bug patterns from sessions 7n-7p:
-        - Fitness pipeline disconnection (game_results -> agent_arc_performance)
-        - Population bloat (zombie agents from failed culling)
-        - Zero evolution signal (random drift for N generations)
-
-        Prints [HEALTH-WARN] / [HEALTH-CRIT] but does NOT gate execution.
-        These are diagnostic signals, not hard stops.
-        """
-        try:
-            # CHECK 1: Population size sanity
-            active_count_rows = self.db.execute_query(
-                "SELECT COUNT(*) as cnt FROM agents WHERE is_active = 1"
-            )
-            active_count = active_count_rows[0]['cnt'] if active_count_rows else 0
-
-            bloat_ratio = active_count / max(self.population_size, 1)
-            if bloat_ratio > 2.0:
-                print(f"  [HEALTH-CRIT] Population bloat: {active_count} active "
-                      f"vs {self.population_size} expected ({bloat_ratio:.1f}x)")
-            elif bloat_ratio > 1.5:
-                print(f"  [HEALTH-WARN] Population slightly bloated: "
-                      f"{active_count} vs {self.population_size} expected")
-
-            # CHECK 2: Fitness pipeline — agent_arc_performance must grow with game_results
-            # NOTE: agent_arc_performance has NO 'generation' column.
-            # Previous code queried WHERE generation = ? which silently failed
-            # inside the try/except -- the very watchdog designed to catch
-            # fitness disconnection was itself broken (Junction 10).
-            # Use game_results.generation to find this gen's session_ids,
-            # then count matching arc_performance rows.
-            gr_rows = self.db.execute_query(
-                "SELECT COUNT(*) as cnt FROM game_results "
-                "WHERE generation = ?", [self.current_generation]
-            )
-            gr_count = gr_rows[0]['cnt'] if gr_rows else 0
-
-            if gr_count > 0:
-                # Count arc_performance rows for the same sessions
-                arc_rows = self.db.execute_query("""
-                    SELECT COUNT(*) as cnt FROM agent_arc_performance ap
-                    WHERE EXISTS (
-                        SELECT 1 FROM game_results gr
-                        WHERE gr.session_id = ap.session_id
-                        AND gr.generation = ?
-                    )
-                """, [self.current_generation])
-                arc_count = arc_rows[0]['cnt'] if arc_rows else 0
-
-                if arc_count == 0:
-                    print(f"  [HEALTH-CRIT] Fitness disconnected: {gr_count} game_results "
-                          f"this gen but 0 agent_arc_performance rows! "
-                          f"Evolution has ZERO selection signal.")
-
-            # CHECK 3: Evolution signal — are scores improving?
-            if self.current_generation > 20 and self.current_generation % 10 == 0:
-                trend_rows = self.db.execute_query("""
-                    SELECT AVG(final_score) as avg_score FROM game_results
-                    WHERE generation BETWEEN ? AND ?
-                """, [self.current_generation - 10, self.current_generation])
-                recent_avg = trend_rows[0]['avg_score'] if trend_rows and trend_rows[0]['avg_score'] else 0
-
-                if recent_avg == 0.0:
-                    print(f"  [HEALTH-WARN] Average score is 0.0 for last 10 generations. "
-                          f"Evolution may lack selection signal.")
-
-        except Exception as e:
-            # Health checks must NEVER crash the evolution loop
-            if self.verbose:
-                print(f"  [HEALTH-ERR] Health check failed: {e}")
-
-    def _run_safe_cleanup(self):
-        """
-        Rule 12 compliance: Run SafeDatabaseCleaner every 10 generations.
-
-        Per Master Ruleset: "Automatic: Runs every 10 generations in
-        autonomous_evolution_runner.py" — but was NEVER actually wired.
-        Now it is.
-        """
-        if self.current_generation % 10 != 0 or self.current_generation == 0:
-            return
-
-        try:
-            from safe_cleanup import SafeDatabaseCleaner
-            cleaner = SafeDatabaseCleaner(db_path=self.db.db_path)
-            results = cleaner.cleanup(dry_run=False, verbose=False)
-            total_deleted = results.get('total_deleted', 0)
-            if total_deleted > 0:
-                print(f"  [CLEANUP] Rule 12: Cleaned {total_deleted} stale records "
-                      f"(gen {self.current_generation})")
-        except Exception as e:
-            if self.verbose:
-                print(f"  [CLEANUP-ERR] Safe cleanup failed: {e}")
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
 
     def run(self):
         """Main evolution loop."""
@@ -2269,30 +1409,27 @@ class EvolutionRunner:
             print(f"Target Game: {self.target_game}")
         print("="*60)
 
-        # Initialize
         self.agents = self.initialize_population()
 
-        # Main loop - max_generations is relative to session start
         target_generation = self._start_generation + self.max_generations
         while self.running and self.current_generation < target_generation:
-            # Run generation
             stats = self.run_generation()
 
             if not self.running:
                 break
 
-            # Evolve
             self.evolve()
 
-            # Post-generation health checks (catch silent pipeline bugs)
-            self._run_generation_health_checks(stats)
+            # Post-generation health checks (delegates to HealthMonitor)
+            self._health_monitor.run_generation_health_checks(
+                self.current_generation, stats
+            )
 
             # Rule 12: Safe cleanup every 10 generations
-            self._run_safe_cleanup()
+            self._health_monitor.run_safe_cleanup(self.current_generation)
 
             self.current_generation += 1
 
-        # Final summary
         print("\n" + "="*60)
         print("EVOLUTION COMPLETE")
         print("="*60)
@@ -2334,26 +1471,24 @@ def main():
 
     # Determine max_actions based on mode if not explicitly set
     if args.max_actions is None:
-        # Offline mode runs much faster - can afford more exploration
         if args.mode == 'offline':
-            args.max_actions = 7500  # 2500 base * 3x offline multiplier
+            args.max_actions = 7500
         else:
-            args.max_actions = 2500  # Boosted baseline (was 500)
+            args.max_actions = 2500
 
     # Test mode overrides
     if args.test:
         args.population = 1
         args.games_per_gen = 1
         args.max_generations = 1
-        args.max_actions = 300  # Boosted for meaningful test (was 100)
+        args.max_actions = 300
 
-    # Log file redirect - file only (no Tee, avoids KeyboardInterrupt on console writes)
+    # Log file redirect
     log_file_handle = None
     if args.log_file:
-        log_file_handle = open(args.log_file, 'w', encoding='utf-8', buffering=1)  # Line-buffered
+        log_file_handle = open(args.log_file, 'w', encoding='utf-8', buffering=1)
         sys.stdout = log_file_handle
         sys.stderr = log_file_handle
-        # Also redirect logging to file
         import logging
         file_handler = logging.StreamHandler(log_file_handle)
         file_handler.setLevel(logging.DEBUG)

@@ -106,14 +106,16 @@ class MasterySystem:
         'master':       (0.30, 0.50),  # Serious stress test
     }
 
-    def __init__(self, db: 'DatabaseInterface'):
+    def __init__(self, db: 'DatabaseInterface', event_bus=None):
         """
         Initialize mastery system.
 
         Args:
             db: DatabaseInterface instance for data storage
+            event_bus: Optional EventBus for publishing MASTERY_TIER_CHANGE events
         """
         self.db = db
+        self.event_bus = event_bus
         self._ensure_tables()
         logger.info("[MASTERY] System initialized")
 
@@ -965,6 +967,22 @@ class MasterySystem:
 
         old_tier = existing[0]['mastery_tier'] if existing else 'novice'
         tier_upgraded = mastery.tier != old_tier and self._tier_rank(mastery.tier) > self._tier_rank(old_tier)
+
+        # Phase 1.1: Publish MASTERY_TIER_CHANGE event when tier upgrades
+        if tier_upgraded and self.event_bus:
+            try:
+                from event_bus import EventType, make_event
+                self.event_bus.publish(make_event(
+                    EventType.MASTERY_TIER_CHANGE,
+                    game_type=mastery.game_type,
+                    level_number=mastery.level_number,
+                    old_tier=old_tier,
+                    new_tier=mastery.tier,
+                    generation=generation,
+                    total_score=mastery.total_score,
+                ))
+            except Exception as e:
+                logger.debug(f"[MASTERY] Could not publish tier change event: {e}")
 
         self.db.execute_query("""
             INSERT OR REPLACE INTO level_mastery (
