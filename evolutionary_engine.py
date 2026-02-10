@@ -1111,6 +1111,108 @@ class CrossoverOperations:
         else:
             self.sensation_engine = None
 
+    # ------------------------------------------------------------------
+    # Phase 1 (Affinity): Genome Distance Primitives
+    # Pure math, no side effects. Used by breeding, transfer, and health.
+    # ------------------------------------------------------------------
+
+    # The 6 numerical strategy params crossed over in crossover_genomes
+    GENOME_NUMERICAL_KEYS = [
+        'exploration_weight', 'conservative_bias', 'action_diversity',
+        'score_optimization_priority', 'win_focus_threshold',
+        'action_efficiency_preference',
+    ]
+
+    # The 13 epigenetic numerical keys from _initialize_default_epigenetics
+    EPIGENETIC_NUMERICAL_KEYS = [
+        # feature_attention_weights
+        'edges', 'symmetry', 'color_patterns', 'spatial_relations',
+        # learning_rate_modifiers
+        'visual_learning', 'symbolic_learning', 'motor_learning',
+        # exploration_settings
+        'exploration_ratio', 'novelty_seeking', 'risk_tolerance',
+        # meta_capacities
+        'problem_decomposition_tendency', 'abstraction_capacity',
+        'transfer_learning_ability',
+    ]
+
+    def calculate_genome_distance(self, genome_a: Dict, genome_b: Dict) -> float:
+        """Euclidean distance between two genomes in normalised strategy space.
+
+        Returns:
+            float in [0.0, 1.0] where 0.0 = identical, 1.0 = maximally different.
+        """
+        import math
+
+        # Parse JSON strings if necessary
+        if isinstance(genome_a, str):
+            genome_a = safe_json_parse(genome_a, {})
+        if isinstance(genome_b, str):
+            genome_b = safe_json_parse(genome_b, {})
+
+        sq_sum = 0.0
+        n = len(self.GENOME_NUMERICAL_KEYS)
+        for key in self.GENOME_NUMERICAL_KEYS:
+            va = float(genome_a.get(key, 0.5))
+            vb = float(genome_b.get(key, 0.5))
+            # All params are already [0, 1]; clamp defensively
+            va = max(0.0, min(1.0, va))
+            vb = max(0.0, min(1.0, vb))
+            sq_sum += (va - vb) ** 2
+
+        # Normalise by sqrt(n) so result is [0, 1]
+        return math.sqrt(sq_sum) / math.sqrt(n) if n > 0 else 0.0
+
+    def calculate_epigenetic_distance(self, epi_a: Dict, epi_b: Dict) -> float:
+        """Euclidean distance between two epigenetic layers.
+
+        Epigenetics is stored as nested dicts; we flatten the 13 numerical
+        keys for comparison.
+
+        Returns:
+            float in [0.0, 1.0] where 0.0 = identical, 1.0 = maximally different.
+        """
+        import math
+
+        if isinstance(epi_a, str):
+            epi_a = safe_json_parse(epi_a, {})
+        if isinstance(epi_b, str):
+            epi_b = safe_json_parse(epi_b, {})
+
+        def _flat_get(epi: Dict, key: str) -> float:
+            """Get a value from a possibly-nested epigenetic dict."""
+            # Direct key
+            if key in epi:
+                return float(epi[key])
+            # Search one level deep (feature_attention_weights.edges etc.)
+            for sub in epi.values():
+                if isinstance(sub, dict) and key in sub:
+                    return float(sub[key])
+            return 0.5  # default when missing
+
+        sq_sum = 0.0
+        n = len(self.EPIGENETIC_NUMERICAL_KEYS)
+        for key in self.EPIGENETIC_NUMERICAL_KEYS:
+            va = max(0.0, min(2.0, _flat_get(epi_a, key)))  # epigenetic vals up to ~2.0
+            vb = max(0.0, min(2.0, _flat_get(epi_b, key)))
+            # Normalise to [0, 1] for distance calc (max is 2.0)
+            sq_sum += ((va / 2.0) - (vb / 2.0)) ** 2
+
+        return math.sqrt(sq_sum) / math.sqrt(n) if n > 0 else 0.0
+
+    def calculate_agent_distance(
+        self, genome_a: Dict, genome_b: Dict,
+        epi_a: Dict, epi_b: Dict,
+    ) -> float:
+        """Combined affinity distance: genome basis (60%) + epigenetic divergence (40%).
+
+        Returns:
+            float in [0.0, 1.0].
+        """
+        gd = self.calculate_genome_distance(genome_a, genome_b)
+        ed = self.calculate_epigenetic_distance(epi_a, epi_b)
+        return gd * 0.6 + ed * 0.4
+
     def crossover_genomes(self, parent1: Dict[str, Any], parent2: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create offspring by combining traits from both parents

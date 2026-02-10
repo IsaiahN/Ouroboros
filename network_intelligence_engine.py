@@ -71,15 +71,29 @@ class NetworkIntelligenceEngine:
         # Population metrics (temporary agent expressions)
         population_metrics = self._calculate_population_metrics(generation)
 
+        # Phase 7 (Affinity): Compute population affinity EARLY so it
+        # feeds into _assess_overall_health instead of a static placeholder.
+        try:
+            affinity_metrics = self._assess_population_affinity(generation)
+        except Exception as e:
+            self.logger.debug(f"[AFFINITY] Population affinity assessment skipped: {e}")
+            affinity_metrics = {
+                'basis_coherence': 0.0, 'genome_diversity': 0.0,
+                'productive_zone_ratio': 0.0, 'monoculture_risk': False,
+                'fragmentation_risk': False, 'avg_pairwise_distance': 0.0,
+                'alignment_velocity_avg': 0.0,
+            }
+
         # Metabolic health indicators
         health_indicators = self._calculate_metabolic_health(
             knowledge_metrics, flow_metrics, population_metrics
         )
 
-        # Overall health assessment
+        # Overall health assessment (affinity_metrics passed in for real scoring)
         health_status, health_score = self._assess_overall_health(
             knowledge_metrics, flow_metrics, resilience_metrics,
-            population_metrics, health_indicators
+            population_metrics, health_indicators,
+            affinity_metrics=affinity_metrics,
         )
 
         # Store snapshot in database
@@ -92,6 +106,7 @@ class NetworkIntelligenceEngine:
             **persona_metrics,
             **population_metrics,
             **health_indicators,
+            **affinity_metrics,
             'health_status': health_status,
             'health_score': health_score
         }
@@ -388,7 +403,8 @@ class NetworkIntelligenceEngine:
 
     def _assess_overall_health(self, knowledge_metrics: Dict, flow_metrics: Dict,
                               resilience_metrics: Dict, population_metrics: Dict,
-                              health_indicators: Dict) -> Tuple[str, float]:
+                              health_indicators: Dict,
+                              affinity_metrics: Optional[Dict] = None) -> Tuple[str, float]:
         """
         Assess overall network health.
 
@@ -415,13 +431,27 @@ class NetworkIntelligenceEngine:
         # Growth score
         growth_score = min(health_indicators['network_growth_rate'] / 10.0, 1.0)
 
-        # Overall health (weighted average)
+        # Phase 7 (Affinity): Population genome health score
+        # productive_zone_ratio: % of agent pairs in [0.2, 0.7] distance range
+        # monoculture penalty: -0.3 if all agents are clones
+        # fragmentation penalty: -0.2 if agents have drifted apart
+        if affinity_metrics:
+            affinity_score = affinity_metrics.get('productive_zone_ratio', 0.0)
+            if affinity_metrics.get('monoculture_risk'):
+                affinity_score = max(0.0, affinity_score - 0.3)
+            if affinity_metrics.get('fragmentation_risk'):
+                affinity_score = max(0.0, affinity_score - 0.2)
+        else:
+            affinity_score = 0.5  # neutral when no data available
+
+        # Overall health (weighted average — weights sum to 1.0)
         health_score = (
-            diversity_score * 0.25 +
-            flow_score * 0.20 +
-            resilience_score * 0.20 +
-            validation_score * 0.15 +
-            growth_score * 0.20
+            diversity_score * 0.22 +
+            flow_score * 0.18 +
+            resilience_score * 0.18 +
+            validation_score * 0.14 +
+            growth_score * 0.18 +
+            affinity_score * 0.10
         )
 
         # Determine status
@@ -498,6 +528,143 @@ class NetworkIntelligenceEngine:
         system_entropy = (agent_entropy + knowledge_entropy) / 2.0
 
         return system_entropy
+
+    # ==================================================================
+    # Phase 6B (Affinity): Alignment Velocity
+    # ==================================================================
+    def calculate_alignment_velocity(self, agent_id: str) -> float:
+        """How quickly does this agent learn to interface with novel worlds?
+
+        For each game the agent has encountered:
+          - If actions_to_first_score exists:
+            speed = 1.0 - (actions_to_first_score / ACTION_BUDGET)
+          - Else: speed = 0.0 (never aligned)
+
+        Returns:
+            float in [0.0, 1.0] where 1.0 = fastest possible alignment.
+        """
+        ACTION_BUDGET = 7000  # default per-game action budget
+
+        history = self.db.get_agent_domain_alignment_history(agent_id)
+        if not history:
+            return 0.0
+
+        speeds = []
+        for entry in history:
+            atfs = entry.get('actions_to_first_score')
+            if atfs is not None and atfs > 0:
+                speed = max(0.0, 1.0 - (atfs / ACTION_BUDGET))
+                speeds.append(speed)
+            else:
+                speeds.append(0.0)
+
+        return sum(speeds) / len(speeds) if speeds else 0.0
+
+    def update_all_alignment_velocities(self, generation: int) -> int:
+        """Recompute and persist alignment_velocity for every active agent.
+
+        Called once per generation (cheap: one DB read + one write per agent).
+
+        Returns:
+            Number of agents updated.
+        """
+        agents = self.db.get_active_agents()
+        updated = 0
+        for agent in agents:
+            velocity = self.calculate_alignment_velocity(agent['agent_id'])
+            self.db.update_agent_alignment_velocity(agent['agent_id'], velocity)
+            updated += 1
+        return updated
+
+    # ==================================================================
+    # Phase 7 (Affinity): Population Affinity Health Gauge
+    # ==================================================================
+    def _assess_population_affinity(self, generation: int) -> Dict:
+        """Assess population-level genome diversity and monoculture risk.
+
+        Returns dict with keys matching the ecosystem_health_snapshots columns:
+          basis_coherence, genome_diversity, productive_zone_ratio,
+          monoculture_risk, fragmentation_risk, avg_pairwise_distance,
+          alignment_velocity_avg.
+        """
+        from collections import Counter
+        from statistics import mean, stdev
+
+        default = {
+            'basis_coherence': 0.0,
+            'genome_diversity': 0.0,
+            'productive_zone_ratio': 0.0,
+            'monoculture_risk': False,
+            'fragmentation_risk': False,
+            'avg_pairwise_distance': 0.0,
+            'alignment_velocity_avg': 0.0,
+        }
+
+        try:
+            from evolutionary_engine import CrossoverOperations
+            crossover_ops = CrossoverOperations(self.db)
+        except Exception:
+            return default
+
+        agents = self.db.get_active_agents()
+        if len(agents) < 2:
+            return default
+
+        # Sample if population is large (O(n^2) pairwise)
+        import random as _rng
+        sample = agents if len(agents) <= 50 else _rng.sample(agents, 50)
+
+        # Parse genomes once
+        parsed = []
+        fingerprints: Counter = Counter()
+        velocities = []
+        for a in sample:
+            genome = a.get('genome', '{}')
+            if isinstance(genome, str):
+                genome = json.loads(genome) if genome else {}
+            vel = a.get('alignment_velocity', 0.0) or 0.0
+            velocities.append(vel)
+            fp = a.get('basis_fingerprint', 'unknown') or 'unknown'
+            fingerprints[fp] += 1
+            parsed.append(genome)
+
+        # Pairwise genome distances
+        distances = []
+        for i in range(len(parsed)):
+            for j in range(i + 1, len(parsed)):
+                d = crossover_ops.calculate_genome_distance(parsed[i], parsed[j])
+                distances.append(d)
+
+        if not distances:
+            return default
+
+        avg_dist = mean(distances)
+        std_dist = stdev(distances) if len(distances) > 1 else 0.0
+
+        # Basis coherence: how many distinct fingerprints vs population
+        unique_fp = len(fingerprints)
+        basis_coherence = 1.0 - (unique_fp / len(sample))
+
+        # Productive zone: pairs with moderate distance (0.2 - 0.7)
+        productive_pairs = sum(1 for d in distances if 0.2 < d < 0.7)
+        productive_ratio = productive_pairs / len(distances)
+
+        # Risk flags
+        monoculture_risk = avg_dist < 0.1
+        fragmentation_risk = avg_dist > 0.8
+
+        # Average alignment velocity
+        avg_velocity = mean(velocities) if velocities else 0.0
+
+        return {
+            'basis_coherence': round(basis_coherence, 4),
+            'genome_diversity': round(avg_dist, 4),
+            'productive_zone_ratio': round(productive_ratio, 4),
+            'monoculture_risk': monoculture_risk,
+            'fragmentation_risk': fragmentation_risk,
+            'avg_pairwise_distance': round(avg_dist, 4),
+            'alignment_velocity_avg': round(avg_velocity, 6),
+        }
 
     def _store_snapshot(self, snapshot: Dict):
         """Store ecosystem snapshot in database."""
@@ -665,6 +832,23 @@ def display_network_intelligence_dashboard(generation: int):
     print(f"  Innovation vs Exploitation: {s['innovation_vs_exploitation']:.2f}")
     print(f"  Transfer Learning Rate: {s['transfer_learning_rate']:.3f}")
     print(f"  System Entropy: {s['system_entropy']:.3f}")
+    print()
+
+    # Phase 7 (Affinity): Population genome health
+    print("[DNA] POPULATION AFFINITY (Self-Affine Basis Health)")
+    print(f"  Genome Diversity: {s.get('genome_diversity', 0.0):.4f}")
+    print(f"  Basis Coherence: {s.get('basis_coherence', 0.0):.4f}")
+    print(f"  Productive Zone: {s.get('productive_zone_ratio', 0.0):.1%} of pairs")
+    print(f"  Avg Pairwise Distance: {s.get('avg_pairwise_distance', 0.0):.4f}")
+    mono = s.get('monoculture_risk', False)
+    frag = s.get('fragmentation_risk', False)
+    if mono:
+        print("  [WARN] MONOCULTURE RISK: agents converging to clones (avg distance < 0.1)")
+    if frag:
+        print("  [WARN] FRAGMENTATION RISK: agents drifting apart (avg distance > 0.8)")
+    if not mono and not frag:
+        print("  [OK] Population diversity in healthy range")
+    print(f"  Alignment Velocity (avg): {s.get('alignment_velocity_avg', 0.0):.6f}")
     print()
 
     print(f"  Overall Health: {s['health_status']}")

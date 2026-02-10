@@ -186,11 +186,64 @@ class ResultRecorder:
         # Pipeline assertion: verify BOTH writes landed
         self.pipe.assert_game_result_stored(session_id, result.game_id, result.agent_id)
 
+        # Phase 6A (Affinity): Update domain alignment history for this agent/game
+        self._update_domain_alignment(
+            result.agent_id, result.game_id,
+            result.score, result.actions_taken, current_generation,
+        )
+
         # Store winning sequence if won
         if result.is_win and result.action_sequence:
             self._store_winning_sequences(
                 result, current_generation, session_id,
             )
+
+    # ------------------------------------------------------------------
+    # Phase 6A (Affinity): Domain Alignment Tracking
+    # ------------------------------------------------------------------
+    def _update_domain_alignment(
+        self,
+        agent_id: str,
+        game_id: str,
+        score: float,
+        actions_taken: int,
+        generation: int,
+    ) -> None:
+        """Track which game worlds this agent has encountered and how quickly it aligned.
+
+        Updates the agent's domain_alignment_history JSON list:
+          - On first encounter with a game_id: appends a new entry.
+          - On first positive score: records actions_to_first_score
+            (the alignment velocity numerator for this game).
+
+        Non-critical: failures here never block game result storage.
+        """
+        try:
+            history = self.db.get_agent_domain_alignment_history(agent_id)
+
+            existing = next((d for d in history if d.get('game_id') == game_id), None)
+            if existing is None:
+                # First encounter with this game
+                entry = {
+                    'game_id': game_id,
+                    'first_encounter_gen': generation,
+                    'actions_to_first_score': actions_taken if score > 0 else None,
+                    'first_positive_score': score if score > 0 else None,
+                    'encounters': 1,
+                }
+                history.append(entry)
+            else:
+                existing['encounters'] = existing.get('encounters', 0) + 1
+                if existing.get('actions_to_first_score') is None and score > 0:
+                    # Just achieved first positive score on this game
+                    existing['actions_to_first_score'] = actions_taken
+                    existing['first_positive_score'] = score
+
+            self.db.update_agent_domain_alignment_history(agent_id, history)
+
+        except Exception as e:
+            if self.verbose:
+                print(f"    [AFFINITY-ERR] domain alignment update failed: {e}")
 
     def _store_winning_sequences(
         self,

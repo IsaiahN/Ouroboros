@@ -1176,10 +1176,25 @@ class EvolutionRunner:
                 # NETWORK INTELLIGENCE: Capture ecosystem snapshot
                 if self.network_intelligence_engine:
                     try:
+                        # Phase 6B (Affinity): Update alignment velocities BEFORE
+                        # snapshot so the snapshot reads fresh values.
+                        try:
+                            n_vel = self.network_intelligence_engine.update_all_alignment_velocities(
+                                self.current_generation
+                            )
+                        except Exception as vel_err:
+                            n_vel = 0
+                            if self.verbose:
+                                print(f"  [AFFINITY-ERR] Alignment velocity update failed: {vel_err}")
+
                         snapshot = self.network_intelligence_engine.capture_ecosystem_snapshot(self.current_generation)
                         health_status = snapshot.get('health_status', 'unknown')
                         health_score = snapshot.get('health_score', 0.0)
                         print(f"  [NETWORK] Ecosystem health: {health_status} (score: {health_score:.3f})")
+
+                        avg_vel = snapshot.get('alignment_velocity_avg', 0.0)
+                        if avg_vel > 0 or self.verbose:
+                            print(f"  [AFFINITY] Alignment velocity: avg={avg_vel:.4f} ({n_vel} agents)")
 
                         if self.verbose:
                             print(f"    Knowledge: {snapshot.get('total_sequences', 0)} sequences, "

@@ -805,7 +805,7 @@ CREATE TABLE agents (
     -- Status
     is_active BOOLEAN DEFAULT TRUE,
     retirement_reason TEXT
-, epigenetics TEXT, discovery_prestige REAL DEFAULT 0.0, innovation_score REAL DEFAULT 0.0, sequence_discovery_count INTEGER DEFAULT 0, pattern_discovery_count INTEGER DEFAULT 0, validation_reputation REAL DEFAULT 0.5, breeding_priority REAL DEFAULT 1.0, survival_protection REAL DEFAULT 0.0, bonus_game_slots INTEGER DEFAULT 0, action_allowance_per_level INTEGER DEFAULT 400, action_allowance_total INTEGER DEFAULT 7000, action_budget_multiplier REAL DEFAULT 1.0, last_salary_adjustment_gen INTEGER DEFAULT 0, recombination_discoveries INTEGER DEFAULT 0, successful_recombinations INTEGER DEFAULT 0, recombination_success_rate REAL DEFAULT 0.0, sensation_profile TEXT DEFAULT '{}', navigation_state REAL DEFAULT 0.0, action_biases TEXT DEFAULT '{}', sensation_learning_rate REAL DEFAULT 0.3, state_update_sensitivity REAL DEFAULT 0.7, emotional_intelligence_score REAL DEFAULT 0.0, last_prestige_update_gen INTEGER DEFAULT 0, social_rule_adherence REAL DEFAULT 0.5, preferred_role TEXT DEFAULT NULL, role_confidence REAL DEFAULT 0.0, role_locked BOOLEAN DEFAULT FALSE, role_lock_generation INTEGER DEFAULT NULL, last_role_switch_gen INTEGER DEFAULT 0, role_switch_cooldown INTEGER DEFAULT 2, self_network_bias REAL DEFAULT 0.5, bias_learning_rate REAL DEFAULT 0.1, vitality REAL DEFAULT 1.0, legacy_score REAL DEFAULT 0.0, last_reflection TEXT DEFAULT NULL, reflection_count INTEGER DEFAULT 0, death_type TEXT DEFAULT NULL, death_persona TEXT DEFAULT NULL, social_relevance_score REAL DEFAULT 1.0, learning_rate_effective REAL DEFAULT 0.1, generations_since_contribution INTEGER DEFAULT 0, times_packages_queried_recent INTEGER DEFAULT 0);
+, epigenetics TEXT, discovery_prestige REAL DEFAULT 0.0, innovation_score REAL DEFAULT 0.0, sequence_discovery_count INTEGER DEFAULT 0, pattern_discovery_count INTEGER DEFAULT 0, validation_reputation REAL DEFAULT 0.5, breeding_priority REAL DEFAULT 1.0, survival_protection REAL DEFAULT 0.0, bonus_game_slots INTEGER DEFAULT 0, action_allowance_per_level INTEGER DEFAULT 400, action_allowance_total INTEGER DEFAULT 7000, action_budget_multiplier REAL DEFAULT 1.0, last_salary_adjustment_gen INTEGER DEFAULT 0, recombination_discoveries INTEGER DEFAULT 0, successful_recombinations INTEGER DEFAULT 0, recombination_success_rate REAL DEFAULT 0.0, sensation_profile TEXT DEFAULT '{}', navigation_state REAL DEFAULT 0.0, action_biases TEXT DEFAULT '{}', sensation_learning_rate REAL DEFAULT 0.3, state_update_sensitivity REAL DEFAULT 0.7, emotional_intelligence_score REAL DEFAULT 0.0, last_prestige_update_gen INTEGER DEFAULT 0, social_rule_adherence REAL DEFAULT 0.5, preferred_role TEXT DEFAULT NULL, role_confidence REAL DEFAULT 0.0, role_locked BOOLEAN DEFAULT FALSE, role_lock_generation INTEGER DEFAULT NULL, last_role_switch_gen INTEGER DEFAULT 0, role_switch_cooldown INTEGER DEFAULT 2, self_network_bias REAL DEFAULT 0.5, bias_learning_rate REAL DEFAULT 0.1, vitality REAL DEFAULT 1.0, legacy_score REAL DEFAULT 0.0, last_reflection TEXT DEFAULT NULL, reflection_count INTEGER DEFAULT 0, death_type TEXT DEFAULT NULL, death_persona TEXT DEFAULT NULL, social_relevance_score REAL DEFAULT 1.0, learning_rate_effective REAL DEFAULT 0.1, generations_since_contribution INTEGER DEFAULT 0, times_packages_queried_recent INTEGER DEFAULT 0, basis_fingerprint TEXT DEFAULT NULL, domain_alignment_history TEXT DEFAULT '[]', alignment_velocity REAL DEFAULT 0.0);
 
 CREATE TABLE analytics_snapshots (
             snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1954,7 +1954,16 @@ CREATE TABLE ecosystem_health_snapshots (
     -- Persona metrics
     persona_count INTEGER DEFAULT 0,
     persona_active_24h INTEGER DEFAULT 0,
-    persona_avg_context_reliability REAL DEFAULT 0.5
+    persona_avg_context_reliability REAL DEFAULT 0.5,
+
+    -- Affinity health metrics (Phase 7)
+    basis_coherence REAL DEFAULT 0.0,
+    genome_diversity REAL DEFAULT 0.0,
+    productive_zone_ratio REAL DEFAULT 0.0,
+    monoculture_risk BOOLEAN DEFAULT 0,
+    fragmentation_risk BOOLEAN DEFAULT 0,
+    avg_pairwise_distance REAL DEFAULT 0.0,
+    alignment_velocity_avg REAL DEFAULT 0.0
 );
 
 CREATE TABLE ecosystem_metabolism_snapshots (

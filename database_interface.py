@@ -44,6 +44,8 @@ class DatabaseInterface:
         self._ensure_persona_tables()
         # Role transition tracking tables must exist for adaptive action limits
         self._ensure_role_transition_tables()
+        # Affinity system columns (Phase 1/6/7) must exist
+        self._ensure_affinity_columns()
 
     @staticmethod
     def _finalize_cleanup(self_ref: weakref.ReferenceType):
@@ -355,6 +357,89 @@ class DatabaseInterface:
             conn.commit()
         except Exception as exc:
             logger.error(f"Error ensuring role transition tables: {exc}")
+
+    # ------------------------------------------------------------------
+    # Affinity System Columns (Phases 1, 6, 7)
+    # ------------------------------------------------------------------
+    def _ensure_affinity_columns(self) -> None:
+        """Add affinity-system columns to agents and ecosystem_health_snapshots.
+
+        Uses ALTER TABLE ADD COLUMN wrapped in try/except (idempotent).
+        Safe on existing databases: column already exists -> no-op.
+        """
+        conn = self._get_connection()
+
+        # --- agents table ---
+        agent_columns = [
+            ("basis_fingerprint", "TEXT DEFAULT NULL"),
+            ("domain_alignment_history", "TEXT DEFAULT '[]'"),
+            ("alignment_velocity", "REAL DEFAULT 0.0"),
+        ]
+        for col_name, col_def in agent_columns:
+            try:
+                conn.execute(f"ALTER TABLE agents ADD COLUMN {col_name} {col_def}")
+            except Exception:
+                pass  # column already exists
+
+        # --- ecosystem_health_snapshots table ---
+        snapshot_columns = [
+            ("basis_coherence", "REAL DEFAULT 0.0"),
+            ("genome_diversity", "REAL DEFAULT 0.0"),
+            ("productive_zone_ratio", "REAL DEFAULT 0.0"),
+            ("monoculture_risk", "BOOLEAN DEFAULT 0"),
+            ("fragmentation_risk", "BOOLEAN DEFAULT 0"),
+            ("avg_pairwise_distance", "REAL DEFAULT 0.0"),
+            ("alignment_velocity_avg", "REAL DEFAULT 0.0"),
+        ]
+        for col_name, col_def in snapshot_columns:
+            try:
+                conn.execute(
+                    f"ALTER TABLE ecosystem_health_snapshots ADD COLUMN {col_name} {col_def}"
+                )
+            except Exception:
+                pass  # column already exists
+
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Affinity DB Helpers
+    # ------------------------------------------------------------------
+    def get_agent_domain_alignment_history(self, agent_id: str) -> list:
+        """Return domain_alignment_history for an agent (parsed JSON list)."""
+        try:
+            rows = self.execute_query(
+                "SELECT domain_alignment_history FROM agents WHERE agent_id = ?",
+                (agent_id,),
+            )
+            if rows and rows[0].get('domain_alignment_history'):
+                import json
+                raw = rows[0]['domain_alignment_history']
+                return json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            pass
+        return []
+
+    def update_agent_domain_alignment_history(
+        self, agent_id: str, history: list
+    ) -> None:
+        """Persist domain_alignment_history JSON for an agent."""
+        import json
+        self.execute_query(
+            "UPDATE agents SET domain_alignment_history = ? WHERE agent_id = ?",
+            (json.dumps(history), agent_id),
+        )
+
+    def update_agent_alignment_velocity(
+        self, agent_id: str, velocity: float
+    ) -> None:
+        """Persist alignment_velocity for an agent."""
+        self.execute_query(
+            "UPDATE agents SET alignment_velocity = ? WHERE agent_id = ?",
+            (velocity, agent_id),
+        )
 
     def upsert_persona_profile(
         self,
