@@ -529,12 +529,22 @@ class SequenceAbstraction:
             if len(parsed_sequences) < min_sequences:
                 return None
 
-            # Find minimum length (template will be this long)
-            min_len = min(p['length'] for p in parsed_sequences)
+            # Extract action patterns and filter out empties
+            raw_patterns = [self._extract_pattern(p['actions']) for p in parsed_sequences]
+            patterns = [p for p in raw_patterns if p]
+
+            if len(patterns) < min_sequences:
+                return None
+
+            # Find minimum length from extracted patterns (not raw sequences)
+            min_len = min(len(p) for p in patterns)
             avg_len = sum(p['length'] for p in parsed_sequences) / len(parsed_sequences)
 
-            # Extract action patterns
-            patterns = [self._extract_pattern(p['actions'][:min_len]) for p in parsed_sequences]
+            if min_len == 0:
+                return None
+
+            # Trim patterns to min_len
+            patterns = [p[:min_len] for p in patterns]
 
             # Find invariants (same action at same position in ALL sequences)
             invariant_actions = []

@@ -1,6 +1,6 @@
 # Environment variables - exclude .env but keep .env.example
 .env
-
+*.log
 #serena
 .serena
 

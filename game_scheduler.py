@@ -403,7 +403,7 @@ class GameScheduler:
         SIMPLIFIED & FASTER: Select game by priority, with basic filtering.
 
         Old complexity: 5 rules with nested scoring and grouping
-        New: 2 simple filters + sort by priority + DIVERSITY CAP
+        New: 2 simple filters + sort by priority + DIVERSITY CAP + ROUND-ROBIN
         Result: 10x faster execution, similar outcomes, no concentration
 
         CRITICAL FIX (2025-12-06): Added diversity cap to prevent 82% concentration
@@ -411,6 +411,10 @@ class GameScheduler:
 
         FIX (2025-12-07): Lowered cap from 30% to 15% per-game-instance.
         Per agi_unified_theory.md: "System should explore all games, not concentrate on few"
+
+        FIX (2025-01-13): Added round-robin enforcement using last_assigned_game_type.
+        Without this, the same game_type was assigned 5+ times consecutively because
+        last_assigned_game_type was set but never consulted during selection.
         """
         if not available_games:
             return None
@@ -457,7 +461,24 @@ class GameScheduler:
         # Just pick lowest priority (highest value) game
         eligible_games.sort(key=lambda g: g.priority)
 
-        # RULE 3: 30% randomness to enforce diversity (increased from 20%)
+        # RULE 3: ROUND-ROBIN enforcement - avoid assigning same game_type consecutively
+        # This prevents FT09 being assigned 5x in a row when priorities are equal
+        if self.last_assigned_game_type and len(eligible_games) > 1:
+            last_type = self.last_assigned_game_type
+            # Separate into "different type" and "same type" pools
+            different_type = [g for g in eligible_games if g.game_type != last_type]
+            same_type = [g for g in eligible_games if g.game_type == last_type]
+
+            if different_type:
+                # Priority gap tolerance: only prefer different type if its priority
+                # is within 15 points of the best same-type option
+                best_priority = eligible_games[0].priority
+                best_different = different_type[0]
+                if best_different.priority <= best_priority + 15:
+                    # Strongly prefer a different game type
+                    eligible_games = different_type + same_type
+
+        # RULE 4: 30% randomness to enforce diversity (increased from 20%)
         # This ensures games rotate more evenly
         if len(eligible_games) > 1 and random.random() < 0.3:
             # Pick from top 5 options randomly (increased from 3)

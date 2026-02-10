@@ -105,11 +105,52 @@ class Action6ObjectExplorationRung(DecisionRung):
     3. Return specific click coordinates for ACTION6
 
     This is critical for ACTION6-only games like vc33.
+
+    CONFIDENCE DECAY (2025-01-13):
+    Tracks recent (x,y) positions per game. When the same coordinates are
+    produced repeatedly, confidence decays so the cognitive router yields
+    to other rungs instead of committing to stale exploration.
     """
     name = "action6_object_exploration"
     category = "exploration"
     default_priority = 38  # Higher priority than GridExplorationRung (47)
     confidence_threshold = 0.35
+
+    # Class-level position history: game_key -> list of recent (x, y)
+    _position_history: Dict[str, List[Tuple[int, int]]] = {}
+    _HISTORY_WINDOW = 8  # Track last 8 positions per game
+
+    @classmethod
+    def _get_repetition_decay(cls, game_key: str, x: int, y: int, proximity: int = 4) -> float:
+        """
+        Calculate confidence decay based on positional repetition.
+
+        Returns a decay value (0.0 = no decay, up to ~0.50 for heavy repetition).
+        Positions within ``proximity`` pixels of each other count as repeats.
+        """
+        history = cls._position_history.get(game_key, [])
+        if not history:
+            return 0.0
+
+        # Count how many of the last N positions are near (x, y)
+        recent = history[-6:]  # Check last 6 positions
+        repeat_count = sum(
+            1 for px, py in recent
+            if abs(px - x) <= proximity and abs(py - y) <= proximity
+        )
+
+        # 0.10 decay per repeat, so 5 repeats -> 0.50 decay (drops below commit threshold)
+        return min(0.50, repeat_count * 0.10)
+
+    @classmethod
+    def _record_position(cls, game_key: str, x: int, y: int) -> None:
+        """Record a position in the history for this game."""
+        if game_key not in cls._position_history:
+            cls._position_history[game_key] = []
+        cls._position_history[game_key].append((x, y))
+        # Trim to window size
+        if len(cls._position_history[game_key]) > cls._HISTORY_WINDOW:
+            cls._position_history[game_key] = cls._position_history[game_key][-cls._HISTORY_WINDOW:]
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         # Check if ACTION6 is available
@@ -125,6 +166,7 @@ class Action6ObjectExplorationRung(DecisionRung):
         try:
             game_type = context.get('game_type', '')
             level = context.get('level', 1)
+            game_key = f"{game_type}_L{level}"
 
             # Get current frame from game_state
             frame = None
@@ -150,15 +192,21 @@ class Action6ObjectExplorationRung(DecisionRung):
                     # Get center coordinates of the object
                     x = obj.get('center_x', obj.get('x', 32))
                     y = obj.get('center_y', obj.get('y', 32))
+                    base_conf = 0.55 + (obj.get('shape_confidence', 0) * 0.2)
+                    decay = self._get_repetition_decay(game_key, x, y)
+                    confidence = max(0.10, base_conf - decay)
+                    self._record_position(game_key, x, y)
+                    decay_note = f" [decay={decay:.2f}]" if decay > 0 else ""
                     return RungResult(
                         action='ACTION6',
-                        confidence=0.55 + (obj.get('shape_confidence', 0) * 0.2),
-                        reason=f"Object exploration: color={obj.get('color')} shape={obj.get('shape_signature')} at ({x},{y})",
+                        confidence=confidence,
+                        reason=f"Object exploration: color={obj.get('color')} shape={obj.get('shape_signature')} at ({x},{y}){decay_note}",
                         metadata={
                             'x': x,
                             'y': y,
                             'target_object': obj,
-                            'source': 'shape_matching'
+                            'source': 'shape_matching',
+                            'repetition_decay': decay
                         }
                     )
 
@@ -174,15 +222,21 @@ class Action6ObjectExplorationRung(DecisionRung):
                             region_y = button.get('region_y', 4)
                             x = region_x * 8 + 4  # Center of region
                             y = region_y * 8 + 4
+                            base_conf = 0.50 + button.get('confidence', 0) * 0.3
+                            decay = self._get_repetition_decay(game_key, x, y)
+                            confidence = max(0.10, base_conf - decay)
+                            self._record_position(game_key, x, y)
+                            decay_note = f" [decay={decay:.2f}]" if decay > 0 else ""
                             return RungResult(
                                 action='ACTION6',
-                                confidence=0.50 + button.get('confidence', 0) * 0.3,
-                                reason=f"Pseudo-button at region ({region_x},{region_y}) -> ({x},{y})",
+                                confidence=confidence,
+                                reason=f"Pseudo-button at region ({region_x},{region_y}) -> ({x},{y}){decay_note}",
                                 metadata={
                                     'x': x,
                                     'y': y,
                                     'pseudo_button': button,
-                                    'source': 'pseudo_button'
+                                    'source': 'pseudo_button',
+                                    'repetition_decay': decay
                                 }
                             )
 
@@ -198,15 +252,21 @@ class Action6ObjectExplorationRung(DecisionRung):
                         match = re.match(r'\((\d+),(\d+)\)', coords)
                         if match:
                             x, y = int(match.group(1)), int(match.group(2))
+                            base_conf = 0.45 + obj.get('confidence', 0) * 0.3
+                            decay = self._get_repetition_decay(game_key, x, y)
+                            confidence = max(0.10, base_conf - decay)
+                            self._record_position(game_key, x, y)
+                            decay_note = f" [decay={decay:.2f}]" if decay > 0 else ""
                             return RungResult(
                                 action='ACTION6',
-                                confidence=0.45 + obj.get('confidence', 0) * 0.3,
-                                reason=f"Selectable object color={obj.get('object_color')} at ({x},{y})",
+                                confidence=confidence,
+                                reason=f"Selectable object color={obj.get('object_color')} at ({x},{y}){decay_note}",
                                 metadata={
                                     'x': x,
                                     'y': y,
                                     'selectable_object': obj,
-                                    'source': 'network_knowledge'
+                                    'source': 'network_knowledge',
+                                    'repetition_decay': decay
                                 }
                             )
 

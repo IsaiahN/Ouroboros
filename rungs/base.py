@@ -290,7 +290,8 @@ class Action6CoordinateProvider:
         # Strategy 3: Frame analysis for interesting regions
         if frame:
             try:
-                coords = Action6CoordinateProvider._find_interesting_region(frame)
+                game_key = f"{game_type}_L{level}"
+                coords = Action6CoordinateProvider._find_interesting_region(frame, game_key)
                 if coords:
                     return {**coords, 'source': 'frame_analysis'}
             except Exception:
@@ -303,12 +304,12 @@ class Action6CoordinateProvider:
             'source': 'random_fallback'
         }
 
-    _cycle_index: int = 0
-    _last_game_key: str = ""
+    # Per-game cycling state: game_key -> cycle index
+    _cycle_indices: Dict[str, int] = {}
 
     @staticmethod
-    def _find_interesting_region(frame: List[List[int]]) -> Optional[Dict[str, int]]:
-        """Find visually interesting regions in the frame, cycling through objects."""
+    def _find_interesting_region(frame: List[List[int]], game_key: str = "") -> Optional[Dict[str, int]]:
+        """Find visually interesting regions in the frame, cycling through objects per-game."""
         if not frame or len(frame) < 4:
             return None
 
@@ -338,8 +339,12 @@ class Action6CoordinateProvider:
 
         sorted_colors = sorted(valid_groups.keys(), key=lambda c: len(valid_groups[c]), reverse=True)
 
-        Action6CoordinateProvider._cycle_index += 1
-        idx = Action6CoordinateProvider._cycle_index % len(sorted_colors)
+        # Per-game cycling: each game tracks its own index through color groups
+        current_idx = Action6CoordinateProvider._cycle_indices.get(game_key, 0)
+        current_idx += 1
+        Action6CoordinateProvider._cycle_indices[game_key] = current_idx
+
+        idx = current_idx % len(sorted_colors)
         target_color = sorted_colors[idx]
         target_group = valid_groups[target_color]
 
