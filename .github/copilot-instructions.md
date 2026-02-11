@@ -37,7 +37,7 @@ python -c "import sys; print(sys.prefix)"
 
 ---
 
-## 16 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
+## 17 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
 
 ### **RULE 1: Always Disable Pycache**
 - `PYTHONDONTWRITEBYTECODE=1` in ALL environments
@@ -177,6 +177,31 @@ python -c "import sys; print(sys.prefix)"
 - **NEVER** run Python commands without venv activated
 - **Why**: Isolated dependencies, reproducible environment, prevents "module not found" errors
 - **Common Error**: If you see "No module named X", activate venv first!
+
+### **RULE 17: Git Commit and Pre-Commit Hook Compliance**
+- **ALWAYS verify git commits succeed** -- do not assume a commit went through
+- After every `git commit`, check the terminal output for pre-commit hook failures
+- **Pre-commit hooks in this repo**:
+  - `vulture` (dead code detection, min-confidence=80, `--ignore-names=_*`)
+  - `trailing-whitespace` (auto-fixes)
+  - `isort` (auto-fixes import order)
+  - `check python ast` (syntax validation)
+  - `fix end of files` (auto-fixes)
+  - `check for added large files`
+- **If a hook FAILS**:
+  1. Read the error output carefully
+  2. Determine if it is a **genuine code issue** or a **whitelist/false-positive**
+  3. **Genuine issues** (unused imports, unused variables at 90%+ confidence): Fix the code
+     - Remove unused imports
+     - Prefix intentionally unused parameters with `_` (e.g. `_action_name`)
+     - Delete truly dead code
+  4. **False positives** (framework methods like `evaluate`, class variables like `category`):
+     Add to `vulture_whitelist.py`
+  5. **Auto-fixed hooks** (trailing-whitespace, isort): Just re-stage and recommit
+  6. After fixing, re-stage files (`git add -A`) and commit again
+  7. Repeat until commit succeeds with zero hook failures
+- **NEVER leave a failed commit unresolved** -- always fix and recommit
+- **Why**: Pre-commit hooks enforce Rule 3 (No Orphaned Code) automatically
 
 ---
 
@@ -1018,6 +1043,8 @@ Before committing any change, verify:
 
 - [ ] `python -m pytest tests/ -v` passes (or 878+ tests pass)
 - [ ] Pylance/type checker shows 0 errors
+- [ ] Pre-commit hooks pass (`git commit` succeeds without vulture/isort/whitespace failures)
+- [ ] If commit fails: fix genuine errors, re-stage auto-fixed files, recommit until clean
 - [ ] One generation runs without crashes
 - [ ] Pipeline assertions produce 0 CRITICAL findings
 - [ ] No new rung monopoly introduced (check action log diversity)
@@ -1049,6 +1076,6 @@ Every fix, every wiring connection, every new capability should be evaluated aga
 ---
 
 **END OF COPILOT INSTRUCTIONS**
-**Version**: 3.0
+**Version**: 3.1
 **Last Updated**: 2026-02-10
 **Keep this document updated as system evolves**
