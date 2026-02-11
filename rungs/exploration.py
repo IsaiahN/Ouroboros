@@ -162,41 +162,46 @@ class Action6ObjectExplorationRung(DecisionRung):
     default_priority = 38  # Higher priority than GridExplorationRung (47)
     confidence_threshold = 0.35
 
-    # Class-level position history: game_key -> list of recent (x, y)
-    _position_history: Dict[str, List[Tuple[int, int]]] = {}
-    _HISTORY_WINDOW = 8  # Track last 8 positions per game
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+        self._consecutive_no_change = 0
+        self._position_history: List[Tuple[int, int]] = []
+        self._HISTORY_WINDOW = 8
 
-    @classmethod
-    def _get_repetition_decay(cls, game_key: str, x: int, y: int, proximity: int = 4) -> float:
+    def _get_repetition_decay(self, x: int, y: int, proximity: int = 4) -> float:
         """
         Calculate confidence decay based on positional repetition.
 
         Returns a decay value (0.0 = no decay, up to ~0.50 for heavy repetition).
         Positions within ``proximity`` pixels of each other count as repeats.
         """
-        history = cls._position_history.get(game_key, [])
-        if not history:
+        if not self._position_history:
             return 0.0
 
-        # Count how many of the last N positions are near (x, y)
-        recent = history[-6:]  # Check last 6 positions
+        recent = self._position_history[-6:]
         repeat_count = sum(
             1 for px, py in recent
             if abs(px - x) <= proximity and abs(py - y) <= proximity
         )
 
-        # 0.10 decay per repeat, so 5 repeats -> 0.50 decay (drops below commit threshold)
         return min(0.50, repeat_count * 0.10)
 
-    @classmethod
-    def _record_position(cls, game_key: str, x: int, y: int) -> None:
-        """Record a position in the history for this game."""
-        if game_key not in cls._position_history:
-            cls._position_history[game_key] = []
-        cls._position_history[game_key].append((x, y))
-        # Trim to window size
-        if len(cls._position_history[game_key]) > cls._HISTORY_WINDOW:
-            cls._position_history[game_key] = cls._position_history[game_key][-cls._HISTORY_WINDOW:]
+    def _record_position(self, x: int, y: int) -> None:
+        """Record a position in the history."""
+        self._position_history.append((x, y))
+        if len(self._position_history) > self._HISTORY_WINDOW:
+            self._position_history = self._position_history[-self._HISTORY_WINDOW:]
+
+    def _should_abstain(self, x: int, y: int, proximity: int = 4) -> bool:
+        """Abstain entirely if we have 5+ no-change actions at the same spot."""
+        if self._consecutive_no_change < 5:
+            return False
+        # Check if proposed coords are near recent ones
+        if self._position_history:
+            last_x, last_y = self._position_history[-1]
+            if abs(last_x - x) <= proximity and abs(last_y - y) <= proximity:
+                return True
+        return False
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         # Check if ACTION6 is available
@@ -212,7 +217,6 @@ class Action6ObjectExplorationRung(DecisionRung):
         try:
             game_type = context.get('game_type', '')
             level = context.get('level', 1)
-            game_key = f"{game_type}_L{level}"
 
             # Get current frame from game_state
             frame = None
@@ -238,11 +242,14 @@ class Action6ObjectExplorationRung(DecisionRung):
                     # Get center coordinates of the object
                     x = obj.get('center_x', obj.get('x', 32))
                     y = obj.get('center_y', obj.get('y', 32))
-                    base_conf = 0.55 + (obj.get('shape_confidence', 0) * 0.2)
-                    decay = self._get_repetition_decay(game_key, x, y)
-                    confidence = max(0.10, base_conf - decay)
-                    self._record_position(game_key, x, y)
-                    decay_note = f" [decay={decay:.2f}]" if decay > 0 else ""
+                    if self._should_abstain(x, y):
+                        return RungResult(reason="Abstaining: repeated no-change at same position")
+                    base_conf = min(0.55, 0.45 + obj.get('shape_confidence', 0) * 0.15)
+                    decay = self._get_repetition_decay(x, y)
+                    no_change_decay = self._consecutive_no_change * 0.08
+                    confidence = max(0.10, base_conf - decay - no_change_decay)
+                    self._record_position(x, y)
+                    decay_note = f" [decay={decay:.2f}+nc={no_change_decay:.2f}]" if (decay > 0 or no_change_decay > 0) else ""
                     return RungResult(
                         action='ACTION6',
                         confidence=confidence,
@@ -268,11 +275,14 @@ class Action6ObjectExplorationRung(DecisionRung):
                             region_y = button.get('region_y', 4)
                             x = region_x * 8 + 4  # Center of region
                             y = region_y * 8 + 4
-                            base_conf = 0.50 + button.get('confidence', 0) * 0.3
-                            decay = self._get_repetition_decay(game_key, x, y)
-                            confidence = max(0.10, base_conf - decay)
-                            self._record_position(game_key, x, y)
-                            decay_note = f" [decay={decay:.2f}]" if decay > 0 else ""
+                            if self._should_abstain(x, y):
+                                continue  # Skip this button, try next
+                            base_conf = min(0.55, 0.40 + button.get('confidence', 0) * 0.20)
+                            decay = self._get_repetition_decay(x, y)
+                            no_change_decay = self._consecutive_no_change * 0.08
+                            confidence = max(0.10, base_conf - decay - no_change_decay)
+                            self._record_position(x, y)
+                            decay_note = f" [decay={decay:.2f}+nc={no_change_decay:.2f}]" if (decay > 0 or no_change_decay > 0) else ""
                             return RungResult(
                                 action='ACTION6',
                                 confidence=confidence,
@@ -298,11 +308,14 @@ class Action6ObjectExplorationRung(DecisionRung):
                         match = re.match(r'\((\d+),(\d+)\)', coords)
                         if match:
                             x, y = int(match.group(1)), int(match.group(2))
-                            base_conf = 0.45 + obj.get('confidence', 0) * 0.3
-                            decay = self._get_repetition_decay(game_key, x, y)
-                            confidence = max(0.10, base_conf - decay)
-                            self._record_position(game_key, x, y)
-                            decay_note = f" [decay={decay:.2f}]" if decay > 0 else ""
+                            if self._should_abstain(x, y):
+                                return RungResult(reason="Abstaining: repeated no-change at same position")
+                            base_conf = min(0.55, 0.35 + obj.get('confidence', 0) * 0.25)
+                            decay = self._get_repetition_decay(x, y)
+                            no_change_decay = self._consecutive_no_change * 0.08
+                            confidence = max(0.10, base_conf - decay - no_change_decay)
+                            self._record_position(x, y)
+                            decay_note = f" [decay={decay:.2f}+nc={no_change_decay:.2f}]" if (decay > 0 or no_change_decay > 0) else ""
                             return RungResult(
                                 action='ACTION6',
                                 confidence=confidence,
@@ -320,6 +333,24 @@ class Action6ObjectExplorationRung(DecisionRung):
         except Exception as e:
             return RungResult(reason=f"Action6 object exploration failed: {e}")
 
+    def on_action_complete(self, action: Any, result: Any,
+                           pre_frame: Any = None, post_frame: Any = None,
+                           **kwargs: Any) -> None:
+        """Track whether actions produce frame changes."""
+        try:
+            if pre_frame is not None and post_frame is not None:
+                import numpy as np
+                pre = np.array(pre_frame) if not isinstance(pre_frame, np.ndarray) else pre_frame
+                post = np.array(post_frame) if not isinstance(post_frame, np.ndarray) else post_frame
+                if pre.shape == post.shape and np.array_equal(pre, post):
+                    self._consecutive_no_change += 1
+                else:
+                    self._consecutive_no_change = 0
+            else:
+                # No frame data -- assume no change (conservative)
+                self._consecutive_no_change += 1
+        except Exception:
+            self._consecutive_no_change += 1
 
 
 # Registry of rungs in this module
