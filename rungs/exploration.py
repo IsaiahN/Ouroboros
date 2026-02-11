@@ -193,15 +193,19 @@ class Action6ObjectExplorationRung(DecisionRung):
             self._position_history = self._position_history[-self._HISTORY_WINDOW:]
 
     def _should_abstain(self, x: int, y: int, proximity: int = 4) -> bool:
-        """Abstain entirely if we have 5+ no-change actions at the same spot."""
-        if self._consecutive_no_change < 5:
+        """Abstain if last 3+ recorded positions are all near proposed coords.
+
+        This uses position history only -- no dependency on on_action_complete.
+        After clicking the same spot 3 times, the rung yields entirely so the
+        router's coordinate fallback can try different positions.
+        """
+        if len(self._position_history) < 3:
             return False
-        # Check if proposed coords are near recent ones
-        if self._position_history:
-            last_x, last_y = self._position_history[-1]
-            if abs(last_x - x) <= proximity and abs(last_y - y) <= proximity:
-                return True
-        return False
+        recent = self._position_history[-3:]
+        return all(
+            abs(px - x) <= proximity and abs(py - y) <= proximity
+            for px, py in recent
+        )
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         # Check if ACTION6 is available
@@ -333,15 +337,22 @@ class Action6ObjectExplorationRung(DecisionRung):
         except Exception as e:
             return RungResult(reason=f"Action6 object exploration failed: {e}")
 
-    def on_action_complete(self, action: Any, result: Any,
-                           pre_frame: Any = None, post_frame: Any = None,
+    def on_action_complete(self, action: str,
+                           action_data: Any = None,
+                           frame_before: Any = None,
+                           frame_after: Any = None,
+                           context: Any = None,
                            **kwargs: Any) -> None:
-        """Track whether actions produce frame changes."""
+        """Track whether actions produce frame changes.
+
+        Signature must match DecisionRungSystem.notify_action_complete caller:
+            action, action_data, frame_before, frame_after, context
+        """
         try:
-            if pre_frame is not None and post_frame is not None:
+            if frame_before is not None and frame_after is not None:
                 import numpy as np
-                pre = np.array(pre_frame) if not isinstance(pre_frame, np.ndarray) else pre_frame
-                post = np.array(post_frame) if not isinstance(post_frame, np.ndarray) else post_frame
+                pre = np.array(frame_before) if not isinstance(frame_before, np.ndarray) else frame_before
+                post = np.array(frame_after) if not isinstance(frame_after, np.ndarray) else frame_after
                 if pre.shape == post.shape and np.array_equal(pre, post):
                     self._consecutive_no_change += 1
                 else:
