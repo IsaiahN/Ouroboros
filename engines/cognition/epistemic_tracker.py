@@ -13,10 +13,8 @@ Key responsibilities:
 4. Provide transition events that drive algorithm switching
 """
 
-import copy
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from engines.cognition.blackboard import KnownFact, Question, RumsfeldQuadrant
@@ -25,7 +23,6 @@ from engines.cognition.epistemic_state import (
     EpistemicSnapshot,
     EpistemicState,
     EpistemicTransition,
-    TransitionResponse,
 )
 
 if TYPE_CHECKING:
@@ -140,6 +137,7 @@ class EpistemicTracker:
         self.transitions: List[EpistemicTransition] = []
         self._last_quadrant = RumsfeldQuadrant.UU
         self._tick = 0
+        self._no_change_streak: int = 0  # Phase 0.2: consecutive no-frame-change actions
 
     def reset(self) -> None:
         """Soft reset for a new decision within same game.
@@ -177,6 +175,7 @@ class EpistemicTracker:
         self.transitions.clear()
         self._last_quadrant = self.current_state.primary_quadrant
         self._tick = 0
+        self._no_change_streak = 0
 
     def hard_reset(self) -> None:
         """Full reset for a completely new game (no knowledge preserved)."""
@@ -185,6 +184,7 @@ class EpistemicTracker:
         self.transitions.clear()
         self._last_quadrant = RumsfeldQuadrant.UU
         self._tick = 0
+        self._no_change_streak = 0
 
     def update_from_rung_result(
         self,
@@ -402,6 +402,56 @@ class EpistemicTracker:
                 1.0,
                 self.current_state.uu_estimate + 0.3
             )
+
+    # =================================================================
+    # Phase 0.2: Evidence-based epistemic updates from action feedback
+    # =================================================================
+
+    def update_from_action_feedback(
+        self,
+        _action_name: str,
+        frame_changed: bool,
+        score_changed: bool = False,
+    ) -> None:
+        """Update epistemic state from real action outcomes.
+
+        Called by the game loop after each action. This closes the gap
+        between confidence-threshold KU->KK transitions and evidence-based
+        transitions: if the world doesn't respond to our actions, our
+        "knowledge" is suspect.
+
+        Args:
+            _action_name: The action that was executed (e.g. 'ACTION6').
+            frame_changed: Whether the frame pixels changed after the action.
+            score_changed: Whether the score changed after the action.
+        """
+        if frame_changed:
+            # World responded -- evidence confirms our knowledge
+            self._no_change_streak = 0
+            boost = 1.1 if score_changed else 1.05
+            self.current_state.kk_confidence = min(
+                1.0, self.current_state.kk_confidence * boost
+            )
+            # Score change also reduces UU (strong evidence of understanding)
+            if score_changed:
+                self.current_state.uu_estimate *= 0.9
+        else:
+            # World did NOT respond -- our knowledge may be wrong
+            self._no_change_streak += 1
+            self.current_state.kk_confidence *= 0.95
+
+            # After 5+ consecutive no-change actions, aggressively decay
+            if self._no_change_streak >= 5:
+                self.current_state.kk_confidence *= 0.8
+                # We clearly don't understand this world yet
+                self.current_state.uu_estimate = min(
+                    1.0, self.current_state.uu_estimate + 0.05
+                )
+
+        # Recompute primary quadrant so downstream readers see the update
+        self.current_state.primary_quadrant = (
+            self.current_state.compute_primary_quadrant()
+        )
 
     def _has_cached_knowledge(
         self,

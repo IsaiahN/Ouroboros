@@ -42,9 +42,51 @@ class SmartActionSelectionRung(DecisionRung):
         # Fallback: random position
         return {'x': random.randint(4, 60), 'y': random.randint(4, 60)}
 
+    def _avoid_tried_positions(
+        self, coords: Dict[str, int], context: Dict[str, Any], max_attempts: int = 10
+    ) -> Dict[str, int]:
+        """Part 7.2: During learning phase, avoid re-clicking previously tried positions.
+
+        Reads the world_model action_history to find positions already clicked,
+        then picks a different random position if the proposed one was already tried.
+        Falls back to the original coords if no novel position can be found.
+        """
+        wm = context.get('world_model') or {}
+        history = wm.get('action_history', [])
+        tried_positions: set = set()
+        for entry in history[-30:]:
+            if isinstance(entry, dict) and 'x' in entry and 'y' in entry:
+                tried_positions.add((entry['x'], entry['y']))
+
+        if not tried_positions:
+            return coords
+
+        # If proposed position already tried, try to find a novel one
+        proposed = (coords.get('x', 32), coords.get('y', 32))
+        if proposed not in tried_positions:
+            return coords
+
+        for _ in range(max_attempts):
+            x = random.randint(4, 60)
+            y = random.randint(4, 60)
+            if (x, y) not in tried_positions:
+                return {'x': x, 'y': y}
+
+        # Couldn't find novel position; return original
+        return coords
+
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         try:
-            strategy = context.get('fallback_strategy', 'balanced')
+            # Part 7.2: Level-aware strategy - learning phases use exploration,
+            # applying phases use exploitation, otherwise use fallback_strategy
+            level_phase = context.get('level_phase', '')
+            if level_phase == 'learning':
+                strategy = 'exploration'
+            elif level_phase == 'applying':
+                strategy = 'exploitation'
+            else:
+                strategy = context.get('fallback_strategy', 'balanced')
+
             available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
             available_strs = {f'ACTION{a}' for a in available}
 
@@ -70,9 +112,13 @@ class SmartActionSelectionRung(DecisionRung):
                 cumulative += weight
                 if r <= cumulative:
                     # Add coordinates if ACTION6
-                    metadata: Dict[str, Any] = {'strategy': strategy}
+                    metadata: Dict[str, Any] = {'strategy': strategy, 'level_phase': level_phase}
                     if action == 'ACTION6':
-                        metadata.update(self._get_action6_coordinates())
+                        coords = self._get_action6_coordinates()
+                        # Part 7.2: During learning phase, avoid re-clicking same positions
+                        if level_phase == 'learning':
+                            coords = self._avoid_tried_positions(coords, context)
+                        metadata.update(coords)
                     return RungResult(
                         action=action,
                         confidence=0.1,
@@ -83,7 +129,7 @@ class SmartActionSelectionRung(DecisionRung):
 
             fallback_action = get_random_available_action(context)
             # Add coordinates if ACTION6
-            metadata = {'strategy': 'ultimate_fallback'}
+            metadata = {'strategy': 'ultimate_fallback', 'level_phase': level_phase}
             if fallback_action == 'ACTION6':
                 metadata.update(self._get_action6_coordinates())
             return RungResult(action=fallback_action, confidence=0.1, reason="Ultimate fallback", metadata=metadata)

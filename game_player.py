@@ -78,6 +78,15 @@ class GamePlayer:
         self._prev_frame: Optional[np.ndarray] = None
         self._prev_properties: Optional[dict] = None
 
+        # Wire epistemic tracker to context builder (Phase 0.2)
+        try:
+            if self._use_cognitive_router and hasattr(self.decision_system, '_cognitive_router'):
+                router = self.decision_system._cognitive_router
+                if router is not None and hasattr(router, 'epistemic_tracker'):
+                    self.context_builder.set_epistemic_source(router.epistemic_tracker)
+        except Exception:
+            pass
+
     @property
     def last_session_id(self) -> Optional[str]:
         """Session ID from the most recent play_game call."""
@@ -1040,6 +1049,33 @@ class GamePlayer:
 
             self.context_builder.update_runner_outcome(action.name, last_outcome_type, last_frame_changed)
 
+            # Feed action outcome to epistemic tracker (Phase 0.2)
+            try:
+                if self._use_cognitive_router and hasattr(self.decision_system, '_cognitive_router'):
+                    router = self.decision_system._cognitive_router
+                    if router is not None and hasattr(router, 'epistemic_tracker'):
+                        router.epistemic_tracker.update_from_action_feedback(
+                            action_name=action.name,
+                            frame_changed=last_frame_changed,
+                            score_changed=(last_score_delta != 0),
+                        )
+            except Exception:
+                pass
+
+            # Update world model causal map from action feedback (Part 7.1)
+            try:
+                click_x = action_data.get('x', 32) if action_data else 32
+                click_y = action_data.get('y', 32) if action_data else 32
+                fb_before = getattr(obs_before, 'frame', None)
+                fb_after = getattr(obs, 'frame', None)
+                self.context_builder.update_world_model_from_action(
+                    action=action.name, x=click_x, y=click_y,
+                    frame_changed=last_frame_changed,
+                    pre_frame=fb_before, post_frame=fb_after,
+                )
+            except Exception:
+                pass
+
             # Record action trace
             self._record_action_trace(
                 game_id=game_id, action_num=action_num,
@@ -1110,6 +1146,19 @@ class GamePlayer:
                         print(f"    [SEQ-ERR] Failed to save level sequence: {e}")
 
                 level_start_action_index = len(action_sequence)
+
+                # Snapshot level scene for level-to-level diffing (Part 7.3)
+                try:
+                    vc = getattr(self.context_builder, '_visual_cortex', None)
+                    if vc is not None:
+                        lvl_frame = getattr(obs, 'frame', None)
+                        if lvl_frame is not None:
+                            lvl_frame_list = lvl_frame.tolist() if hasattr(lvl_frame, 'tolist') else lvl_frame
+                            if isinstance(lvl_frame_list, list) and len(lvl_frame_list) > 0:
+                                lvl_scene = vc.analyze(lvl_frame_list)
+                                self.context_builder.snapshot_level_scene(lvl_scene.to_dict(), current_levels)
+                except Exception:
+                    pass
 
                 # Publish LEVEL_UP event
                 self.event_bus.publish(make_event(

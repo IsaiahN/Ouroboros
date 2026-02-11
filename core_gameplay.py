@@ -1,6 +1,12 @@
 """
-Core Gameplay v3.0 - Convenience Wrapper
-========================================
+Core Gameplay v3.0 - Convenience Wrapper  [DEPRECATED]
+=======================================================
+
+.. deprecated::
+    This module is a thin wrapper around ``GamePlayer`` and ``GameLoop``.
+    All production game-playing flows through ``game_player.py`` directly.
+    No production code imports this module.  Kept for backward compatibility
+    with skipped test files.  Prefer ``GamePlayer`` for new code.
 
 Thin convenience wrapper around the production ``GamePlayer`` (sync path)
 and the lightweight ``GameLoop`` (async state-machine path).
@@ -535,7 +541,7 @@ class SimpleDecisionFallback:
     Just returns a random action from available actions.
     """
 
-    def decide(self, frame: Any, context: Dict[str, Any]) -> tuple[str, str]:
+    def decide(self, _frame: Any, context: Dict[str, Any]) -> tuple[str, str]:
         """Make a random decision."""
         import random
 

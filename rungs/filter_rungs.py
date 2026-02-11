@@ -523,7 +523,22 @@ class BudgetAwarePlanningRung(DecisionRung):
 
         game_type = context.get('game_type', '')
         level = context.get('level', 1)
+        puzzle_type = context.get('puzzle_type', 'unknown')
         game_key = f"{game_type}_L{level}"
+
+        # Part 7.2: Deliberate experimentation mode
+        # Levels 1-2: LEARNING phase - maximize information gain
+        # Level 3: TRANSITIONING - start applying learned rules
+        # Levels 4+: APPLYING - exploit knowledge to complete levels
+        level_phase = context.get('level_phase', 'learning')
+        if not level_phase or level_phase == 'learning':
+            # Re-derive from level in case context didn't populate it
+            if level <= 2:
+                level_phase = 'learning'
+            elif level == 3:
+                level_phase = 'transitioning'
+            else:
+                level_phase = 'applying'
 
         # Calculate efficiency
         productive = self._productive_actions.get(game_key, 0)
@@ -534,6 +549,8 @@ class BudgetAwarePlanningRung(DecisionRung):
         if remaining_pct < 0.10:
             # CRITICAL: Less than 10% budget remaining
             # Only allow actions with known positive outcomes
+            # In learning phase, still don't penalize exploration
+            exploration_penalty = 0.0 if level_phase == 'learning' else 0.7
             return RungResult(
                 confidence=0.3,
                 reason=f"CRITICAL budget: {remaining_pct:.0%} remaining, {action_count}/{action_budget} used. Efficiency: {efficiency:.0%}",
@@ -542,30 +559,38 @@ class BudgetAwarePlanningRung(DecisionRung):
                     'budget_remaining_pct': remaining_pct,
                     'efficiency': efficiency,
                     'confidence_boost': 0.3,  # Boost confidence of exploitation rungs
+                    'level_phase': level_phase,
+                    'puzzle_type': puzzle_type,
+                    'exploration_penalty': exploration_penalty,
                 }
             )
         elif remaining_pct < 0.30:
             # LATE: Shift strongly toward exploitation
-            weights: Dict[str, float] = {}
-            available = context.get('available_actions', [])
-            # Don't penalize specific actions, but inject metadata for other rungs
+            # In learning phase, never penalize exploration
+            exploration_penalty = 0.0 if level_phase == 'learning' else 0.5
             return RungResult(
                 reason=f"Late budget: {remaining_pct:.0%} remaining. Efficiency: {efficiency:.0%}",
                 metadata={
                     'budget_phase': 'late',
                     'budget_remaining_pct': remaining_pct,
                     'efficiency': efficiency,
-                    'exploration_penalty': 0.5,  # Downstream rungs can read this
+                    'exploration_penalty': exploration_penalty,
+                    'level_phase': level_phase,
+                    'puzzle_type': puzzle_type,
                 }
             )
         elif remaining_pct < 0.70:
             # MID: Balanced
+            exploration_penalty = 0.0 if level_phase == 'learning' else 0.0
             return RungResult(
                 reason=f"Mid budget: {remaining_pct:.0%} remaining. Efficiency: {efficiency:.0%}",
                 metadata={
                     'budget_phase': 'mid',
                     'budget_remaining_pct': remaining_pct,
                     'efficiency': efficiency,
+                    'level_phase': level_phase,
+                    'puzzle_type': puzzle_type,
+                    'exploration_penalty': exploration_penalty,
                 }
             )
 
@@ -574,6 +599,9 @@ class BudgetAwarePlanningRung(DecisionRung):
             metadata={
                 'budget_phase': 'early',
                 'budget_remaining_pct': remaining_pct,
+                'level_phase': level_phase,
+                'puzzle_type': puzzle_type,
+                'exploration_penalty': 0.0,
             }
         )
 

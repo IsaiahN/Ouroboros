@@ -22,9 +22,12 @@ Usage:
     action, reason = decision_system.decide(observation, context)
 """
 
+import logging
 import os
 
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+logger = logging.getLogger(__name__)
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -178,6 +181,39 @@ class DecisionContext:
     sparse_diff: Optional[Dict[str, Any]] = None  # Diff from previous frame
 
     # =====================================================================
+    # Part 7 Cognitive Capabilities (world model, goals, classification)
+    # These enable the system to accumulate knowledge across actions,
+    # understand what the goal is, and select appropriate strategies.
+    # =====================================================================
+
+    # 7.1 Within-Game Persistent World Model
+    # Accumulates across actions AND levels. Contains causal_map, cell_states,
+    # rules_learned, action_history. Updated by on_action_complete feedback.
+    world_model: Optional[Dict[str, Any]] = None
+
+    # 7.4 Goal-State Differencing
+    # Extracted from reference panel by visual cortex. Shows what needs to change.
+    goal_state: Optional[Dict[str, Any]] = None  # {(x,y): target_color}
+    goal_delta: Optional[Dict[str, Any]] = None  # {(x,y): (current, target)}
+
+    # 7.5 Puzzle-Type Classification
+    # Determined before first action from available_actions + visual analysis.
+    # One of: click_toggle, click_transform, movement_maze, pattern_completion, hybrid, unknown
+    puzzle_type: str = 'unknown'
+
+    # 7.3 Level-to-Level Differencing
+    # What changed between previous and current level. The delta IS the lesson.
+    level_diffs: List[Dict[str, Any]] = field(default_factory=list)
+
+    # Phase 0.2 Epistemic State (exposed to rungs for informed decisions)
+    # One of: KK (known-known), KU (known-unknown), UK (unknown-known), UU (unknown-unknown)
+    epistemic_quadrant: str = 'UU'
+
+    # Part 7.2: Level-aware deliberate experimentation phase
+    # 'learning' (levels 1-2), 'transitioning' (level 3), 'applying' (levels 4+)
+    level_phase: str = 'learning'
+
+    # =====================================================================
     # Runtime fields (populated by EvolutionRunner game loop)
     # These fields exist so that both ContextBuilder.build() (game_loop.py)
     # and EvolutionRunner.play_game() produce identical context contracts.
@@ -311,6 +347,15 @@ class DecisionContext:
             'sparse_components': self.sparse_components,
             'sparse_diff': self.sparse_diff,
 
+            # Part 7 Cognitive Capabilities
+            'world_model': self.world_model,
+            'goal_state': self.goal_state,
+            'goal_delta': self.goal_delta,
+            'puzzle_type': self.puzzle_type,
+            'level_diffs': self.level_diffs,
+            'epistemic_quadrant': self.epistemic_quadrant,
+            'level_phase': self.level_phase,
+
             # Runtime fields (evolution_runner game loop)
             'state': self.game_state.name if hasattr(self.game_state, 'name') else str(self.game_state),
             'frame_data': self.frame_data,
@@ -408,6 +453,42 @@ class ContextBuilder:
             except Exception as e:
                 logger.warning(f"Visual cortex init failed: {e}")
                 self._visual_cortex = None
+
+        # =====================================================================
+        # Part 7 Cognitive Capability State (persists across actions in a game)
+        # =====================================================================
+
+        # 7.1 World Model — accumulates causal knowledge across actions/levels
+        self._world_model: Dict[str, Any] = {
+            'causal_map': {},       # {pos_key: {effect_type, affected_cells, observations}}
+            'cell_states': {},      # {pos_key: current_color}
+            'goal_state': {},       # {pos_key: target_color}  (from reference panel)
+            'delta': {},            # {pos_key: (current, target)}
+            'rules_learned': [],    # Compact rules extracted from causal_map
+            'level_diffs': [],      # What changed between levels
+            'action_history': [],   # [(action, x, y, frame_changed, changes_count)]
+        }
+
+        # 7.3 Level-to-Level Differencing state
+        self._prev_level_scene: Optional[Dict[str, Any]] = None  # Visual scene at end of prev level
+        self._prev_level_number: int = 0
+        self._level_diffs: List[Dict[str, Any]] = []
+
+        # 7.5 Puzzle-Type Classification (set once per game, cached)
+        self._puzzle_type: str = 'unknown'
+        self._puzzle_type_classified: bool = False
+
+        # Phase 0.2: Reference to EpistemicTracker for real quadrant state
+        self._epistemic_source: Any = None
+
+    def set_epistemic_source(self, tracker: Any) -> None:
+        """Store a reference to an EpistemicTracker for real epistemic state.
+
+        Called once during wiring (e.g. from GamePlayer.__init__).
+        The tracker's ``current_state.primary_quadrant.name`` is read each
+        time ``build_from_runner_state()`` constructs a DecisionContext.
+        """
+        self._epistemic_source = tracker
 
     def build(
         self,
@@ -612,6 +693,43 @@ class ContextBuilder:
             except Exception as e:
                 logger.debug(f"Visual cortex analysis failed: {e}")
 
+        # =====================================================================
+        # Part 7 Cognitive Capabilities population
+        # =====================================================================
+
+        # 7.5 Puzzle-Type Classification (once per game)
+        puzzle_type = self.classify_puzzle_type(available_actions, visual_scene_dict)
+
+        # 7.4 Goal-State Differencing (every action — reference panel may become clearer)
+        goal_state, goal_delta = self.extract_goal_state(visual_scene_dict, frame)
+
+        # 7.3 Level-to-Level Differencing (on level transition)
+        if level > self._prev_level_number and self._prev_level_number > 0:
+            self.compute_level_diff(visual_scene_dict, level)
+        elif self._prev_level_number == 0:
+            # First action — snapshot for future comparison
+            self._prev_level_scene = visual_scene_dict
+            self._prev_level_number = level
+
+        # Phase 0.2: Real epistemic state from tracker
+        epistemic_q = 'UU'
+        if self._epistemic_source is not None:
+            try:
+                epistemic_q = self._epistemic_source.current_state.primary_quadrant.name
+            except Exception:
+                pass
+
+        # Part 7.2: Deliberate experimentation mode
+        # Levels 1-2: LEARNING phase - maximize information gain
+        # Level 3: TRANSITIONING - start applying learned rules
+        # Levels 4+: APPLYING - exploit knowledge to complete levels
+        if level <= 2:
+            level_phase = 'learning'
+        elif level == 3:
+            level_phase = 'transitioning'
+        else:
+            level_phase = 'applying'
+
         return DecisionContext(
             # Game
             game_id=game_id,
@@ -673,6 +791,19 @@ class ContextBuilder:
 
             # Visual cortex scene understanding
             visual_scene=visual_scene_dict,
+
+            # Part 7 Cognitive Capabilities
+            world_model=self._world_model.copy(),
+            goal_state=goal_state,
+            goal_delta=goal_delta,
+            puzzle_type=puzzle_type,
+            level_diffs=self._level_diffs.copy(),
+
+            # Phase 0.2: Real epistemic quadrant
+            epistemic_quadrant=epistemic_q,
+
+            # Part 7.2: Level-aware experimentation phase
+            level_phase=level_phase,
 
             # Runtime fields (unique to evolution_runner path)
             frame_data=obs,
@@ -941,6 +1072,353 @@ class ContextBuilder:
         self._visited_positions.clear()
         self._death_count = 0
         self._clear_checkpoint()  # Clear checkpoint on game reset
+
+        # Reset Part 7 cognitive state for new game
+        self._world_model = {
+            'causal_map': {},
+            'cell_states': {},
+            'goal_state': {},
+            'delta': {},
+            'rules_learned': [],
+            'level_diffs': [],
+            'action_history': [],
+        }
+        self._prev_level_scene = None
+        self._prev_level_number = 0
+        self._level_diffs = []
+        self._puzzle_type = 'unknown'
+        self._puzzle_type_classified = False
+        # NOTE: _epistemic_source is NOT reset here — it is structural wiring,
+        # not game-scoped state.  It persists across games for the same player.
+
+    # =====================================================================
+    # Part 7 Cognitive Capability Methods
+    # =====================================================================
+
+    def classify_puzzle_type(self, available_actions: List[int],
+                            visual_scene: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Classify the puzzle type from available actions and visual analysis.
+        Called once per game, cached for subsequent actions.
+
+        Returns one of: click_toggle, click_transform, movement_maze,
+        pattern_completion, hybrid, unknown
+        """
+        if self._puzzle_type_classified:
+            return self._puzzle_type
+
+        # Primary signal: available actions
+        has_directional = any(a in available_actions for a in [1, 2, 3, 4])
+        has_click = 6 in available_actions
+        has_submit = 5 in available_actions
+
+        if has_click and not has_directional:
+            # Click-only game
+            puzzle_type = 'click_toggle'  # Default for click-only
+
+            # Refine with visual analysis
+            if visual_scene:
+                panels = visual_scene.get('panels', [])
+                panel_count = visual_scene.get('panel_count', 0)
+                tile_grid = visual_scene.get('tile_grid')
+
+                if panel_count >= 3:
+                    # Multiple panels with reference = transformation game
+                    puzzle_type = 'click_transform'
+                elif tile_grid:
+                    # Regular tile grid = toggle/constraint game
+                    puzzle_type = 'click_toggle'
+
+        elif has_directional and not has_click:
+            puzzle_type = 'movement_maze'
+
+        elif has_directional and has_click:
+            puzzle_type = 'hybrid'
+
+        else:
+            puzzle_type = 'unknown'
+
+        self._puzzle_type = puzzle_type
+        self._puzzle_type_classified = True
+        return puzzle_type
+
+    def extract_goal_state(self, visual_scene: Optional[Dict[str, Any]],
+                           frame: Optional[Any] = None) -> Tuple[Optional[Dict], Optional[Dict]]:
+        """
+        Extract goal state from reference panel in visual scene.
+
+        Returns (goal_state, goal_delta) where:
+        - goal_state: {(x,y): target_color} from reference panel
+        - goal_delta: {(x,y): (current_color, target_color)} differences
+        """
+        if not visual_scene or not frame:
+            return None, None
+
+        try:
+            # Get panels with their roles
+            panels = visual_scene.get('panels', [])
+            reference_panel_idx = visual_scene.get('reference_panel_idx')
+
+            if reference_panel_idx is None or reference_panel_idx >= len(panels):
+                return None, None
+
+            ref_panel = panels[reference_panel_idx]
+            ref_bounds = ref_panel.get('bounds')  # (y_min, x_min, y_max, x_max)
+
+            if not ref_bounds:
+                return None, None
+
+            # Get frame as list for indexing
+            frame_data = frame
+            if hasattr(frame, 'tolist'):
+                frame_data = frame.tolist()
+
+            if not isinstance(frame_data, list) or not frame_data:
+                return None, None
+
+            y_min, x_min, y_max, x_max = ref_bounds
+
+            # Extract reference panel pixels as goal state
+            goal_state = {}
+            for y in range(max(0, y_min), min(len(frame_data), y_max)):
+                row = frame_data[y]
+                for x in range(max(0, x_min), min(len(row), x_max)):
+                    color = row[x]
+                    if color != 0:  # Non-background
+                        goal_state[f"{x},{y}"] = color
+
+            if not goal_state:
+                return None, None
+
+            # Find workspace panel to compute delta
+            workspace_idx = None
+            for i, p in enumerate(panels):
+                role = p.get('role', '')
+                if role in ('workspace', 'output') and i != reference_panel_idx:
+                    workspace_idx = i
+                    break
+
+            goal_delta = None
+            if workspace_idx is not None and workspace_idx < len(panels):
+                ws_panel = panels[workspace_idx]
+                ws_bounds = ws_panel.get('bounds')
+                if ws_bounds:
+                    wy_min, wx_min, wy_max, wx_max = ws_bounds
+                    goal_delta = {}
+
+                    # Map workspace positions to reference positions
+                    # (offset-based correspondence)
+                    ref_h = y_max - y_min
+                    ref_w = x_max - x_min
+                    ws_h = wy_max - wy_min
+                    ws_w = wx_max - wx_min
+
+                    if ref_h > 0 and ref_w > 0 and ws_h > 0 and ws_w > 0:
+                        for ry in range(min(ref_h, ws_h)):
+                            for rx in range(min(ref_w, ws_w)):
+                                ref_y = y_min + ry
+                                ref_x = x_min + rx
+                                ws_y = wy_min + ry
+                                ws_x = wx_min + rx
+
+                                if (ref_y < len(frame_data) and ref_x < len(frame_data[ref_y])
+                                        and ws_y < len(frame_data) and ws_x < len(frame_data[ws_y])):
+                                    ref_color = frame_data[ref_y][ref_x]
+                                    ws_color = frame_data[ws_y][ws_x]
+                                    if ref_color != ws_color:
+                                        goal_delta[f"{ws_x},{ws_y}"] = {
+                                            'current': ws_color,
+                                            'target': ref_color,
+                                        }
+
+            # Update world model goal tracking
+            self._world_model['goal_state'] = goal_state
+            self._world_model['delta'] = goal_delta or {}
+
+            return goal_state, goal_delta
+
+        except Exception as e:
+            logger.debug(f"Goal state extraction failed: {e}")
+            return None, None
+
+    def compute_level_diff(self, current_scene: Optional[Dict[str, Any]],
+                           current_level: int) -> Optional[Dict[str, Any]]:
+        """
+        Compare current level's visual scene to previous level's scene.
+        The delta IS the lesson the game is teaching.
+
+        Returns diff dict or None if no previous level to compare.
+        """
+        if not current_scene or current_level <= 1:
+            # Store current scene for next level's comparison
+            self._prev_level_scene = current_scene
+            self._prev_level_number = current_level
+            return None
+
+        if self._prev_level_scene is None:
+            self._prev_level_scene = current_scene
+            self._prev_level_number = current_level
+            return None
+
+        prev = self._prev_level_scene
+        curr = current_scene
+
+        try:
+            diff = {
+                'from_level': self._prev_level_number,
+                'to_level': current_level,
+                'panel_count_change': curr.get('panel_count', 0) - prev.get('panel_count', 0),
+                'new_colors': list(
+                    set(curr.get('unique_colors', [])) - set(prev.get('unique_colors', []))
+                ),
+                'lost_colors': list(
+                    set(prev.get('unique_colors', [])) - set(curr.get('unique_colors', []))
+                ),
+                'layout_changed': curr.get('layout', '') != prev.get('layout', ''),
+                'grid_size_change': (
+                    (curr.get('logical_grid_size', (0, 0))[0] - prev.get('logical_grid_size', (0, 0))[0],
+                     curr.get('logical_grid_size', (0, 0))[1] - prev.get('logical_grid_size', (0, 0))[1])
+                    if curr.get('logical_grid_size') and prev.get('logical_grid_size')
+                    else (0, 0)
+                ),
+            }
+
+            self._level_diffs.append(diff)
+            self._world_model['level_diffs'] = self._level_diffs.copy()
+
+            # Update prev for next level transition
+            self._prev_level_scene = current_scene
+            self._prev_level_number = current_level
+
+            return diff
+
+        except Exception as e:
+            logger.debug(f"Level diff computation failed: {e}")
+            self._prev_level_scene = current_scene
+            self._prev_level_number = current_level
+            return None
+
+    def update_world_model_from_action(self, action: str, x: int, y: int,
+                                       frame_changed: bool,
+                                       pre_frame: Optional[Any] = None,
+                                       post_frame: Optional[Any] = None) -> None:
+        """
+        Update the world model's causal map after an action.
+        This is called from the feedback loop (on_action_complete path).
+
+        Records what happened when we took this action at this position.
+        """
+        # Record in action history
+        self._world_model['action_history'].append({
+            'action': action,
+            'x': x, 'y': y,
+            'frame_changed': frame_changed,
+        })
+        # Keep history bounded
+        if len(self._world_model['action_history']) > 200:
+            self._world_model['action_history'] = self._world_model['action_history'][-200:]
+
+        if not frame_changed or pre_frame is None or post_frame is None:
+            return
+
+        try:
+            # Convert frames to lists if numpy
+            pre = pre_frame.tolist() if hasattr(pre_frame, 'tolist') else pre_frame
+            post = post_frame.tolist() if hasattr(post_frame, 'tolist') else post_frame
+
+            if not isinstance(pre, list) or not isinstance(post, list):
+                return
+
+            # Find all changed pixels
+            changes = []
+            for row_idx in range(min(len(pre), len(post))):
+                pre_row = pre[row_idx]
+                post_row = post[row_idx]
+                for col_idx in range(min(len(pre_row), len(post_row))):
+                    if pre_row[col_idx] != post_row[col_idx]:
+                        changes.append({
+                            'x': col_idx, 'y': row_idx,
+                            'from_color': pre_row[col_idx],
+                            'to_color': post_row[col_idx],
+                        })
+
+            if not changes:
+                return
+
+            # Record in causal map
+            pos_key = f"{x},{y}"
+            if pos_key not in self._world_model['causal_map']:
+                self._world_model['causal_map'][pos_key] = {
+                    'action': action,
+                    'observations': [],
+                    'total_observations': 0,
+                }
+
+            entry = self._world_model['causal_map'][pos_key]
+            entry['observations'].append({
+                'changes': changes[:50],  # Cap per observation
+                'change_count': len(changes),
+            })
+            entry['total_observations'] += 1
+
+            # Keep observations bounded
+            if len(entry['observations']) > 10:
+                entry['observations'] = entry['observations'][-10:]
+
+            # Extract rules when we have enough observations
+            if entry['total_observations'] >= 2:
+                self._extract_causal_rules(pos_key, entry)
+
+        except Exception as e:
+            logger.debug(f"World model causal update failed: {e}")
+
+    def _extract_causal_rules(self, pos_key: str, entry: Dict[str, Any]) -> None:
+        """Extract compact causal rules from repeated observations at a position."""
+        observations = entry['observations']
+        if len(observations) < 2:
+            return
+
+        # Check if effect is consistent across observations
+        first_changes = set()
+        for c in observations[0].get('changes', []):
+            first_changes.add((c['x'], c['y']))
+
+        consistent = True
+        for obs in observations[1:]:
+            obs_changes = set()
+            for c in obs.get('changes', []):
+                obs_changes.add((c['x'], c['y']))
+            if obs_changes != first_changes:
+                consistent = False
+                break
+
+        if consistent and first_changes:
+            rule = {
+                'trigger_pos': pos_key,
+                'action': entry.get('action', ''),
+                'affected_positions': [f"{x},{y}" for x, y in first_changes],
+                'effect_type': 'toggle' if len(first_changes) > 1 else 'single',
+                'confidence': min(1.0, entry['total_observations'] / 5.0),
+            }
+
+            # Add rule if not already present
+            existing_triggers = {r['trigger_pos'] for r in self._world_model['rules_learned']}
+            if pos_key not in existing_triggers:
+                self._world_model['rules_learned'].append(rule)
+            else:
+                # Update existing rule
+                for i, r in enumerate(self._world_model['rules_learned']):
+                    if r['trigger_pos'] == pos_key:
+                        self._world_model['rules_learned'][i] = rule
+                        break
+
+    def snapshot_level_scene(self, visual_scene: Optional[Dict[str, Any]], level: int) -> None:
+        """
+        Snapshot the current visual scene at level end for level-to-level diffing.
+        Call this just before a level transition.
+        """
+        self._prev_level_scene = visual_scene
+        self._prev_level_number = level
 
     def _determine_phase(self, budget_used_percent: float) -> str:
         """Determine the current game phase based on budget usage."""
