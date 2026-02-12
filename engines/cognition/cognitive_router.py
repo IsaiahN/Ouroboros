@@ -903,6 +903,28 @@ class CognitiveRouter:
                 break  # Algorithm returned nothing - exit loop
 
             # =================================================================
+            # CLICK-GAME ROUTING BOOST: When available_actions == [6],
+            # ensure click-specific rungs are evaluated early in the batch.
+            # Without this, click rungs compete uniformly with 60+ other
+            # rungs and may never be reached before the decision commits.
+            # =================================================================
+            available_actions = game_state.get('available_actions', [])
+            if available_actions == [6] or set(available_actions) == {6}:
+                _CLICK_BOOST_RUNGS = frozenset({
+                    'causal_click_mapping', 'constraint_satisfaction',
+                    'constraint_decoder', 'object_color_targeting',
+                    'click_behavior_learning', 'action6_object_exploration',
+                })
+                # Find click rungs in frontier but NOT already in next_rungs
+                missing_click_rungs = [
+                    r for r in _CLICK_BOOST_RUNGS
+                    if r in frontier and r not in set(next_rungs)
+                ]
+                if missing_click_rungs:
+                    # Prepend them to the batch so they get evaluated first
+                    next_rungs = missing_click_rungs + list(next_rungs)
+
+            # =================================================================
             # BATCH EVALUATION: Evaluate top-K candidates in one pass
             # Architecture target: O(26) typical via focused search.
             # Each iteration evaluates a batch of K candidates (default 5),

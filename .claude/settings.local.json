@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONDONTWRITEBYTECODE=1 .venv/Scripts/python.exe:*)"
+    ]
+  }
+}
