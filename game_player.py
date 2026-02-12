@@ -650,6 +650,9 @@ class GamePlayer:
         recent_actions: list = []
         last_score_delta = 0.0
         last_outcome_type = 'neutral'
+        total_frame_changes = 0
+        total_coord_attempts = 0
+        total_coord_successes = 0
 
         # Reset context builder for new game
         self.context_builder.reset(game_id)
@@ -980,6 +983,12 @@ class GamePlayer:
             frame_hash_after = self._compute_frame_hash(obs)
             last_frame_changed = frame_hash_before != frame_hash_after
             current_frame_hash = frame_hash_after
+            if last_frame_changed:
+                total_frame_changes += 1
+            if action.name == 'ACTION6':
+                total_coord_attempts += 1
+                if last_frame_changed:
+                    total_coord_successes += 1
 
             # ACTION6 click feedback to visual_analyzer
             if action.name == 'ACTION6' and action_data:
@@ -1397,4 +1406,7 @@ class GamePlayer:
             levels_completed=levels_completed, total_levels=total_levels,
             is_win=is_win, actions_taken=actions_taken,
             action_sequence=action_sequence,
+            frame_changes=total_frame_changes,
+            coordinate_attempts=total_coord_attempts,
+            coordinate_successes=total_coord_successes,
         )

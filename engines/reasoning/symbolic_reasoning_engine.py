@@ -261,7 +261,7 @@ class SceneParser(ABC):
 
     @abstractmethod
     def identify_object_type(self, cells: List[Tuple[int, int]], color: int,
-                             context: Optional[Dict] = None) -> ObjectType:
+                             _context: Optional[Dict] = None) -> ObjectType:
         """Determine the type of an object based on visual features."""
         pass
 
@@ -286,6 +286,10 @@ class ConnectedComponentParser(SceneParser):
         """Parse frame into WorldState using connected components."""
         if isinstance(frame, list):
             frame = np.array(frame, dtype=int)
+
+        # Squeeze leading dimensions: (1, H, W) -> (H, W)
+        while frame.ndim > 2:
+            frame = frame[0]
 
         objects = {}
         visited = np.zeros_like(frame, dtype=bool)
@@ -355,7 +359,7 @@ class ConnectedComponentParser(SceneParser):
         return cells
 
     def identify_object_type(self, cells: List[Tuple[int, int]], color: int,
-                             context: Optional[Dict] = None) -> ObjectType:
+                             _context: Optional[Dict] = None) -> ObjectType:
         """Identify object type from color, size, and position."""
         # Use color mapping if available
         if color in self.color_mappings:
@@ -1012,7 +1016,7 @@ class WorldModel:
 
         self.physics_rules.append(rule)
 
-    def apply_physics_rules(self, action: int, current_position: Tuple[int, int], target_position: Tuple[int, int]) -> Dict[str, Any]:
+    def apply_physics_rules(self, action: int, _current_position: Tuple[int, int], target_position: Tuple[int, int]) -> Dict[str, Any]:
         """
         Apply learned physics rules to predict outcome of movement.
 
@@ -1979,6 +1983,10 @@ class SymbolicReasoningEngine:
         if isinstance(initial_frame, list):
             initial_frame = np.array(initial_frame, dtype=int)
 
+        # Squeeze leading dimensions: (1, H, W) -> (H, W)
+        while initial_frame.ndim > 2:
+            initial_frame = initial_frame[0]
+
         self.last_frame = initial_frame
 
         # Check for cached agent identification
@@ -2145,6 +2153,10 @@ class SymbolicReasoningEngine:
         """Update world model with action result and observed frame."""
         if isinstance(new_frame, list):
             new_frame = np.array(new_frame, dtype=int)
+
+        # Squeeze leading dimensions: (1, H, W) -> (H, W)
+        while new_frame.ndim > 2:
+            new_frame = new_frame[0]
 
         # Record action for agent identification
         if self.learning_mode and self.last_frame is not None:

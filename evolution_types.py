@@ -50,3 +50,6 @@ class GameResult:
     is_win: bool
     actions_taken: int
     action_sequence: List[str] = field(default_factory=list)
+    frame_changes: int = 0
+    coordinate_attempts: int = 0
+    coordinate_successes: int = 0

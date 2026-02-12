@@ -93,9 +93,10 @@ class ResultRecorder:
                 INSERT INTO game_results (
                     game_id, session_id, start_time, end_time, status,
                     final_score, total_actions, win_detected,
-                    level_completions, generation
+                    level_completions, frame_changes,
+                    coordinate_attempts, coordinate_successes, generation
                 ) VALUES (?, ?, datetime('now'), datetime('now'), 'completed',
-                          ?, ?, ?, ?, ?)
+                          ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 result.game_id,
                 session_id,
@@ -103,6 +104,9 @@ class ResultRecorder:
                 result.actions_taken,
                 result.is_win,
                 result.levels_completed,
+                getattr(result, 'frame_changes', 0),
+                getattr(result, 'coordinate_attempts', 0),
+                getattr(result, 'coordinate_successes', 0),
                 current_generation,
             ))
         except Exception as e:
