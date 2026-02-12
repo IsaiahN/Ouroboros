@@ -1353,6 +1353,12 @@ class ContextBuilder:
             if not isinstance(pre, list) or not isinstance(post, list):
                 return
 
+            # Squeeze leading dimensions: [[[pixel]]] -> [[pixel]]
+            while pre and isinstance(pre, list) and isinstance(pre[0], list) and isinstance(pre[0][0], list):
+                pre = pre[0]
+            while post and isinstance(post, list) and isinstance(post[0], list) and isinstance(post[0][0], list):
+                post = post[0]
+
             # Find all changed pixels
             changes = []
             for row_idx in range(min(len(pre), len(post))):
