@@ -32,6 +32,13 @@ from event_bus import EventBus, EventType, make_event
 from evolution_types import AgentState, GameResult
 from pipeline_assertions import PipelineAssertions
 
+# Optional: Symbolic Reasoning Engine for complex games (graceful degradation)
+try:
+    from engines.reasoning.symbolic_reasoning_engine import SymbolicReasoningEngine
+    SYMBOLIC_REASONING_AVAILABLE = True
+except ImportError:
+    SYMBOLIC_REASONING_AVAILABLE = False
+
 
 class GamePlayer:
     """Plays a single game for a single agent.
@@ -811,6 +818,26 @@ class GamePlayer:
         if self.verbose:
             print(f"    Game: {game_id} | Available actions: {available_actions} | Win at: {win_levels} levels")
 
+        # Instantiate SymbolicReasoningEngine for this game session (Task A1)
+        symbolic_engine = None
+        if SYMBOLIC_REASONING_AVAILABLE:
+            try:
+                game_type_sym = game_id[:4] if len(game_id) >= 4 else game_id
+                symbolic_engine = SymbolicReasoningEngine(
+                    game_type=game_type_sym, level=1
+                )
+                init_frame = self._get_frame_array(initial_obs)
+                if init_frame is not None:
+                    symbolic_engine.initialize(init_frame)
+                    if self.verbose:
+                        print(f"    [SYM] SymbolicReasoningEngine initialized for {game_type_sym}")
+                else:
+                    symbolic_engine = None
+            except Exception as e:
+                if self.verbose:
+                    print(f"    [SYM-WARN] SymbolicReasoningEngine init failed: {e}")
+                symbolic_engine = None
+
         # ========== GAME LOOP ==========
         while actions_taken < self.max_actions:
             if not is_running_fn():
@@ -1076,6 +1103,36 @@ class GamePlayer:
             except Exception:
                 pass
 
+            # Feed frame to SymbolicReasoningEngine and enrich world_model (Task A1)
+            if symbolic_engine is not None:
+                try:
+                    post_frame = self._get_frame_array(obs)
+                    if post_frame is not None:
+                        action_int = int(action.name.replace('ACTION', '')) if action.name.startswith('ACTION') else 1
+                        symbolic_engine.update(action_int, post_frame)
+                        # Enrich context builder's world_model with symbolic data
+                        sym_state = symbolic_engine.get_state()
+                        if sym_state is not None:
+                            sym_data = {
+                                'objects': {
+                                    oid: {
+                                        'type': obj.object_type.value,
+                                        'position': obj.position,
+                                        'color': obj.color,
+                                        'size': obj.size,
+                                    }
+                                    for oid, obj in sym_state.objects.items()
+                                },
+                                'goal_progress': symbolic_engine.get_goal_progress(),
+                                'goal_achieved': symbolic_engine.is_goal_achieved(),
+                                'agent_id': symbolic_engine.get_agent_identity(),
+                                'learning_mode': symbolic_engine.learning_mode,
+                            }
+                            # Merge into context builder world model
+                            self.context_builder._world_model['symbolic_state'] = sym_data
+                except Exception:
+                    pass
+
             # Record action trace
             self._record_action_trace(
                 game_id=game_id, action_num=action_num,
@@ -1146,6 +1203,19 @@ class GamePlayer:
                         print(f"    [SEQ-ERR] Failed to save level sequence: {e}")
 
                 level_start_action_index = len(action_sequence)
+
+                # Reinitialize SymbolicReasoningEngine for new level (Task A1)
+                if symbolic_engine is not None:
+                    try:
+                        new_level_frame = self._get_frame_array(obs)
+                        if new_level_frame is not None:
+                            game_type_sym = game_id[:4] if len(game_id) >= 4 else game_id
+                            symbolic_engine = SymbolicReasoningEngine(
+                                game_type=game_type_sym, level=current_levels + 1
+                            )
+                            symbolic_engine.initialize(new_level_frame)
+                    except Exception:
+                        pass
 
                 # Snapshot level scene for level-to-level diffing (Part 7.3)
                 try:

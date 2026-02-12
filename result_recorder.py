@@ -49,6 +49,7 @@ class ResultRecorder:
         current_generation: int,
         session_id: Optional[str],
         use_cognitive_router: bool = False,
+        world_model: Optional[dict] = None,
     ) -> None:
         """Store game result in database.
 
@@ -57,6 +58,7 @@ class ResultRecorder:
             current_generation: Current generation number.
             session_id: Session ID from the game player (may be None).
             use_cognitive_router: Whether cognitive strategy was used.
+            world_model: Optional world_model dict from ContextBuilder (Task A2).
         """
         # Use existing session from play_game (avoids orphan sessions)
         if not session_id:
@@ -186,6 +188,16 @@ class ResultRecorder:
         # Pipeline assertion: verify BOTH writes landed
         self.pipe.assert_game_result_stored(session_id, result.game_id, result.agent_id)
 
+        # Task A2: Persist world_model state to world_model_states table
+        if world_model and isinstance(world_model, dict):
+            self._persist_world_model(
+                game_id=result.game_id,
+                session_id=session_id or 'unknown',
+                actions_taken=result.actions_taken,
+                score=result.score,
+                world_model=world_model,
+            )
+
         # Phase 6A (Affinity): Update domain alignment history for this agent/game
         self._update_domain_alignment(
             result.agent_id, result.game_id,
@@ -244,6 +256,80 @@ class ResultRecorder:
         except Exception as e:
             if self.verbose:
                 print(f"    [AFFINITY-ERR] domain alignment update failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Task A2: World Model Persistence
+    # ------------------------------------------------------------------
+    def _persist_world_model(
+        self,
+        game_id: str,
+        session_id: str,
+        actions_taken: int,
+        score: float,
+        world_model: dict,
+    ) -> None:
+        """Persist world_model causal_map and rules_learned to world_model_states.
+
+        Serializes the causal_map and rules_learned as JSON and stores them
+        in the world_model_states table. This allows future game sessions to
+        seed their world model with previously learned causal knowledge.
+
+        Non-critical: failures here never block game result storage.
+        """
+        try:
+            import hashlib
+            state_id = f"wm_{uuid.uuid4().hex[:12]}"
+
+            # Extract the key data to persist
+            causal_map = world_model.get('causal_map', {})
+            rules_learned = world_model.get('rules_learned', [])
+            symbolic_state = world_model.get('symbolic_state')
+
+            # Serialize objects_json: causal_map + rules_learned
+            objects_payload = {
+                'causal_map': causal_map,
+                'rules_learned': rules_learned,
+            }
+            objects_json = json.dumps(objects_payload, default=str)
+
+            # Compute grid_hash from causal_map keys for quick lookup
+            map_keys = sorted(causal_map.keys()) if causal_map else []
+            grid_hash = hashlib.md5(
+                json.dumps(map_keys).encode()
+            ).hexdigest()[:16] if map_keys else 'empty'
+
+            # Metadata: symbolic engine state + action history summary
+            metadata_payload = {}
+            if symbolic_state:
+                metadata_payload['symbolic_state'] = symbolic_state
+            action_history = world_model.get('action_history', [])
+            if action_history:
+                metadata_payload['action_count'] = len(action_history)
+                metadata_payload['last_actions'] = action_history[-5:]
+            metadata_json = json.dumps(metadata_payload, default=str)
+
+            self.db.execute_query("""
+                INSERT INTO world_model_states (
+                    state_id, game_id, session_id, step_number,
+                    objects_json, grid_hash, score, metadata,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (
+                state_id,
+                game_id,
+                session_id,
+                actions_taken,
+                objects_json,
+                grid_hash,
+                score,
+                metadata_json,
+            ))
+            if self.verbose:
+                print(f"    [WM-SAVE] World model persisted: {state_id[:16]} "
+                      f"({len(causal_map)} causal entries, {len(rules_learned)} rules)")
+        except Exception as e:
+            if self.verbose:
+                print(f"    [WM-ERR] World model persistence failed: {e}")
 
     def _store_winning_sequences(
         self,

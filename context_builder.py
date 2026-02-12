@@ -1083,6 +1083,30 @@ class ContextBuilder:
             'level_diffs': [],
             'action_history': [],
         }
+
+        # Task A2: Seed world_model from previously-persisted state for this game type
+        if self._db is not None:
+            try:
+                game_prefix = game_id[:4] if len(game_id) >= 4 else game_id
+                # Find most recent world_model for any game with same prefix
+                rows = self._db.execute_query("""
+                    SELECT objects_json FROM world_model_states
+                    WHERE game_id LIKE ? || '%'
+                    ORDER BY created_at DESC LIMIT 1
+                """, (game_prefix,))
+                if rows and rows[0].get('objects_json'):
+                    import json as _json
+                    stored = _json.loads(rows[0]['objects_json'])
+                    if isinstance(stored, dict):
+                        seed_causal = stored.get('causal_map', {})
+                        seed_rules = stored.get('rules_learned', [])
+                        if seed_causal:
+                            self._world_model['causal_map'] = seed_causal
+                        if seed_rules:
+                            self._world_model['rules_learned'] = seed_rules
+            except Exception:
+                pass  # Non-critical: seeding failure is fine, start fresh
+
         self._prev_level_scene = None
         self._prev_level_number = 0
         self._level_diffs = []

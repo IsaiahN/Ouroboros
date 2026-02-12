@@ -1004,11 +1004,18 @@ class EvolutionRunner:
                     print(f"  {game_id}: {status} score={result.score:.1f} actions={result.actions_taken}")
 
                     # Store in database (delegates to ResultRecorder)
+                    # Task A2: Pass world_model from context_builder for DB persistence
+                    _wm = None
+                    try:
+                        _wm = getattr(self.context_builder, '_world_model', None)
+                    except Exception:
+                        pass
                     self._result_recorder.store_game_result(
                         result=result,
                         current_generation=self.current_generation,
                         session_id=self._game_player.last_session_id,
                         use_cognitive_router=self._use_cognitive_router,
+                        world_model=_wm,
                     )
 
                 # Update curriculum progress

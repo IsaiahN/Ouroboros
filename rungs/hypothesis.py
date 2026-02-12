@@ -595,6 +595,52 @@ class InteractableTileDiscoveryRung(DecisionRung):
         level = context.get('level', 1)
         game_key = f"{game_type}_L{level}"
 
+        # Merge shared world model causal data (Part 7 unification, Task A3)
+        shared_wm = context.get('world_model')
+        if shared_wm and isinstance(shared_wm, dict):
+            shared_causal = shared_wm.get('causal_map', {})
+            if shared_causal:
+                if game_key not in self._modifier_map:
+                    self._modifier_map[game_key] = {}
+                if game_key not in self._known_modifiers:
+                    self._known_modifiers[game_key] = []
+                for pos_key_str, entry in shared_causal.items():
+                    # Parse "x,y" position key from shared causal map
+                    try:
+                        parts = pos_key_str.split(',')
+                        if len(parts) == 2:
+                            px, py = int(parts[0]), int(parts[1])
+                            pos = (px, py)
+                            # Check if this causal entry involves color changes
+                            # (which would indicate a modifier tile)
+                            obs_list = entry.get('observations', [])
+                            has_color_change = False
+                            for obs_item in obs_list:
+                                for change in obs_item.get('changes', []):
+                                    if change.get('old_color') != change.get('new_color'):
+                                        has_color_change = True
+                                        break
+                                if has_color_change:
+                                    break
+                            if has_color_change and pos not in self._known_modifiers.get(game_key, []):
+                                self._known_modifiers.setdefault(game_key, []).append(pos)
+                                self._property_changes_detected[game_key] = \
+                                    self._property_changes_detected.get(game_key, 0) + 1
+                    except (ValueError, IndexError):
+                        pass
+            # Contribute own discoveries back to shared world model
+            if game_key in self._modifier_map and self._modifier_map[game_key]:
+                if 'causal_map' not in shared_wm:
+                    shared_wm['causal_map'] = {}
+                for pos, observations in self._modifier_map[game_key].items():
+                    contrib_key = f"{pos[0]},{pos[1]}"
+                    if contrib_key not in shared_wm['causal_map']:
+                        shared_wm['causal_map'][contrib_key] = {
+                            'action': 'movement',
+                            'observations': [{'changes': obs.get('state_changes', [])} for obs in observations],
+                            'total_observations': len(observations),
+                        }
+
         # If we've discovered modifier tiles, suggest moving toward them
         modifiers = self._known_modifiers.get(game_key, [])
         if modifiers and self._estimated_position:
@@ -1118,6 +1164,11 @@ class SymbolicTrackerRung(DecisionRung):
     default_priority = 24
     confidence_threshold = 0.45
 
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        # Private causal map for symbolic observations: game_key -> {pos_key -> effects}
+        self._causal_map: Dict[str, Dict[str, Any]] = {}
+
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         st = self.engines.symbolic_tracker
         if st is None:
@@ -1127,6 +1178,39 @@ class SymbolicTrackerRung(DecisionRung):
             frame = getattr(game_state, 'frame', None)
             if frame is None:
                 return RungResult()
+
+            game_type = context.get('game_type', '')
+            level = context.get('level', 1)
+            game_key = f"{game_type}_L{level}"
+
+            # Merge shared world model causal data (Part 7 unification, Task A3)
+            shared_wm = context.get('world_model')
+            if shared_wm and isinstance(shared_wm, dict):
+                shared_causal = shared_wm.get('causal_map', {})
+                if shared_causal and game_key not in self._causal_map:
+                    self._causal_map[game_key] = {}
+                for pos_key_str, entry in shared_causal.items():
+                    if game_key in self._causal_map:
+                        if pos_key_str not in self._causal_map[game_key]:
+                            # Convert shared format to local format
+                            obs_list = entry.get('observations', [])
+                            effects = []
+                            for obs_item in obs_list:
+                                for change in obs_item.get('changes', []):
+                                    effects.append(change)
+                            if effects:
+                                self._causal_map[game_key][pos_key_str] = effects
+                # Contribute own observations back to shared world model
+                if game_key in self._causal_map and self._causal_map[game_key]:
+                    if 'causal_map' not in shared_wm:
+                        shared_wm['causal_map'] = {}
+                    for pos_key, effects in self._causal_map[game_key].items():
+                        if pos_key not in shared_wm['causal_map']:
+                            shared_wm['causal_map'][pos_key] = {
+                                'action': 'symbolic_transform',
+                                'observations': [{'changes': effects}],
+                                'total_observations': len(effects),
+                            }
 
             # Identify symbolic objects
             if hasattr(st, 'identify_symbolic_objects'):
