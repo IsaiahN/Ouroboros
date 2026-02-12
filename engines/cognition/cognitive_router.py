@@ -1087,8 +1087,10 @@ class CognitiveRouter:
                 # Check commit threshold
                 quadrant = self.epistemic_tracker.current_state.primary_quadrant
                 if quadrant == RumsfeldQuadrant.UU:
-                    # UU: Agreement provides enough confidence (0.6+0.15=0.75)
-                    effective_threshold = max(self.config.commit_threshold, 0.60)
+                    # UU: Use base threshold so anti-monopoly-capped rungs
+                    # (0.55) can still commit. Agreement boost (+0.15)
+                    # provides quality signal on top.
+                    effective_threshold = self.config.commit_threshold
                 else:
                     # KK/KU/UK: Agreement easily clears base threshold
                     effective_threshold = self.config.commit_threshold
@@ -1115,8 +1117,9 @@ class CognitiveRouter:
                 )
                 quadrant = self.epistemic_tracker.current_state.primary_quadrant
                 if quadrant == RumsfeldQuadrant.UU:
-                    # UU: Slightly higher bar for single rung (no agreement)
-                    effective_threshold = max(self.config.commit_threshold, 0.60)
+                    # UU: Use base threshold so anti-monopoly-capped rungs
+                    # (0.55) can commit. Prevents deadlock where cap < threshold.
+                    effective_threshold = self.config.commit_threshold
                 else:
                     # KK/KU/UK: Single confident rung (0.6) can commit
                     effective_threshold = self.config.commit_threshold
