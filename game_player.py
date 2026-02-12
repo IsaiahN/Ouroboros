@@ -1102,8 +1102,8 @@ class GamePlayer:
             try:
                 click_x = action_data.get('x', 32) if action_data else 32
                 click_y = action_data.get('y', 32) if action_data else 32
-                fb_before = getattr(obs_before, 'frame', None)
-                fb_after = getattr(obs, 'frame', None)
+                fb_before = self._get_frame_array(obs_before)
+                fb_after = self._get_frame_array(obs)
                 self.context_builder.update_world_model_from_action(
                     action=action.name, x=click_x, y=click_y,
                     frame_changed=last_frame_changed,
