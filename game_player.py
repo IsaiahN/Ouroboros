@@ -276,7 +276,11 @@ class GamePlayer:
 
     @staticmethod
     def _get_frame_array(obs: Any) -> Optional[np.ndarray]:
-        """Extract frame as numpy array from observation."""
+        """Extract frame as numpy array from observation.
+
+        Handles the common case where obs.frame is a list wrapping
+        a single ndarray: [ndarray(64,64)] -> ndarray(64,64).
+        """
         if obs is None:
             return None
         try:
@@ -286,6 +290,9 @@ class GamePlayer:
                     if isinstance(data, np.ndarray):
                         return data
                     if isinstance(data, list):
+                        # Unwrap [ndarray] -> ndarray
+                        if len(data) == 1 and isinstance(data[0], np.ndarray):
+                            return data[0]
                         return np.array(data, dtype=np.uint8)
                     if hasattr(data, 'tolist'):
                         return np.array(data)

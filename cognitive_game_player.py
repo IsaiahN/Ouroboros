@@ -210,6 +210,10 @@ class CognitiveGamePlayer:
                 new_score=current_score,
             )
 
+            # Print cognitive frame AFTER record_result (frame_changed is now known)
+            if self._verbose and cf:
+                print(cf.to_log_line())
+
             # ═══ NOTIFY RUNGS (close the feedback loop for all 80+ rungs) ═══
             if hasattr(self._gp.decision_system, 'notify_action_complete'):
                 try:
@@ -367,17 +371,39 @@ class CognitiveGamePlayer:
 
     @staticmethod
     def _compute_frame_hash(obs: Any) -> str:
-        """Compute a hash of the observation frame for change detection."""
+        """Compute a hash of the observation frame for change detection.
+
+        obs.frame can be:
+          - np.ndarray (64x64)        -> hash directly
+          - list wrapping an ndarray  -> unwrap, then hash
+          - list of lists (raw ints)  -> convert to ndarray, then hash
+          - None                      -> return empty string
+        """
         import hashlib
         frame = getattr(obs, 'frame', None)
         if frame is None:
             return ''
+        # Unwrap list-wrapped ndarray: [ndarray(64,64)] -> ndarray(64,64)
+        if isinstance(frame, list):
+            if len(frame) == 1 and isinstance(frame[0], np.ndarray):
+                frame = frame[0]
+            else:
+                try:
+                    frame = np.array(frame, dtype=np.uint8)
+                except (ValueError, TypeError):
+                    return hashlib.md5(str(frame).encode()).hexdigest()
         if isinstance(frame, np.ndarray):
             return hashlib.md5(frame.tobytes()).hexdigest()
+        # Fallback for any other type
+        return hashlib.md5(str(frame).encode()).hexdigest()
 
     @staticmethod
     def _get_frame_array(obs: Any) -> 'Optional[np.ndarray]':
-        """Extract frame as numpy array from observation."""
+        """Extract frame as numpy array from observation.
+
+        Handles the common case where obs.frame is a list wrapping
+        a single ndarray: [ndarray(64,64)] -> ndarray(64,64).
+        """
         if obs is None:
             return None
         try:
@@ -387,14 +413,12 @@ class CognitiveGamePlayer:
                     if isinstance(data, np.ndarray):
                         return data
                     if isinstance(data, list):
+                        # Unwrap [ndarray] -> ndarray
+                        if len(data) == 1 and isinstance(data[0], np.ndarray):
+                            return data[0]
                         return np.array(data, dtype=np.uint8)
                     if hasattr(data, 'tolist'):
                         return np.array(data)
             return None
         except Exception:
             return None
-        try:
-            flat = str(frame)
-            return hashlib.md5(flat.encode()).hexdigest()
-        except Exception:
-            return ''

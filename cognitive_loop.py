@@ -426,9 +426,8 @@ class CognitiveLoop:
         self._current_frame = cf
         self._frames.append(cf)
 
-        # Print if verbose
-        if self._verbose:
-            print(cf.to_log_line())
+        # NOTE: Don't print cf.to_log_line() here — frame_changed is not yet known.
+        # The caller should print AFTER calling record_result().
 
         return action_num, action_data, cf
 
@@ -551,7 +550,12 @@ class CognitiveLoop:
             positions_to_register = []
 
             # From detected objects (centroid positions)
+            # Filter to small objects (< 1/8 frame area) = likely interactive
+            # tiles, not background panels. Large blobs add noise.
+            frame_area = 64 * 64
             for obj in percept.objects:
+                if obj.get('size', frame_area) >= frame_area // 8:
+                    continue  # Skip large background regions
                 cx = int(obj.get('centroid_x', obj.get('x', 0)))
                 cy = int(obj.get('centroid_y', obj.get('y', 0)))
                 if 0 < cx < 64 and 0 < cy < 64:
@@ -577,7 +581,7 @@ class CognitiveLoop:
             if percept.has_goal and percept.goal_cells:
                 self._causal_map.set_goal(percept.goal_cells)
             if percept.current_cells:
-                self._causal_map.set_current_cells(percept.current_cells)
+                self._causal_map.set_current_state(percept.current_cells)
 
         # Record in cognitive frame
         cf.perception_summary = percept.summary()
@@ -914,11 +918,17 @@ class CognitiveLoop:
         import random
 
         # Strategy 1: Click objects we haven't clicked yet
+        # For click games, prefer small discrete objects (tiles/buttons) over
+        # large background regions. Sort by size ascending so we try tiles first.
         if percept.objects:
             explored = set()
             if self._causal_map:
                 explored = self._causal_map._explored
-            for obj in percept.objects:
+            sorted_objects = sorted(
+                percept.objects,
+                key=lambda o: o.get('size', 9999),
+            )
+            for obj in sorted_objects:
                 cx = int(obj.get('centroid_x', obj.get('x', 0)))
                 cy = int(obj.get('centroid_y', obj.get('y', 0)))
                 if (cx, cy) not in explored and 0 < cx < 64 and 0 < cy < 64:

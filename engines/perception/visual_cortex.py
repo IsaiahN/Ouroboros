@@ -307,7 +307,14 @@ class VisualCortex:
         Returns:
             SceneDescription with full visual understanding
         """
-        if not frame or not frame[0]:
+        if frame is None or (isinstance(frame, (list, tuple)) and len(frame) == 0):
+            return self._empty_scene()
+        # Verify first row exists (safe for both list-of-lists and ndarray)
+        try:
+            first_row = frame[0]
+            if first_row is None or (isinstance(first_row, (list, tuple)) and len(first_row) == 0):
+                return self._empty_scene()
+        except (IndexError, TypeError):
             return self._empty_scene()
 
         # Check cache
@@ -424,7 +431,16 @@ class VisualCortex:
             logger.warning("PIL not available - cannot render image")
             return None
 
-        if not frame or not frame[0]:
+        if frame is None or (isinstance(frame, (list, tuple)) and len(frame) == 0):
+            return None
+
+        try:
+            first_row = frame[0]
+            if isinstance(first_row, np.ndarray) and first_row.size == 0:
+                return None
+            elif isinstance(first_row, (list, tuple)) and len(first_row) == 0:
+                return None
+        except (IndexError, TypeError):
             return None
 
         grid = np.array(frame, dtype=np.int32)

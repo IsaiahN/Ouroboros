@@ -249,7 +249,7 @@ class ResonanceDetector:
     # RESONANCE DETECTION - Find patterns with cross-role agreement
     # =========================================================================
 
-    def detect_resonance(self, generation: Optional[int] = None) -> List[Dict[str, Any]]:
+    def detect_resonance(self, _generation: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Detect resonant patterns: same abstract beliefs, different roles.
 
@@ -403,7 +403,7 @@ class ResonanceDetector:
     # PHASE 3.1: Template-based Resonance Scanning
     # =========================================================================
 
-    def scan_compressed_templates(self, generation: int = 0) -> List[Dict[str, Any]]:
+    def scan_compressed_templates(self, _generation: int = 0) -> List[Dict[str, Any]]:
         """Detect cross-game resonance from Phase 2 compressed templates.
 
         Loads sequence_concepts (generalized winning sequences) and viral
@@ -431,7 +431,7 @@ class ResonanceDetector:
         try:
             concepts = self.db.execute_query("""
                 SELECT concept_id, goal_type, layout_signature,
-                       movement_pattern, constraints, abstraction_level
+                       strategy_type, constraints, abstraction_level
                 FROM sequence_concepts
                 ORDER BY abstraction_level DESC
             """)
@@ -609,7 +609,7 @@ class ResonanceDetector:
 
     def detect_visual_resonance(
         self,
-        generation: int = 0,
+        _generation: int = 0,
         similarity_threshold: float = 0.80,
         min_embeddings_per_game: int = 3,
     ) -> List[Dict[str, Any]]:

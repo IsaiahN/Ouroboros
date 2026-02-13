@@ -405,7 +405,7 @@ class PackageCompressor:
                 self.db.execute_query("""
                     INSERT OR REPLACE INTO sequence_concepts (
                         concept_id, sequence_id, layout_signature,
-                        goal_type, movement_pattern, constraints,
+                        goal_type, strategy_type, constraints,
                         abstraction_level, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 """, (
@@ -413,7 +413,7 @@ class PackageCompressor:
                     best_seq_id,
                     json.dumps(template),  # layout_signature = template
                     f"{gt}_L{level}",
-                    invariant_desc,        # movement_pattern = invariants
+                    invariant_desc,        # strategy_type = invariants
                     variant_desc,          # constraints = variants
                     len(parsed),           # abstraction_level = sample size
                 ))

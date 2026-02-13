@@ -99,7 +99,7 @@ class Perceiver:
         available_actions: Optional[List[int]] = None,
         actions_taken: int = 0,
         max_actions: int = 500,
-        game_id: str = "",
+        _game_id: str = "",
     ) -> PerceptualField:
         """
         Run all perception channels and integrate into a PerceptualField.
@@ -203,15 +203,27 @@ class Perceiver:
         pf: PerceptualField,
     ) -> None:
         """Channel 2: Object inventory from scene data or frame analysis."""
-        if visual_scene_dict is None:
-            return
-
         try:
-            # Extract objects from visual scene
-            raw_objects = visual_scene_dict.get('objects', [])
+            raw_objects: List[Dict[str, Any]] = []
+
+            if visual_scene_dict is not None:
+                raw_objects = visual_scene_dict.get('objects', [])
+
             if not raw_objects and frame_array is not None:
-                # Fallback: simple color cluster detection
+                # Fallback: connected-component color cluster detection
                 raw_objects = self._detect_color_clusters(frame_array)
+
+            # Normalize objects to always have centroid_x / centroid_y
+            # (VisualCortex may use 'centroid' tuple, fallback uses centroid_x/y)
+            for obj in raw_objects:
+                if 'centroid_x' not in obj:
+                    centroid = obj.get('centroid')
+                    if isinstance(centroid, (list, tuple)) and len(centroid) >= 2:
+                        obj['centroid_x'] = float(centroid[0])
+                        obj['centroid_y'] = float(centroid[1])
+                    else:
+                        obj['centroid_x'] = float(obj.get('x', 0))
+                        obj['centroid_y'] = float(obj.get('y', 0))
 
             pf.objects = raw_objects
             pf.inventory_confidence = 0.6 if raw_objects else 0.1
@@ -508,6 +520,43 @@ class Perceiver:
         if pf.has_goal and pf.map_completeness > 0.5:
             pf.goal_confidence = min(1.0, pf.goal_confidence + 0.15)
 
+        # ── Infer interactive_bounds from detected objects ──
+        # For click games, the interactive region is where the small, discrete
+        # objects are (tiles / buttons), not the large background blocks.
+        # Filter to objects smaller than 1/8 of the frame area — these are
+        # likely interactive tiles, not background panels.
+        if pf.interactive_bounds is None and pf.objects:
+            frame_area = 64 * 64
+            small_objs = [
+                o for o in pf.objects
+                if o.get('size', frame_area) < frame_area // 8
+            ]
+            if small_objs:
+                all_bounds = [o['bounds'] for o in small_objs if 'bounds' in o]
+                if all_bounds:
+                    y_min = min(b[0] for b in all_bounds)
+                    x_min = min(b[1] for b in all_bounds)
+                    y_max = max(b[2] for b in all_bounds)
+                    x_max = max(b[3] for b in all_bounds)
+                    pf.interactive_bounds = (y_min, x_min, y_max, x_max)
+
+            # Also infer tile_count from small, similarly-sized objects
+            if pf.tile_count == 0 and small_objs:
+                sizes = [o.get('size', 0) for o in small_objs]
+                if sizes:
+                    median_size = sorted(sizes)[len(sizes) // 2]
+                    # Objects within 2x of median size are likely tiles
+                    tile_like = [
+                        o for o, s in zip(small_objs, sizes)
+                        if 0.3 * median_size <= s <= 3.0 * median_size
+                    ]
+                    if len(tile_like) >= 2:
+                        pf.tile_count = len(tile_like)
+                        # Estimate grid dimensions
+                        import math
+                        pf.grid_rows = max(1, round(math.sqrt(pf.tile_count)))
+                        pf.grid_cols = max(1, (pf.tile_count + pf.grid_rows - 1) // pf.grid_rows)
+
         # Classify puzzle type from available actions
         actions_list = list(available_actions) if available_actions is not None else []
         if actions_list:
@@ -573,11 +622,18 @@ class Perceiver:
 
     @staticmethod
     def _to_numpy(frame: Any) -> Optional[np.ndarray]:
-        """Convert frame to numpy array."""
+        """Convert frame to numpy array.
+
+        The SDK often returns frame as [ndarray(64,64)] — a Python list
+        wrapping a single numpy array. Unwrap before converting.
+        """
         if frame is None:
             return None
         if isinstance(frame, np.ndarray):
             return frame
+        # Unwrap [ndarray] -> ndarray
+        if isinstance(frame, list) and len(frame) == 1 and isinstance(frame[0], np.ndarray):
+            return frame[0]
         try:
             return np.array(frame, dtype=np.uint8)
         except Exception:
@@ -585,14 +641,24 @@ class Perceiver:
 
     @staticmethod
     def _to_list(frame: Any, frame_array: Optional[np.ndarray]) -> Optional[list]:
-        """Convert frame to list-of-lists."""
-        if isinstance(frame, list):
-            return frame
+        """Convert frame to list-of-lists (pure Python ints).
+
+        The VisualCortex expects list[list[int]], NOT list[ndarray].
+        Always produce a deep-converted list to avoid numpy truthiness
+        errors downstream.
+        """
         if frame_array is not None:
             try:
                 return frame_array.tolist()
             except Exception:
                 pass
+        if isinstance(frame, list):
+            # If it's already a list of lists of ints, return as-is
+            if frame and isinstance(frame[0], list):
+                return frame
+            # If it's [ndarray], convert
+            if frame and isinstance(frame[0], np.ndarray):
+                return frame[0].tolist()
         return None
 
     @staticmethod
@@ -622,32 +688,85 @@ class Perceiver:
         return changes
 
     @staticmethod
+    def _label_connected_components(mask: np.ndarray) -> np.ndarray:
+        """Label connected components in a binary mask (4-connected).
+
+        Returns an array of the same shape where each connected region
+        has a unique positive integer label (background is 0).
+        Uses iterative BFS — fast enough for 64x64 frames.
+        """
+        labels = np.zeros(mask.shape, dtype=np.int32)
+        h, w = mask.shape
+        current_label = 0
+        for sy in range(h):
+            for sx in range(w):
+                if mask[sy, sx] and labels[sy, sx] == 0:
+                    current_label += 1
+                    queue = [(sy, sx)]
+                    labels[sy, sx] = current_label
+                    qi = 0
+                    while qi < len(queue):
+                        cy, cx = queue[qi]
+                        qi += 1
+                        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                            ny, nx = cy + dy, cx + dx
+                            if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and labels[ny, nx] == 0:
+                                labels[ny, nx] = current_label
+                                queue.append((ny, nx))
+        return labels
+
+    @staticmethod
     def _detect_color_clusters(frame: np.ndarray) -> List[Dict[str, Any]]:
-        """Simple fallback: detect color clusters as objects."""
-        objects = []
+        """Detect individual color clusters (connected components) as objects.
+
+        Unlike the old version that grouped ALL pixels of the same color
+        into one object, this finds spatially distinct regions.  Each
+        region gets its own centroid — critical for click games where
+        each tile is a small, separate interactive target.
+
+        Object dicts use 'centroid_x' and 'centroid_y' keys to match the
+        format expected by _find_explore_target and _perceive.
+        """
+        objects: List[Dict[str, Any]] = []
         try:
-            unique_colors = np.unique(frame)
+            # Determine frame dimensionality
+            if frame.ndim == 3:
+                flat = frame[:, :, 0]  # Use first channel
+            else:
+                flat = frame
+
+            unique_colors = np.unique(flat)
             # Background is most common color
-            color_counts = Counter(frame.flatten())
+            color_counts = Counter(flat.flatten())
             bg_color = color_counts.most_common(1)[0][0]
 
             obj_id = 0
             for color in unique_colors:
                 if color == bg_color:
                     continue
-                mask = frame == color
-                ys, xs = np.where(mask)
-                if len(ys) == 0:
-                    continue
-                objects.append({
-                    'id': obj_id,
-                    'color': int(color),
-                    'centroid': (float(np.mean(xs)), float(np.mean(ys))),
-                    'bounds': (int(ys.min()), int(xs.min()), int(ys.max()), int(xs.max())),
-                    'size': int(len(ys)),
-                    'is_rectangular': True,  # Simplified
-                })
-                obj_id += 1
+                mask = (flat == color)
+                labels = Perceiver._label_connected_components(mask)
+                n_components = int(labels.max())
+                for label_id in range(1, n_components + 1):
+                    component = (labels == label_id)
+                    ys, xs = np.where(component)
+                    if len(ys) < 2:
+                        continue  # Skip isolated single pixels
+                    cx = float(np.mean(xs))
+                    cy = float(np.mean(ys))
+                    objects.append({
+                        'id': obj_id,
+                        'color': int(color),
+                        'centroid_x': cx,
+                        'centroid_y': cy,
+                        'x': cx,
+                        'y': cy,
+                        'bounds': (int(ys.min()), int(xs.min()),
+                                   int(ys.max()), int(xs.max())),
+                        'size': int(len(ys)),
+                        'is_rectangular': True,
+                    })
+                    obj_id += 1
         except Exception:
             pass
         return objects
