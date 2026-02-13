@@ -1154,8 +1154,8 @@ class GamePlayer:
             # Notify rungs about action outcome
             if hasattr(self.decision_system, 'notify_action_complete'):
                 try:
-                    frame_before = getattr(obs_before, 'frame', None)
-                    frame_after = getattr(obs, 'frame', None)
+                    frame_before = self._get_frame_array(obs_before)
+                    frame_after = self._get_frame_array(obs)
                     if frame_before is not None and hasattr(frame_before, 'tolist'):
                         frame_before = frame_before.tolist()
                     if frame_after is not None and hasattr(frame_after, 'tolist'):

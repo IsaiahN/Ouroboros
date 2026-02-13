@@ -54,6 +54,13 @@ from evolution_types import AgentState, GameResult
 # Extracted modules (Phase 4.1)
 from game_player import GamePlayer
 from health_monitor import HealthMonitor
+
+# Cognitive Loop - Perceive-Think-Map-Act architecture
+try:
+    from cognitive_game_player import CognitiveGamePlayer
+    COGNITIVE_LOOP_AVAILABLE = True
+except ImportError:
+    COGNITIVE_LOOP_AVAILABLE = False
 from pipeline_assertions import PipelineAssertions
 from result_recorder import ResultRecorder
 
@@ -225,10 +232,12 @@ class EvolutionRunner:
         target_game: Optional[str] = None,
         verbose: bool = False,
         rung_ordering: str = "comprehensive",
+        use_cognitive_loop: bool = True,
     ):
         self.mode = mode
         self.verbose = verbose
         self.rung_ordering = rung_ordering
+        self._use_cognitive_loop = use_cognitive_loop and COGNITIVE_LOOP_AVAILABLE
         self.db = DatabaseInterface(db_path)
         self.pipe = PipelineAssertions(self.db)
         self.population_size = population_size
@@ -482,6 +491,21 @@ class EvolutionRunner:
             use_cognitive_router=self._use_cognitive_router,
         )
 
+        # Cognitive Loop wrapper (Perceive-Think-Map-Act)
+        self._cognitive_player: Optional[CognitiveGamePlayer] = None
+        if self._use_cognitive_loop:
+            try:
+                self._cognitive_player = CognitiveGamePlayer(
+                    game_player=self._game_player,
+                    verbose=self.verbose,
+                )
+                if self.verbose:
+                    print("[INIT] CognitiveGamePlayer initialized - PTMA loop active")
+            except Exception as e:
+                print(f"[WARN] CognitiveGamePlayer init failed, falling back to standard: {e}")
+                self._cognitive_player = None
+                self._use_cognitive_loop = False
+
         self._result_recorder = ResultRecorder(
             db=self.db,
             pipe=self.pipe,
@@ -703,7 +727,23 @@ class EvolutionRunner:
     # ------------------------------------------------------------------
 
     def play_game(self, agent: AgentState, game_id: str) -> GameResult:
-        """Play a single game with an agent (delegates to GamePlayer)."""
+        """Play a single game with an agent.
+
+        Routes through CognitiveGamePlayer (PTMA loop) when enabled,
+        falls back to standard GamePlayer on failure.
+        """
+        if self._use_cognitive_loop and self._cognitive_player is not None:
+            try:
+                return self._cognitive_player.play_game(
+                    agent=agent,
+                    game_id=game_id,
+                    current_generation=self.current_generation,
+                    is_running_fn=lambda: self.running,
+                )
+            except Exception as e:
+                if self.verbose:
+                    print(f"    [PTMA-ERR] CognitiveLoop failed, falling back: {e}")
+
         return self._game_player.play_game(
             agent=agent,
             game_id=game_id,
