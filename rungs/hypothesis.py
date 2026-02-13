@@ -24,6 +24,13 @@ from rungs.base import (
 logger = logging.getLogger(__name__)
 
 
+def _get_frame(game_state: Any) -> Any:
+    """Extract frame from game_state whether it's a dict or object."""
+    if isinstance(game_state, dict):
+        return game_state.get('frame')
+    return _get_frame(game_state)
+
+
 class ScientificMethodRung(DecisionRung):
     """Theory formation and testing - HYPOTHESIS"""
     name = "scientific_method"
@@ -870,7 +877,7 @@ class GoalRelationshipModelingRung(DecisionRung):
         if 6 not in available and 'ACTION6' not in available:
             return RungResult()
 
-        frame = getattr(game_state, 'frame', None)
+        frame = _get_frame(game_state)
         if frame is None:
             return RungResult()
 
@@ -1175,7 +1182,7 @@ class SymbolicTrackerRung(DecisionRung):
             return RungResult()
 
         try:
-            frame = getattr(game_state, 'frame', None)
+            frame = _get_frame(game_state)
             if frame is None:
                 return RungResult()
 

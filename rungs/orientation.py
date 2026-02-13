@@ -24,6 +24,13 @@ from rungs.base import (
 logger = logging.getLogger(__name__)
 
 
+def _get_frame(game_state: Any) -> Any:
+    """Extract frame from game_state whether it's a dict or object."""
+    if isinstance(game_state, dict):
+        return game_state.get('frame')
+    return _get_frame(game_state)
+
+
 class SurveyRung(DecisionRung):
     """Survey the environment at level start - ORIENTATION
 
@@ -71,14 +78,7 @@ class SurveyRung(DecisionRung):
         }
 
         # Get frame from game_state
-        frame = None
-        if hasattr(game_state, 'frame'):
-            frame = game_state.frame
-        elif hasattr(game_state, 'observation'):
-            obs = game_state.observation
-            if isinstance(obs, dict) and 'frame' in obs:
-                frame = obs['frame']
-
+        frame = _get_frame(game_state)
         if frame is None:
             return survey
 
@@ -331,14 +331,7 @@ class PaletteDetectionRung(DecisionRung):
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         # Get frame from game_state
-        frame = None
-        if hasattr(game_state, 'frame'):
-            frame = game_state.frame
-        elif hasattr(game_state, 'observation'):
-            obs = game_state.observation
-            if isinstance(obs, dict) and 'frame' in obs:
-                frame = obs['frame']
-
+        frame = _get_frame(game_state)
         if frame is None:
             return RungResult(
                 confidence=0.0,
@@ -496,14 +489,7 @@ class SparseGridRung(DecisionRung):
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         # Get frame from game_state
-        frame = None
-        if hasattr(game_state, 'frame'):
-            frame = game_state.frame
-        elif hasattr(game_state, 'observation'):
-            obs = game_state.observation
-            if isinstance(obs, dict) and 'frame' in obs:
-                frame = obs['frame']
-
+        frame = _get_frame(game_state)
         if frame is None:
             return RungResult(
                 confidence=0.0,
@@ -856,7 +842,7 @@ class AffordanceDetectionRung(DecisionRung):
 
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         """Detect affordances and inject into context. Does NOT suggest actions."""
-        frame = getattr(game_state, 'frame', None)
+        frame = _get_frame(game_state)
         if frame is None:
             return RungResult()
 

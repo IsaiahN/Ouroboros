@@ -25,6 +25,13 @@ from rungs.base import (
 logger = logging.getLogger(__name__)
 
 
+def _get_frame(game_state: Any) -> Any:
+    """Extract frame from game_state whether it's a dict or object."""
+    if isinstance(game_state, dict):
+        return game_state.get('frame')
+    return getattr(game_state, 'frame', None)
+
+
 class DeathAvoidanceRung(DecisionRung):
     """Position-bucket death pattern avoidance - FILTER (modifies weights)"""
     name = "death_avoidance"
@@ -171,12 +178,9 @@ class ThreeLayerFilterRung(DecisionRung):
     def evaluate(self, game_state: Any, context: Dict[str, Any]) -> RungResult:
         try:
             weights: Dict[str, float] = {}
-            frame = None
-            if hasattr(game_state, 'frame'):
-                frame = game_state.frame
-                # Convert numpy array to list if needed
-                if hasattr(frame, 'tolist'):
-                    frame = frame.tolist()
+            frame = _get_frame(game_state)
+            if frame is not None and hasattr(frame, 'tolist'):
+                frame = frame.tolist()
             position = context.get('position', (0, 0))
             # Ensure position is a tuple of ints
             if hasattr(position, '__iter__') and not isinstance(position, str):
@@ -326,7 +330,7 @@ class TerminalPatternRung(DecisionRung):
             return RungResult()
 
         try:
-            frame = game_state.frame if hasattr(game_state, 'frame') else None
+            frame = _get_frame(game_state)
 
             if hasattr(tpd, 'detect_terminal_approach'):
                 terminal = tpd.detect_terminal_approach(frame, context.get('last_actions', []))
