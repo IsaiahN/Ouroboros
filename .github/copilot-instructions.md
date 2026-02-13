@@ -1,6 +1,6 @@
 # MASTER RULESET FOR AUTONOMOUS OUROBOROS OPERATION
-**Version**: 2.0
-**Date**: 2026-01-12
+**Version**: 4.0
+**Date**: 2026-02-13
 **Purpose**: Comprehensive operating rules + architectural theory synthesis
 **Context**: Single source of truth to prevent LLM catastrophic forgetting
 
@@ -37,7 +37,7 @@ python -c "import sys; print(sys.prefix)"
 
 ---
 
-## 17 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
+## 16 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
 
 ### **RULE 1: Always Disable Pycache**
 - `PYTHONDONTWRITEBYTECODE=1` in ALL environments
@@ -168,17 +168,7 @@ python -c "import sys; print(sys.prefix)"
   - Mock/simulated games (violates Rule 6)
   - Manual test files created during development
 
-### **RULE 16: Always Use .venv Virtual Environment**
-- **ALL Python execution** uses `.venv` in project root
-- **Activation** (PowerShell): `& .venv/Scripts/Activate.ps1`
-- **Activation** (bash): `source .venv/bin/activate`
-- **Verify**: Terminal prompt shows `(.venv)` prefix
-- **Install packages**: Only with venv activated: `pip install <package>`
-- **NEVER** run Python commands without venv activated
-- **Why**: Isolated dependencies, reproducible environment, prevents "module not found" errors
-- **Common Error**: If you see "No module named X", activate venv first!
-
-### **RULE 17: Git Commit and Pre-Commit Hook Compliance**
+### **RULE 16: Git Commit and Pre-Commit Hook Compliance**
 - **ALWAYS verify git commits succeed** -- do not assume a commit went through
 - After every `git commit`, check the terminal output for pre-commit hook failures
 - **Pre-commit hooks in this repo**:
@@ -273,61 +263,56 @@ Intelligence dies when systems violate conditions for distributed resonance. The
 
 ---
 
-## PART 2: ARCHITECTURE MAP
+## PART 2: ARCHITECTURE DISCOVERY
 
-### 2.1 Core Files and Their Roles
+The codebase evolves rapidly. Rather than maintaining a static file map (which goes stale immediately), use these strategies to understand the current architecture.
 
-| File | Lines | Role | Risk |
-|------|-------|------|------|
-| `evolution_runner.py` | ~2,400 | Main loop. Owns all engines, game play, evolution. | GOD FILE. Single point of failure. |
-| `decision_rung_system.py` | ~10,600 | 85 rungs, 6 strategies, cognitive routing. | GOD FILE. Single point of failure. |
-| `context_builder.py` | ~1,100 | Builds DecisionContext for rungs. | Critical contract — rungs depend on this. |
-| `game_loop.py` | ~640 | Async game state machine. | Coordinate passing bugs found here. |
-| `game_player.py` | ~870 | Sync game integration layer. | Entry point divergence from evolution_runner. |
-| `core_gameplay.py` | ~530 | Convenience wrapper. | SECOND game-playing path with different capabilities. |
-| `outcome_processor.py` | ~400 | Processes action outcomes. | Where feedback hooks fire. |
-| `evolutionary_engine.py` | ~870 | Selection, breeding, mutation. | Meta-learning sync lives here. |
-| `agent_factory.py` | ~870 | Three-layer agent construction. | Genome/epigenetic/somatic separation. |
-| `safe_cleanup.py` | ~1,300 | Generation-based data retention. | Deletes but never compresses. |
-| `database_interface.py` | ~600 | SQLite interface. | ~280 tables. |
-| `seed_primitives.py` | ~16,800 | Primitive operations library. | MASSIVELY bloated. No usage tracking. |
-| `adaptive_action_limits.py` | ~300 | ATP budget + PrestigeFirewall. | Clean. Don't break this. |
-| `mastery_system.py` | ~1,350 | Five-tier mastery with ablation. | Was disconnected. Check wiring. |
-| `collective_reasoning_engine.py` | ~800 | Deliberation sessions. | Vote/resolve cycle may still be incomplete. |
-| `event_bus.py` | ~200 | Pub/sub event system. | Check subscriber count. |
+### 2.1 Finding the Main Loop
 
-### 2.2 Engine Sub-Packages
+- `evolution_runner.py` is the entry point and main evolution loop
+- It routes game play through the PTMA cognitive loop (primary path) with fallback to standard game player
+- Follow the import chain from `evolution_runner` to understand current wiring
+- Use `grep -r "import X" .` or `grep -r "from X import" .` to trace who uses what
 
-The `engines/` directory contains 10+ sub-packages with clean interfaces:
-- `engines/cognition/` — Cognitive router, edge inference, path crystallization, epistemic tracking
-- `engines/consciousness/` — I-thread, phenomenology, deliberation
-- `engines/self_model/` — Belief system, valence goals, control tracker, click behavior, discovery
-- `engines/social/` — Resonance detector, horizontal transfer
-- `engines/planning/` — Subgoal planner, sequence abstraction
-- `engines/memory/` — Near-miss analyzer
-- `engines/regulation/` — Frustration detector, regulatory signals
-- `engines/perception/` — Visual analyzer, object detector, visual cortex
+### 2.2 Key Architectural Patterns
 
-### 2.3 Critical Data Flows
+These patterns are stable even as specific files change:
 
-```
-Frame (64x64 grid)
-  -> VisualCortex.analyze() -> visual_scene (panels, objects, symmetry, hypotheses)
-  -> ContextBuilder.build() -> DecisionContext (unified dataclass)
-  -> CognitiveRouter.route() -> selects rungs via graph search
-  -> Rung.evaluate() -> RungResult (action, confidence, resolved_questions)
-  -> ActionExecution -> game state change
-  -> notify_action_complete() -> feedback to all rungs with on_action_complete hooks
-  -> OutcomeProcessor -> updates DB tables
-  -> EvolutionRunner -> stores game_results, agent_arc_performance
-  -> EvolutionaryEngine -> selection, breeding, mutation
-  -> HorizontalTransfer -> viral packages spread between agents
-  -> SafeCleanup (every 10 gens) -> prune old data
+- **PTMA Loop**: Perceive -> Think -> Map -> Act cognitive cycle (see `architecture/PERCEIVE_THINK_MAP_ACT.md`)
+- **Cognitive Routing**: CognitiveRouter selects rungs via graph search, not linear iteration
+- **Three-Layer Agents**: Genome (fixed) + Epigenetic (slow) + Somatic (fast)
+- **Dual Economy**: ATP (action budget) + Prestige (trustworthiness), never mixed
+- **Event Bus**: Pub/sub for cross-component communication
+- **Database as Organism**: All persistent state in SQLite, agents are temporary
+- **Evolutionary Selection**: Population-based optimization with mutation, crossover, prestige
+- **Viral Knowledge Transfer**: Winning strategies packaged and spread between agents
+
+### 2.3 Discovering Current Wiring
+
+Use these techniques rather than relying on documentation that may be stale:
+
+```bash
+# Find who imports a module
+grep -r "from X import\|import X" . --include="*.py"
+
+# Find who calls a function
+grep -r "X(" . --include="*.py"
+
+# Check if a database table is actively written to
+python -c "import sqlite3; c=sqlite3.connect('core_data.db'); print(c.execute('SELECT COUNT(*) FROM table_name').fetchone())"
+
+# Trace the full chain: writer -> table -> reader -> action
+# If ANY link is broken, the system is dead at that point
 ```
 
-### 2.4 The Two Game-Playing Paths (KNOWN ISSUE)
+### 2.4 Architecture Health Signals
 
-`evolution_runner.py` and `core_gameplay.py` are TWO independent game-playing implementations. They build context differently, have different engine sets, and different capabilities. `core_gameplay.py` has no cognitive router, no viral packages, no horizontal transfer. Until these are unified (Phase 4 of implementation plan), be aware that fixes to one path may not apply to the other.
+When assessing architecture health, check:
+- Run `--verbose` mode and look at `[INIT]` lines: what systems initialized?
+- Check event bus subscriber count: `[INIT] Event bus: N subscribers wired across M event types`
+- Check for `[PTMA-ERR]` fallback messages: PTMA loop crashed, using old path
+- Check for `[PIPE-BREAK]` messages: fitness pipeline partially dead
+- Use `manual_tools/analysis/analyze_dependencies.py` for import graph analysis
 
 ---
 
@@ -351,15 +336,12 @@ ORDER BY row_count ASC;
 
 Check for tables with readers but zero writers. Check for tables with writers but zero readers. Both are dead pipelines.
 
-**Historical examples found**:
-- `agent_game_diversity`: 5 readers, 0 writers -> fitness 40% dead
-- `agent_meta_learning`: 2 readers, 0 writers -> fitness 30% dead
-- `mastery_system.py`: 1,350 lines, zero imports from production code
-- `event_bus.py`: 16 event types, zero subscribers
-- `collective_reasoning_engine.py`: Sessions created, vote/resolve never runs
-- `resonance_detector.record_resonance_pattern()`: Method exists, never called from main loop
-- `concept_discovery_engine.track_concept_candidate()`: Only called by disconnected side-engines
-- `primitive_unlock_manager`: Referenced in 3 places, file was never created
+**Common examples**:
+- Database table with readers but zero writers -> downstream consumers starved
+- Database table with writers but zero readers -> data goes nowhere
+- Entire subsystem (1000+ lines) with zero imports from the main loop
+- Method exists with correct signature but is never called from production code
+- Event types defined but zero subscribers registered
 
 **Action**: For every system you touch, verify the FULL chain: writer -> table -> reader -> action. If any link is broken, fix it.
 
@@ -372,11 +354,6 @@ Check for tables with readers but zero writers. Check for tables with writers bu
 - Same coordinates appearing on every action line
 - Confidence that never decays (e.g., constant 0.77)
 - Zero diversity in rung selection across an entire game
-
-**Historical examples found**:
-- `exploration_phase` committing at 0.60 before any other rung evaluated (Session 7)
-- `palette_detection` returning confidence 0.10 with no action, triggering random fallback (Session 10)
-- `action6_object_exploration` returning 0.77 for (36,36) thirty-two times straight (Session 12)
 
 **Root cause**: Rungs that don't track their own failure. A rung that has been producing the same coordinates for 10 actions and nothing has changed should have its confidence approach zero. Confidence must reflect actual information gain, not just "I can produce an output."
 
@@ -396,12 +373,6 @@ Check for tables with readers but zero writers. Check for tables with writers bu
 - Check that the action coordinates passed to feedback are the ACTUAL coordinates used, not defaults like (0, 0)
 - Check that frame data in feedback is properly extracted (numpy arrays converted to lists, etc.)
 
-**Historical examples found**:
-- `evolution_runner.py` never called `notify_action_complete()` -> 7 feedback hooks permanently deaf (Session 11)
-- `game_loop.py` passed wrong coordinates: `getattr(action, 'x', 0)` always returned 0 (Session 11)
-- `ClickBehaviorClassifier` (625 lines) was fully built but never imported by `outcome_processor.py` (Session 10)
-- `ClickBehaviorLearningRung` treated strings as dicts (Session 10)
-
 **Action**: After any fix involving action processing, verify the FULL feedback chain:
 ```
 action executed -> frame extracted -> coordinates captured -> notify_action_complete called
@@ -418,10 +389,6 @@ action executed -> frame extracted -> coordinates captured -> notify_action_comp
 - Check for rungs that access `context.get('key')` vs `context.key` -- one works with dicts, the other with dataclasses
 - Search for `None` checks that mask missing data: `value = context.get('visual_scene') or default` may hide that visual_scene was never populated
 
-**Historical examples found**:
-- `evolution_runner.py` built a flat dict with ~60 ad-hoc keys; `context_builder.py` built a typed `DecisionContext` with different keys (implementation plan Phase 0.1)
-- Synthetic epistemic signals: KU->KK transitions based on confidence thresholds, not real question resolution (implementation plan Phase 0.2)
-
 ### 3.5 The Coordinate Fixation Pattern
 
 **This is the #5 failure mode.** Specific to click games. The system clicks the same position repeatedly because the coordinate generation logic falls back to center/default.
@@ -430,10 +397,6 @@ action executed -> frame extracted -> coordinates captured -> notify_action_comp
 - Same (x, y) coordinates across all actions
 - Coordinates at grid center (36, 36) or (32, 32) -- these are default fallbacks
 - Zero frame change between actions (clicking a dead position)
-
-**Historical examples found**:
-- FT09: All 1,550 clicks at (36, 36) because constructor sent directional actions to click-only game (Session 10)
-- FT09: `action6_object_exploration` produced (36, 36) because `_find_interesting_region()` couldn't find distinct colored clusters (Session 12)
 
 **Root cause**: The coordinate provider falls back to center when it can't find interesting targets. The visual cortex or object detector either isn't running, isn't finding objects, or its results aren't reaching the coordinate provider.
 
@@ -617,166 +580,87 @@ Save frames at key moments (first action, after each level change, after each ga
 
 ---
 
-## PART 6: IMPLEMENTATION PLAN
+## PART 6: THE COGNITIVE ARCHITECTURE (PTMA)
 
-This is the phased plan for bringing the system to completion. Phases are dependency-ordered. Each phase builds a capability AND guards against a corresponding mode of decay.
+The system uses a **Perceive → Think → Map → Act** loop as its primary cognitive cycle. See `architecture/PERCEIVE_THINK_MAP_ACT.md` for the full design document.
 
-### Phase 0: Heal the Broken Wiring (2-3 sessions)
+### 6.1 PERCEIVE: Multimodal Scene Understanding
 
-**MUST BE COMPLETED FIRST. Nothing else works without this.**
+Five parallel perception channels fuse into a unified percept:
 
-| Task | What | Why | Files |
-|------|------|-----|-------|
-| 0.1 | Unify context contract | Two divergent context paths -> rungs get None | `context_builder.py`, `evolution_runner.py` |
-| 0.2 | Fix epistemic signals | KU->KK transitions synthetic, not real | `decision_rung_system.py`, `engines/cognition/` |
-| 0.3 | Activate event bus | 16 event types, zero subscribers | `event_bus.py`, `evolution_runner.py`, `game_loop.py` |
-| 0.4 | Fix duplicate rung registry | Second entry silently overwrites first | `decision_rung_system.py` |
+1. **Spatial** — Panel layout, grid structure, interactive regions (from VisualCortex)
+2. **Object** — Connected components with centroids, colors, sizes (from ObjectDetector + fallback BFS)
+3. **Goal** — Reference panel comparison, cell-level delta (current vs goal)
+4. **Temporal** — Frame diffs, action effects, surprise measurement
+5. **Causal** — Known effects from CausalMap, unexplored positions, predicted next actions
 
-**Validation**: Run one generation. Every rung receives DecisionContext. Event subscribers fire. Zero None values for keys that should be populated.
+Channels cross-validate: spatial+object agreement boosts confidence, contradictions dampen it. This is mutual constraint satisfaction, not backpropagation.
 
-### Phase 1: Close Feedback Loops (3-4 sessions)
+### 6.2 THINK: Phenomenological Compression
 
-| Task | What | Why | Files |
-|------|------|-----|-------|
-| 1.1 | Wire mastery system | 1,350 lines never imported | `evolution_runner.py`, `mastery_system.py` |
-| 1.2 | Complete collective reasoning | vote/resolve cycle never executes | `evolution_runner.py`, `collective_reasoning_engine.py` |
-| 1.3 | Wire health -> corrective action | Snapshots stored, never acted on | New `network_health_responder.py` |
-| 1.4 | Wire concept discovery input | No input data reaching concept engine | `outcome_processor.py`, `concept_discovery_engine.py` |
+The integrated percept is compressed into a felt-state (valence, arousal, certainty, agency, salience) that captures meaning: "what changed?", "how does this relate to my goal?", "am I surprised?" Strategy is derived from felt-state + map completeness: **execute** (plan exists) → **experiment** (learning phase) → **exploit** (sufficient knowledge) → **explore** (insufficient knowledge).
 
-**Validation**: After 20 gens, `level_mastery` has entries. After stuck period, collective reasoning sessions show proposals and votes. Health metrics trigger parameter adjustments.
+### 6.3 MAP: Causal Knowledge Accumulation
 
-### Phase 2: Compression Pipeline (4-5 sessions)
+The CausalMap is where the "leapfrog" happens — once cause→effect is mapped, slow thinking is replaced by fast lookup:
 
-| Task | What | Why | Files |
-|------|------|-----|-------|
-| 2.1 | Viral package clustering | Similar packages never merged | New `engines/social/package_compressor.py` |
-| 2.2 | Sequence generalization | Redundant winning sequences never abstracted | `engines/planning/sequence_abstraction.py` |
-| 2.3 | Action trace distillation | Traces deleted without extracting patterns first | `safe_cleanup.py` |
-| 2.4 | Compression in cleanup | Cleanup deletes but never merges | `safe_cleanup.py` |
+- **Per-position effects**: "clicking HERE does THAT" (with color cycle tracking)
+- **Cross-position rules**: "clicking any cell toggles its von Neumann neighbors"
+- **Goal planning**: Use known rules to compute action sequence from current to goal state
+- **Information gain**: Prioritize unexplored positions during learning phase
 
-**Validation**: Package count decreases but coverage doesn't. Generalized sequences have marked invariant/optional positions. Database growth rate slows.
+**Critical feedback loop**: MAP feeds back into PERCEIVE — Channel 5 reads the CausalMap, so each cycle's perception is informed by all previous actions' consequences.
 
-### Phase 3: Resonance Detection (4-5 sessions)
+### 6.4 ACT: Three-Speed Decision Making
 
-| Task | What | Why | Files |
-|------|------|-----|-------|
-| 3.1 | Wire resonance pattern writing | `record_resonance_pattern()` exists but never called | `engines/social/resonance_detector.py` |
-| 3.2 | Create primitive unlock manager | Referenced in 3 places, never created | New `primitive_unlock_manager.py` |
-| 3.3 | Connect embeddings to resonance | Frame embeddings exist but not used for cross-game similarity | `representation_learner.py`, `resonance_detector.py` |
-| 3.4 | Resonance-informed scheduling | Game scheduler doesn't use resonance info | `evolution_game_scheduler.py` |
+| Speed | Name | Condition | Behavior |
+|-------|------|-----------|----------|
+| Fast | **MAPPED** | Goal plan exists with steps remaining | Execute next planned step from CausalMap |
+| Medium | **REASONED** | Sufficient knowledge, no complete plan | Delegate to cognitive router + rung system |
+| Slow | **EXPLORATORY** | Insufficient knowledge or learning phase | Select action with highest information gain |
 
-**Validation**: After 50+ gens of multi-game play, `resonance_patterns` has entries. Agents assigned resonant games solve them faster.
+### 6.5 Key Design Principles
 
-### Phase 4: Decompose Monoliths (3-4 sessions)
-
-| Task | What | Why | Files |
-|------|------|-----|-------|
-| 4.1 | Split evolution_runner.py | 2,400 lines, single point of failure | -> 5 new files + thin orchestrator |
-| 4.2 | Split decision_rung_system.py | 10,600 lines, 85 classes in one file | -> 8 rung modules + registry + system |
-| 4.3 | Unify game-playing paths | Two independent paths with different capabilities | `core_gameplay.py`, `game_player.py` |
-
-**Validation**: All tests pass. No behavior change. No file exceeds 2,000 lines.
-
-### Phase 5: Self-Tuning (3-4 sessions)
-
-| Task | What | Why | Files |
-|------|------|-----|-------|
-| 5.1 | Adaptive transfer rates | Hardcoded 0.15/0.45/0.75 | `horizontal_transfer_engine.py` |
-| 5.2 | Emergent concept targets | 7 hardcoded concepts, can't discover novel ones | `concept_discovery_engine.py` |
-| 5.3 | Health-driven evolution params | Static mutation rate, role allocation | `evolutionary_engine.py`, `agent_operating_mode_system.py` |
-| 5.4 | Adaptive cleanup thresholds | Static retention limits | `safe_cleanup.py` |
-
-**Validation**: Transfer rates diverge from initial values. Concept library has `source='emergent'` entries. Parameters stabilize when health is good.
-
-### Phase 6: Health Monitoring (2-3 sessions)
-
-| Task | What | Why | Files |
-|------|------|-----|-------|
-| 6.1 | Seven runtime health gauges | No continuous system health visibility | New `system_health_gauges.py` |
-| 6.2 | Contract validation | Integration breaks silently | `pipeline_assertions.py` |
-| 6.3 | Self-diagnostic report | System can't assess its own health | New `system_diagnostic.py` |
-
-**Validation**: 7 gauge values stored every generation. Violations detected within one generation. Health score correlates with game-winning rate.
+- **The loop IS the intelligence** — not the rungs, not the cortex, not the map. The fact that perceiving informs thinking, thinking informs mapping, mapping informs the next perception, and acting closes the cycle.
+- **Level 1 is a tutorial, not a test** — early levels maximize learning, later levels exploit knowledge.
+- **Level-to-level differencing** — when entering a new level, the delta from the previous level IS the lesson the game is teaching.
+- **Goal-state differencing** — "3 cells need to change from blue to red" is actionable; "the frame looks different" is not.
+- **Puzzle-type classification** — `available_actions=[6]` = click game, `[1,2,3,4]` = movement game. Classify BEFORE the first action.
 
 ---
 
-## PART 7: THE CRITICAL COGNITIVE CAPABILITIES
+## PART 7: IMPLEMENTATION PRIORITIES
 
-These are the capabilities the system needs to align with novel ARC-3 worlds. Build them in this order.
+Rather than a fixed plan (which goes stale), use this priority ordering when deciding what to work on. Fix in this order:
 
-### 7.1 Within-Game Persistent World Model
+1. **Broken feedback loops** — agent can't hear world's responses → blocks all learning
+2. **Rung monopoly** — one rung dominating → blocks cognitive diversity
+3. **Coordinate fixation** — clicking same spot → blocks game-specific learning
+4. **Missing context data** — rungs getting None → blocks informed decisions
+5. **Dead pipelines** — data written but never read, or never written → blocks persistence
+6. **Missing compression** — database bloating → blocks abstraction
+7. **Missing resonance** — no cross-game transfer → blocks generalization
 
-**What**: A structured representation of the game state that accumulates across actions AND across levels within a single game session.
+### 7.1 How to Assess Current State
 
-**Why**: Without this, the system re-parses the frame from scratch every action and starts each level with zero knowledge from previous levels.
+Run a generation with `--verbose` and check:
+- Does the PTMA loop run or does it fall back? (look for `[PTMA-ERR]`)
+- Are all feedback loops closed? (notify_action_complete fires after every action)
+- Are all 3 game types being played?
+- Is the fitness pipeline healthy? (look for `[PIPE-BREAK]`)
+- Are health gauges self-correcting? (look for `[GAUGES]`)
 
-**Structure**:
-```python
-class WorldModel:
-    game_id: str
-    current_level: int
-    cell_states: dict  # {(x,y): current_color}
-    causal_map: dict   # {(x,y): {effect_type, affected_cells, cycle_states}}
-    goal_state: dict   # {(x,y): required_color} (from reference panel)
-    delta: dict        # {(x,y): current vs goal difference}
-    rules_learned: list  # Compact rules extracted from causal_map
-    level_diffs: list  # What changed between levels
-    action_history: list  # What we did and what happened
+### 7.2 The Alignment Velocity Target
+
+```
+alignment_velocity = levels_completed / actions_taken
 ```
 
-**Integration point**: Passed through `context['world_model']`, populated by a `WorldModelRung` that runs first in the evaluation order and updated by `on_action_complete`.
+- **Current target**: velocity > 0.00 (any level progression at all)
+- **Medium-term**: velocity > 0.02 (some levels across multiple games)
+- **Long-term**: velocity > 0.05 (efficient level completion)
 
-### 7.2 Deliberate Experimentation Mode
-
-**What**: On early levels (1-2), the system's goal is not to win but to LEARN. Each action is a hypothesis test: "I click (x,y) to test whether it toggles neighbors."
-
-**Why**: Level 1 is the tutorial. It's cheap to experiment on. The information gained is worth more than the actions spent.
-
-**Implementation**:
-- `BudgetAwarePlanningRung` should recognize levels 1-2 as "learning phase"
-- In learning phase, actions are selected to maximize information gain, not progress:
-  - Click each distinct object once
-  - Record what each click does to neighbors
-  - Test for spatial patterns (von Neumann, Moore, row/column)
-- By level 3, the causal map should be complete enough to plan purposefully
-
-### 7.3 Level-to-Level Differencing
-
-**What**: When entering a new level, compare its structure to the previous level. The delta IS the lesson the game is teaching.
-
-**Why**: ARC-3's progressive difficulty is a curriculum. Level 2 has something level 1 didn't -- maybe more colors, larger grid, new constraint. That difference tells you what to pay attention to.
-
-**Implementation**:
-```python
-def diff_levels(prev_scene: VisualScene, curr_scene: VisualScene):
-    return {
-        'grid_size_change': curr_scene.grid_size - prev_scene.grid_size,
-        'new_colors': curr_scene.colors - prev_scene.colors,
-        'object_count_change': len(curr_scene.objects) - len(prev_scene.objects),
-        'new_panel_types': curr_scene.panel_types - prev_scene.panel_types,
-        'structural_changes': compare_panel_layouts(prev_scene, curr_scene)
-    }
-```
-
-### 7.4 Goal-State Differencing
-
-**What**: Compute the structured gap between current state and goal state.
-
-**Why**: "3 cells need to change from blue to red" is actionable. "The frame looks different from the reference" is not.
-
-**Implementation**: The visual cortex detects reference panels. Compare reference panel cell states to workspace panel cell states. The difference vector tells you exactly what needs to change.
-
-### 7.5 Puzzle-Type Classification
-
-**What**: On game start, classify the game type and select the appropriate cognitive strategy BEFORE the first action.
-
-**Why**: Click games with toggles need constraint solvers. Movement games with walls need pathfinders. Pattern completion needs transformation inference. Don't spend 10 actions figuring out what kind of problem this is.
-
-**Classification signal sources**:
-- `available_actions`: [6] = click game, [1,2,3,4] = movement game, [1-6] = hybrid
-- Panel count: 4 panels with clear input/output = transformation game
-- Object count and arrangement: grid of same-sized cells = toggle/constraint game
-- Previous experience: if the game_id has been seen before, use the stored classification
+Every fix should be evaluated against this metric. If it doesn't move alignment velocity upward, it's not the right priority.
 
 ---
 
@@ -873,7 +757,7 @@ This is the protocol for fully automated system improvement without human interv
 REPEAT:
   1. Run N generations (start with N=20)
   2. Analyze the run log (Section 4)
-  3. Compute 7 health gauges (Section 7, Phase 6.1)
+  3. Compute 7 health gauges
   4. Identify the TOP failure mode (which seal is most violated?)
   5. Diagnose root cause using the patterns in Section 3
   6. Implement the fix
@@ -886,15 +770,7 @@ UNTIL: system achieves sustained level progression across all 3 game types
 
 ### 10.2 Priority Ordering
 
-When multiple problems exist (they always will), fix in this order:
-
-1. **Broken feedback loops** (agent can't hear world's responses) -- blocks all learning
-2. **Rung monopoly** (one rung dominating) -- blocks cognitive diversity
-3. **Coordinate fixation** (clicking same spot) -- blocks game-specific learning
-4. **Missing context data** (rungs getting None) -- blocks informed decisions
-5. **Dead pipelines** (data not flowing) -- blocks persistence and transfer
-6. **Missing compression** (database bloating) -- blocks abstraction
-7. **Missing resonance** (no cross-game transfer) -- blocks generalization
+When multiple problems exist (they always will), fix using the priority ordering in Part 7. From feedback loops (most critical) down to resonance (least urgent).
 
 ### 10.3 Success Metrics
 
@@ -1041,7 +917,7 @@ conn.close()
 
 Before committing any change, verify:
 
-- [ ] `python -m pytest tests/ -v` passes (or 878+ tests pass)
+- [ ] `python -m pytest tests/ -v` passes
 - [ ] Pylance/type checker shows 0 errors
 - [ ] Pre-commit hooks pass (`git commit` succeeds without vulture/isort/whitespace failures)
 - [ ] If commit fails: fix genuine errors, re-stage auto-fixed files, recommit until clean
@@ -1051,9 +927,6 @@ Before committing any change, verify:
 - [ ] No context field newly returning None (check context log)
 - [ ] notify_action_complete still fires for every action
 - [ ] Game results still written to database after each game
-- [ ] If touching evolution_runner.py: check BOTH game-playing paths still work
-- [ ] If touching decision_rung_system.py: check rung registry has correct count
-- [ ] If touching context_builder.py: check all rungs still receive their required fields
 
 ## APPENDIX C: THE ALIGNMENT VELOCITY METRIC
 
@@ -1076,6 +949,6 @@ Every fix, every wiring connection, every new capability should be evaluated aga
 ---
 
 **END OF COPILOT INSTRUCTIONS**
-**Version**: 3.1
-**Last Updated**: 2026-02-10
+**Version**: 4.0
+**Last Updated**: 2026-02-13
 **Keep this document updated as system evolves**
