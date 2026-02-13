@@ -90,3 +90,4 @@ timestamp_column  # noqa: F821 - safe_cleanup.py:757 - column name for queries
 
 arc_agi  # noqa: F821 - arc_api_adapter.py:39 - module reference for future use
 PrimitiveStatus  # noqa: F821 - concept_discovery_engine.py:40 - enum for future use
+game_id  # noqa: F821 - perceiver.py:102 - API param for future game-specific perception

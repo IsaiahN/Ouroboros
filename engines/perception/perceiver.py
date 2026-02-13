@@ -23,7 +23,7 @@ Integration is by mutual constraint satisfaction:
 
 import logging
 from collections import Counter
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -99,7 +99,7 @@ class Perceiver:
         available_actions: Optional[List[int]] = None,
         actions_taken: int = 0,
         max_actions: int = 500,
-        _game_id: str = "",
+        game_id: str = "",
     ) -> PerceptualField:
         """
         Run all perception channels and integrate into a PerceptualField.
