@@ -288,7 +288,7 @@ class Action6CoordinateProvider:
                 pass
 
         # Strategy 3: Frame analysis for interesting regions
-        if frame:
+        if frame is not None:
             try:
                 game_key = f"{game_type}_L{level}"
                 coords = Action6CoordinateProvider._find_interesting_region(frame, game_key)
@@ -310,7 +310,7 @@ class Action6CoordinateProvider:
     @staticmethod
     def _find_interesting_region(frame: List[List[int]], game_key: str = "") -> Optional[Dict[str, int]]:
         """Find visually interesting regions in the frame, cycling through objects per-game."""
-        if not frame or len(frame) < 4:
+        if frame is None or len(frame) < 4:
             return None
 
         interesting_points: List[Tuple[int, int, int]] = []
@@ -329,7 +329,7 @@ class Action6CoordinateProvider:
                 color_groups[color] = []
             color_groups[color].append((x, y))
 
-        frame_area = len(frame) * (len(frame[0]) if frame else 64)
+        frame_area = len(frame) * (len(frame[0]) if len(frame) > 0 else 64)
         valid_groups = {
             c: pts for c, pts in color_groups.items()
             if 3 <= len(pts) <= frame_area * 0.4

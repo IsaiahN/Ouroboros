@@ -199,7 +199,7 @@ class ThreeLayerFilterRung(DecisionRung):
 
             # Layer 2: Object prefilter for click actions
             # Penalize ACTION5/6/7 if there's no non-background pixel at position
-            if frame and isinstance(frame, list):
+            if frame is not None and isinstance(frame, list):
                 for action_num in [5, 6, 7]:
                     if action_num in available:
                         action = f'ACTION{action_num}'

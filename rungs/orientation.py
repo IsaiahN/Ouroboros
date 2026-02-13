@@ -88,7 +88,7 @@ class SurveyRung(DecisionRung):
 
         # Analyze grid structure
         if isinstance(frame, list) and len(frame) > 0:
-            survey['grid_size'] = (len(frame), len(frame[0]) if frame else 0)
+            survey['grid_size'] = (len(frame), len(frame[0]) if len(frame) > 0 else 0)
 
             # Find unique colors and objects
             colors: set = set()
@@ -1001,7 +1001,7 @@ class AffordanceDetectionRung(DecisionRung):
 
     def _detect_objects(self, frame: List[List[int]]) -> List[Dict[str, Any]]:
         """Detect distinct colored objects in the frame."""
-        if not frame:
+        if frame is None or (isinstance(frame, list) and len(frame) == 0):
             return []
 
         color_pixels: Dict[int, List[Tuple[int, int]]] = {}
@@ -1017,7 +1017,7 @@ class AffordanceDetectionRung(DecisionRung):
             return []
 
         objects = []
-        frame_area = len(frame) * (len(frame[0]) if frame else 64)
+        frame_area = len(frame) * (len(frame[0]) if len(frame) > 0 else 64)
         for color, pixels in color_pixels.items():
             size = len(pixels)
             if size < 2 or size > frame_area * 0.5:

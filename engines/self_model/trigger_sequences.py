@@ -22,7 +22,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -594,7 +594,12 @@ class TriggerSequenceTracker:
             return (TriggerEffect.SCORE_CHANGE, None)
 
         # Check for frame changes
-        if frame_before == frame_after:
+        if hasattr(frame_before, 'shape'):
+            import numpy as np
+            frames_equal = np.array_equal(frame_before, frame_after)
+        else:
+            frames_equal = frame_before == frame_after
+        if frames_equal:
             return (TriggerEffect.UNKNOWN, None)
 
         # Find what changed

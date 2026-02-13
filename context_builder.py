@@ -1030,7 +1030,12 @@ class ContextBuilder:
         Returns:
             Hash string, or empty string if frame is None
         """
-        if not frame:
+        if frame is None:
+            return ""
+        # Handle numpy arrays: convert to list for safe iteration
+        if hasattr(frame, 'tolist'):
+            frame = frame.tolist()
+        if not isinstance(frame, list) or len(frame) == 0:
             return ""
         try:
             import hashlib
@@ -1469,7 +1474,7 @@ class ContextBuilder:
         This is a simplified heuristic. Full implementation would use
         the agent self-model.
         """
-        if not frame:
+        if frame is None or (isinstance(frame, list) and len(frame) == 0):
             return None
 
         # Simple heuristic: find first non-zero cell

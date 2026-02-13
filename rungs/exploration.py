@@ -156,6 +156,13 @@ class Action6ObjectExplorationRung(DecisionRung):
     Tracks recent (x,y) positions per game. When the same coordinates are
     produced repeatedly, confidence decays so the cognitive router yields
     to other rungs instead of committing to stale exploration.
+
+    ANTI-MONOPOLY (2026-02-10):
+    Per-game evaluation counter decays confidence by 0.02 per evaluate() call,
+    regardless of coordinate diversity. This prevents the rung from holding
+    98% of all actions by cycling through objects — after ~15 evaluations,
+    confidence drops low enough for exploitation rungs to compete.
+    Resets on level change (progress = fresh exploration budget).
     """
     name = "action6_object_exploration"
     category = "exploration"
@@ -167,6 +174,10 @@ class Action6ObjectExplorationRung(DecisionRung):
         self._consecutive_no_change = 0
         self._position_history: List[Tuple[int, int]] = []
         self._HISTORY_WINDOW = 8
+        # Per-game evaluation counter: decays confidence even when coordinates
+        # are diverse (prevents monopoly through object cycling).
+        self._game_eval_count: Dict[str, int] = {}
+        self._last_game_level: Optional[str] = None
 
     def _get_repetition_decay(self, x: int, y: int, proximity: int = 4) -> float:
         """
@@ -229,8 +240,29 @@ class Action6ObjectExplorationRung(DecisionRung):
             elif isinstance(game_state, dict):
                 frame = game_state.get('frame')
 
-            if not frame:
+            if frame is None:
                 return RungResult()
+            # Convert numpy to list for safe iteration
+            if hasattr(frame, 'tolist'):
+                frame = frame.tolist()
+            if not isinstance(frame, list) or len(frame) == 0:
+                return RungResult()
+
+            # ANTI-MONOPOLY: Per-game eval counter — decays confidence
+            # even when coordinates are diverse (object cycling).
+            game_key = f"{game_type}_L{level}"
+            eval_count = self._game_eval_count.get(game_key, 0)
+            self._game_eval_count[game_key] = eval_count + 1
+
+            # Reset counter on level change (same game, new level = progress)
+            if self._last_game_level and self._last_game_level != game_key:
+                old_type = self._last_game_level.split('_L')[0]
+                if old_type == game_type:
+                    self._game_eval_count[game_key] = 0
+                    eval_count = 0
+            self._last_game_level = game_key
+
+            eval_decay = eval_count * 0.02
 
             # First try: Get objects matching known selectable shapes for this game
             if hasattr(a6e, 'get_untried_objects_for_frontier'):
@@ -248,12 +280,12 @@ class Action6ObjectExplorationRung(DecisionRung):
                     y = obj.get('center_y', obj.get('y', 32))
                     if self._should_abstain(x, y):
                         return RungResult(reason="Abstaining: repeated no-change at same position")
-                    base_conf = min(0.55, 0.45 + obj.get('shape_confidence', 0) * 0.15)
+                    base_conf = min(0.50, 0.45 + obj.get('shape_confidence', 0) * 0.15)
                     decay = self._get_repetition_decay(x, y)
                     no_change_decay = self._consecutive_no_change * 0.08
-                    confidence = max(0.10, base_conf - decay - no_change_decay)
+                    confidence = max(0.10, base_conf - decay - no_change_decay - eval_decay)
                     self._record_position(x, y)
-                    decay_note = f" [decay={decay:.2f}+nc={no_change_decay:.2f}]" if (decay > 0 or no_change_decay > 0) else ""
+                    decay_note = f" [decay={decay:.2f}+nc={no_change_decay:.2f}+ev={eval_decay:.2f}]" if (decay > 0 or no_change_decay > 0 or eval_decay > 0) else ""
                     return RungResult(
                         action='ACTION6',
                         confidence=confidence,
@@ -281,12 +313,12 @@ class Action6ObjectExplorationRung(DecisionRung):
                             y = region_y * 8 + 4
                             if self._should_abstain(x, y):
                                 continue  # Skip this button, try next
-                            base_conf = min(0.55, 0.40 + button.get('confidence', 0) * 0.20)
+                            base_conf = min(0.50, 0.40 + button.get('confidence', 0) * 0.20)
                             decay = self._get_repetition_decay(x, y)
                             no_change_decay = self._consecutive_no_change * 0.08
-                            confidence = max(0.10, base_conf - decay - no_change_decay)
+                            confidence = max(0.10, base_conf - decay - no_change_decay - eval_decay)
                             self._record_position(x, y)
-                            decay_note = f" [decay={decay:.2f}+nc={no_change_decay:.2f}]" if (decay > 0 or no_change_decay > 0) else ""
+                            decay_note = f" [decay={decay:.2f}+nc={no_change_decay:.2f}+ev={eval_decay:.2f}]" if (decay > 0 or no_change_decay > 0 or eval_decay > 0) else ""
                             return RungResult(
                                 action='ACTION6',
                                 confidence=confidence,
@@ -314,12 +346,12 @@ class Action6ObjectExplorationRung(DecisionRung):
                             x, y = int(match.group(1)), int(match.group(2))
                             if self._should_abstain(x, y):
                                 return RungResult(reason="Abstaining: repeated no-change at same position")
-                            base_conf = min(0.55, 0.35 + obj.get('confidence', 0) * 0.25)
+                            base_conf = min(0.50, 0.35 + obj.get('confidence', 0) * 0.25)
                             decay = self._get_repetition_decay(x, y)
                             no_change_decay = self._consecutive_no_change * 0.08
-                            confidence = max(0.10, base_conf - decay - no_change_decay)
+                            confidence = max(0.10, base_conf - decay - no_change_decay - eval_decay)
                             self._record_position(x, y)
-                            decay_note = f" [decay={decay:.2f}+nc={no_change_decay:.2f}]" if (decay > 0 or no_change_decay > 0) else ""
+                            decay_note = f" [decay={decay:.2f}+nc={no_change_decay:.2f}+ev={eval_decay:.2f}]" if (decay > 0 or no_change_decay > 0 or eval_decay > 0) else ""
                             return RungResult(
                                 action='ACTION6',
                                 confidence=confidence,
