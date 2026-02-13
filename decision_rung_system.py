@@ -822,7 +822,8 @@ class DecisionRungSystem:
 
     def _select_ordering_for_context(self, available_actions: List[int], context: Dict[str, Any]) -> str:
         """Select the best ordering based on available actions and context."""
-        if available_actions == [6]:
+        actions_list = list(available_actions) if available_actions is not None else []
+        if actions_list == [6]:
             return 'action6_only'
         if 6 in available_actions:
             if self.ordering_name in ('action6_world', 'action6_only', 'frontier_exploration'):
@@ -1428,7 +1429,8 @@ class DecisionRungSystem:
             return action, reasoning
 
         except Exception as e:
-            logger.error(f"[COGNITIVE] Router error: {e}, falling back to context_adaptive")
+            import traceback
+            logger.error(f"[COGNITIVE] Router error: {e}, falling back to context_adaptive\n{traceback.format_exc()}")
             return self._decide_context_adaptive(game_state, context)
 
     # ── Stats & experiments ──────────────────────────────────────────────────

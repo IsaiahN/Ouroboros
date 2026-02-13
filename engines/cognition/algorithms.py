@@ -414,7 +414,7 @@ class BeamSearch(SearchAlgorithm):
     time_complexity = "O(k·b·d)"
     space_complexity = "O(k·d)"
 
-    def __init__(self, beam_width: int = 3):
+    def __init__(self, beam_width: int = 3, **_kwargs: object):
         self.beam_width = beam_width
 
     def get_next_rungs(
@@ -457,7 +457,7 @@ class InformationMaximizingSearch(SearchAlgorithm):
     space_complexity = "O(1)"
 
     def __init__(self, exploration_bonus: float = 1.0, curiosity_weight: float = 0.2,
-                 epsilon: float = 0.05):
+                 epsilon: float = 0.05, **_kwargs: object):
         self.exploration_bonus = exploration_bonus
         self.curiosity_weight = curiosity_weight
         self.epsilon = epsilon  # Stochastic tie-breaking noise
@@ -635,7 +635,7 @@ class BacktrackingAStar(SearchAlgorithm):
     time_complexity = "O(E × backtrack_depth)"
     space_complexity = "O(V)"
 
-    def __init__(self, checkpoint_id: Optional[int] = None, excluded_rungs: Optional[Set[str]] = None):
+    def __init__(self, checkpoint_id: Optional[int] = None, excluded_rungs: Optional[Set[str]] = None, **_kwargs: object):
         self.checkpoint_id = checkpoint_id
         self.excluded_rungs = excluded_rungs or set()
 
@@ -843,7 +843,7 @@ class ExplorationWithExclusions(SearchAlgorithm):
     time_complexity = "O(V)"
     space_complexity = "O(1)"
 
-    def __init__(self, boost_novel: bool = True):
+    def __init__(self, boost_novel: bool = True, **_kwargs: object):
         self.boost_novel = boost_novel
 
     def get_next_rungs(

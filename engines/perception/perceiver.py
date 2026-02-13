@@ -27,13 +27,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
-from engines.perception.perceptual_field import (
-    ActionEffect,
-    CellDiff,
-    KnownEffect,
-    PerceptualField,
-    TilePosition,
-)
+from engines.perception.perceptual_field import ActionEffect, CellDiff, PerceptualField
 
 logger = logging.getLogger(__name__)
 
@@ -515,12 +509,13 @@ class Perceiver:
             pf.goal_confidence = min(1.0, pf.goal_confidence + 0.15)
 
         # Classify puzzle type from available actions
-        if available_actions:
-            if available_actions == [6]:
+        actions_list = list(available_actions) if available_actions is not None else []
+        if actions_list:
+            if actions_list == [6]:
                 pf.puzzle_type = 'click_only'
-            elif 6 not in available_actions:
+            elif 6 not in actions_list:
                 pf.puzzle_type = 'movement'
-            elif set(available_actions) == {1, 2, 3, 4, 5, 6, 7}:
+            elif set(actions_list) == {1, 2, 3, 4, 5, 6, 7}:
                 pf.puzzle_type = 'hybrid'
             else:
                 pf.puzzle_type = 'mixed'

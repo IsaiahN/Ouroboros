@@ -908,8 +908,8 @@ class CognitiveRouter:
             # Without this, click rungs compete uniformly with 60+ other
             # rungs and may never be reached before the decision commits.
             # =================================================================
-            available_actions = game_state.get('available_actions', [])
-            if available_actions == [6] or set(available_actions) == {6}:
+            available_actions = list(game_state.get('available_actions', []))
+            if available_actions == [6]:
                 _CLICK_BOOST_RUNGS = frozenset({
                     'causal_click_mapping', 'constraint_satisfaction',
                     'constraint_decoder', 'object_color_targeting',
@@ -1229,10 +1229,11 @@ class CognitiveRouter:
                         )
                     # Severe anomaly: force exploration boost on next iteration
                     if anomaly.severity > 0.7:
+                        visited_list = list(self._state.visited_rungs)
                         context.excluded_rungs.update(
-                            self._state.visited_rungs[-3:]
-                            if len(self._state.visited_rungs) >= 3
-                            else self._state.visited_rungs
+                            visited_list[-3:]
+                            if len(visited_list) >= 3
+                            else visited_list
                         )
 
             # Update context
@@ -1854,7 +1855,7 @@ class CognitiveRouter:
             if controlled is None:
                 # Derive from player_position: default (32,32) is sentinel
                 pos = game_state.get('player_position')
-                if pos is not None and pos != (32, 32):
+                if pos is not None and tuple(pos) != (32, 32):
                     controlled = f"player_at_{pos[0]}_{pos[1]}"
             if controlled is not None:
                 self.blackboard.slot('controlled_object', controlled)
@@ -1917,9 +1918,9 @@ class CognitiveRouter:
         # passes active_sequence (full winning sequence) and sequence_position.
         # When available, we store the remaining actions as the cached sequence
         # keyed by a generic rung name so ANY rung can be delegated via it.
-        active_seq = game_state.get('active_sequence', [])
+        active_seq = game_state.get('active_sequence') or []
         seq_pos = game_state.get('sequence_position', 0)
-        if active_seq and seq_pos < len(active_seq):
+        if len(active_seq) > 0 and seq_pos < len(active_seq):
             remaining = active_seq[seq_pos:]
             # Convert int actions to ACTION strings for rung compatibility
             remaining_actions = [

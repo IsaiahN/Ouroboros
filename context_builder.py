@@ -672,8 +672,9 @@ class ContextBuilder:
                 pass
 
         # ACTION6 flags
-        is_action6_only = available_actions == [6]
-        action6_avail = 6 in available_actions
+        _aa_list = list(available_actions) if available_actions is not None else []
+        is_action6_only = _aa_list == [6]
+        action6_avail = 6 in _aa_list
 
         # Detect frontier and stuck/oscillation from internal state
         is_frontier = not has_full_win

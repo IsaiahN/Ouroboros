@@ -390,7 +390,7 @@ class Action6CoordinateProvider:
     def is_action6_game(context: Dict[str, Any]) -> bool:
         """Check if ACTION6 is the only available action (click-only game)."""
         available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
-        return available == [6]
+        return list(available) == [6]
 
     @staticmethod
     def action6_available(context: Dict[str, Any]) -> bool:

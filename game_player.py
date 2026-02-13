@@ -1007,7 +1007,7 @@ class GamePlayer:
                     pass
 
             # Track failed actions and stuck state
-            is_action6_only = current_available == [6]
+            is_action6_only = list(current_available) == [6]
             if not last_frame_changed and action.name.startswith('ACTION'):
                 failed_actions.add(action.name)
                 if not is_action6_only:

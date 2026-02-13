@@ -366,7 +366,7 @@ class DeliberationEngine:
 
         # Fallback: Random
         if action is None:
-            action = random.choice(available_actions) if available_actions else "ACTION1"
+            action = random.choice(list(available_actions)) if (available_actions is not None and len(available_actions) > 0) else "ACTION1"
             basis = "no pattern - random selection"
             habit_strength = 0.0
 

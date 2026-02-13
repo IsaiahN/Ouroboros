@@ -21,6 +21,8 @@ Usage in evolution_runner.py:
 
 import logging
 import time
+import uuid
+from datetime import datetime
 from typing import Any, Callable, List, Optional
 
 import numpy as np
@@ -100,6 +102,19 @@ class CognitiveGamePlayer:
 
         # Reset context builder
         self._gp.context_builder.reset(game_id)
+
+        # Create session for action traces (mirrors GamePlayer.play_game)
+        self._gp._current_session_id = (
+            f"session_{uuid.uuid4().hex[:12]}_{int(datetime.now().timestamp())}"
+        )
+        try:
+            self._gp.db.execute_query("""
+                INSERT INTO training_sessions (
+                    session_id, game_id, start_time, mode, status, total_actions
+                ) VALUES (?, ?, datetime('now'), 'evolution', 'in_progress', 0)
+            """, (self._gp._current_session_id, game_id))
+        except Exception as e:
+            logger.warning(f"[COGNITIVE] Failed to create training session: {e}")
 
         # Initialize cognitive loop
         loop.start_game(game_id, available_actions, self._gp.max_actions)
@@ -246,7 +261,6 @@ class CognitiveGamePlayer:
                 # Record winning subsequence for this level
                 try:
                     import json
-                    import uuid
                     level_subsequence = action_sequence[level_start_action_index:]
                     if level_subsequence:
                         level_seq_id = f"seq_{uuid.uuid4().hex[:12]}"
