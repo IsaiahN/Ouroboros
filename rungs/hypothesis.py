@@ -28,7 +28,7 @@ def _get_frame(game_state: Any) -> Any:
     """Extract frame from game_state whether it's a dict or object."""
     if isinstance(game_state, dict):
         return game_state.get('frame')
-    return _get_frame(game_state)
+    return getattr(game_state, 'frame', None)
 
 
 class ScientificMethodRung(DecisionRung):
