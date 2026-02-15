@@ -24,13 +24,13 @@ repos:
     hooks:
       - id: check-yaml
       - id: end-of-file-fixer
-        exclude: ^(deprecated/|\.svg$)
+        exclude: ^(deprecated/|environment_files/|\.svg$)
       - id: trailing-whitespace
-        exclude: ^(deprecated/|\.svg$)
+        exclude: ^(deprecated/|environment_files/|\.svg$)
       - id: check-added-large-files
         args: ['--maxkb=500']
       - id: check-ast
-        exclude: ^deprecated/
+        exclude: ^(deprecated/|environment_files/)
 
   # Import sorting
   - repo: https://github.com/pycqa/isort
@@ -38,4 +38,15 @@ repos:
     hooks:
       - id: isort
         args: ["--profile", "black", "--skip", "deprecated"]
+        exclude: ^environment_files/
+
+  # Protect game files from modification (Rule: games are sacrosanct)
+  - repo: local
+    hooks:
+      - id: protect-game-files
+        name: protect game files (environment_files/)
+        entry: "bash -c 'echo \"ERROR: Game files in environment_files/ must NEVER be modified. These are official ARC Prize game files.\" && exit 1'"
+        language: system
+        files: ^environment_files/
+        pass_filenames: false
         exclude: ^deprecated/
