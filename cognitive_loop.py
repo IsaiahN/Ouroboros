@@ -37,6 +37,7 @@ Usage:
 """
 
 import logging
+import random
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -305,7 +306,7 @@ class CognitiveLoop:
         # ═══ GAP 1: Frame history for stable region detection ═══
         self._frame_history: List[np.ndarray] = []  # Last N frames
         self._stable_mask: Optional[np.ndarray] = None  # Boolean: True = never changed
-        self._stable_region_computed: bool = False
+        self._stable_region_attempts: int = 0  # How many times we've tried (allow retry)
         self._reference_snapshot: Optional[np.ndarray] = None  # Stable pixels snapshot
 
         # ═══ GAP 2: Goal-delta tracking ═══
@@ -344,13 +345,14 @@ class CognitiveLoop:
         # Reset gap state
         self._frame_history = []
         self._stable_mask = None
-        self._stable_region_computed = False
+        self._stable_region_attempts = 0
         self._reference_snapshot = None
         self._last_goal_delta_count = 0
         self._goal_cells_total = 0
         self._active_plan = []
         self._agent_position = None
         self._prev_hud_hash = 0
+        self._productive_rotation_index = 0  # Fix 3: rotate among productive targets
 
         # Create fresh causal map for this game
         self._causal_map = CausalMap(game_id=game_id)
@@ -735,8 +737,12 @@ class CognitiveLoop:
             if len(self._frame_history) > 15:
                 self._frame_history = self._frame_history[-15:]
 
-            # After 5 actions, compute stable regions if not done for this level
-            if len(self._frame_history) >= 5 and not self._stable_region_computed:
+            # Compute stable regions: first try at 5 frames, retry at 10 if first attempt
+            # failed to find a useful split (e.g. intro animation, camera panning)
+            min_frames = 5 if self._stable_region_attempts == 0 else 10
+            if (len(self._frame_history) >= min_frames
+                    and self._stable_mask is None
+                    and self._stable_region_attempts < 2):
                 self._compute_stable_regions()
 
         # ═══ GAP 4: Rich action outcome computation ═══
@@ -827,11 +833,16 @@ class CognitiveLoop:
         if level_changed:
             self._current_level = new_level if new_level > 0 else self._current_level + 1
             # Reset stable regions for new level (visual layout may change)
-            self._stable_region_computed = False
+            self._stable_region_attempts = 0
             self._stable_mask = None
             self._reference_snapshot = None
             self._frame_history = []
             self._active_plan = []  # Plan is invalid for new level
+            # Fix 2: Reset goal tracking so stale data from previous level
+            # doesn't produce phantom deltas on the first action of new level
+            self._goal_cells_total = 0
+            self._last_goal_delta_count = 0
+            self._productive_rotation_index = 0
         self._score = new_score if new_score else self._score + score_delta
 
         # Build result summary
@@ -869,6 +880,8 @@ class CognitiveLoop:
         if len(self._frame_history) < 3:
             return
 
+        self._stable_region_attempts += 1
+
         try:
             base = self._frame_history[0]
             # Build a mask: True where pixel NEVER changed from the base
@@ -877,6 +890,18 @@ class CognitiveLoop:
             for frame in self._frame_history[1:]:
                 if frame.shape == base.shape:
                     stable &= (frame == base)
+
+            # ═══ Fix 4: Exclude HUD edge pixels from stable mask ═══
+            # Edge strips contain timer bars, lives, and decorations that
+            # are stable initially but change later (timer ticks, life lost).
+            # Including them corrupts the workspace delta computation.
+            edge = self._hud_edge_size
+            h, w = stable.shape[:2]
+            if h > edge * 2 and w > edge * 2:
+                stable[:edge, :] = False   # top strip
+                stable[-edge:, :] = False  # bottom strip
+                stable[:, :edge] = False   # left strip
+                stable[:, -edge:] = False  # right strip
 
             # A region is "stable" if a meaningful fraction of its pixels
             # never changed. Compute the fraction of stable pixels.
@@ -888,33 +913,34 @@ class CognitiveLoop:
             if 0.1 < stable_fraction < 0.95:
                 self._stable_mask = stable
                 self._reference_snapshot = base.copy()
-                self._stable_region_computed = True
 
                 if self._verbose:
                     print(f"    [GAP1-STABLE] Stable region: {stable_fraction:.0%} pixels never changed")
             else:
                 # Everything changes or nothing changes -- can't split
-                self._stable_region_computed = True  # Don't retry
+                # Don't set _stable_mask so retry is possible with more frames
                 if self._verbose:
-                    print(f"    [GAP1-STABLE] No useful split ({stable_fraction:.0%} stable)")
+                    print(f"    [GAP1-STABLE] No useful split ({stable_fraction:.0%} stable, attempt {self._stable_region_attempts})")
 
         except Exception as e:
             logger.debug(f"[GAP1] Stable region computation failed: {e}")
-            self._stable_region_computed = True  # Don't retry
 
-    def _compute_goal_from_stable_regions(
+    def _compute_workspace_delta(
         self, current_frame: np.ndarray
     ) -> Tuple[int, int]:
         """
-        Gap 1 + Gap 2: Use stable regions to compute goal delta.
+        Gap 1 + Gap 2: Measure how much the workspace has changed.
 
         Compares the CHANGING regions of the current frame against
-        the reference snapshot. The stable region tells us "what
-        should stay the same" and the changing region tells us
-        "what we can modify." The goal is often encoded in the
-        stable region as a reference pattern.
+        the initial snapshot (frame[0]). This measures "cells that
+        have been modified" — exploration coverage — NOT "cells
+        matching a goal." We don't know the goal state.
 
-        Returns (goal_cells_total, goal_cells_correct).
+        The score_delta from the API is the ground truth for whether
+        modifications are moving toward the goal. This method just
+        counts HOW MANY cells have been touched.
+
+        Returns (total_workspace_cells, cells_modified_from_initial).
         """
         if self._stable_mask is None or self._reference_snapshot is None:
             return 0, 0
@@ -923,27 +949,17 @@ class CognitiveLoop:
             if current_frame.shape != self._reference_snapshot.shape:
                 return 0, 0
 
-            # The stable pixels ARE the reference/goal.
-            # The changing pixels are what the agent can modify.
-            # For games where the goal is encoded as a reference panel:
-            #   stable_region = goal display (never changes)
-            #   changing_region = workspace (changes on click)
-            # The agent succeeds when changing_region matches a pattern
-            # related to the stable_region.
-
-            # Simple approach: compare current non-stable pixels
-            # against the reference snapshot. This works if the goal
-            # is "make the workspace look like the initial state" or
-            # "make it match a reference pattern."
+            # The changing pixels are the interactive workspace.
             changing = ~self._stable_mask
             if not changing.any():
                 return 0, 0
 
-            # Count changing pixels that match reference
+            # Count workspace cells that DIFFER from initial state.
+            # More modified = more exploration coverage.
             total = int(changing.sum())
-            matching = int((current_frame[changing] == self._reference_snapshot[changing]).sum())
+            modified = int((current_frame[changing] != self._reference_snapshot[changing]).sum())
 
-            return total, matching
+            return total, modified
 
         except Exception:
             return 0, 0
@@ -967,15 +983,17 @@ class CognitiveLoop:
             except Exception:
                 pass
 
-        # Goal-delta tracking: compare before vs after
+        # Goal-delta tracking: how many workspace cells differ from initial state
+        # This tracks "exploration coverage" not "goal correctness" since we
+        # don't know the target state game-agnostically.
         cf.goal_delta_before = self._last_goal_delta_count
 
         if post_array is not None:
-            goal_total, goal_correct = self._compute_goal_from_stable_regions(post_array)
+            goal_total, cells_modified = self._compute_workspace_delta(post_array)
             cf.goal_cells_total = goal_total
-            cf.goal_cells_correct = goal_correct
-            cf.goal_completion = goal_correct / max(goal_total, 1)
-            cf.goal_delta_after = goal_total - goal_correct
+            cf.goal_cells_correct = cells_modified  # cells touched, not "correct"
+            cf.goal_completion = cells_modified / max(goal_total, 1)
+            cf.goal_delta_after = goal_total - cells_modified
             # Update loop-level goal awareness
             if goal_total > 0:
                 self._goal_cells_total = goal_total
@@ -985,18 +1003,27 @@ class CognitiveLoop:
         else:
             cf.goal_delta_after = cf.goal_delta_before
 
-        # Compute goal progress
+        # Compute goal progress delta (change in remaining cells)
         cf.goal_progress_delta = cf.goal_delta_before - cf.goal_delta_after
 
-        # Categorize outcome
+        # Categorize outcome — score_delta from API is the ground truth.
+        # Pixel-based delta is a secondary signal when score is flat.
         if not cf.frame_changed:
             cf.was_wasted = True
+        elif cf.score_delta > 0:
+            # API says we scored — this is definitively productive
+            cf.was_productive = True
+        elif cf.score_delta < 0:
+            # API says we lost — this is definitively destructive
+            cf.was_destructive = True
         elif cf.goal_progress_delta > 0:
+            # Score flat but workspace delta improved — cautiously productive
             cf.was_productive = True
         elif cf.goal_progress_delta < 0:
+            # Score flat but workspace delta worsened
             cf.was_destructive = True
         elif cf.goal_cells_total > 0:
-            cf.was_neutral = True  # Frame changed but goal didn't improve
+            cf.was_neutral = True  # Frame changed but neither score nor delta moved
         # If no goal detected yet, frame_changed is the only signal
 
     def _check_hud_state(self, cf: CognitiveFrame, frame_array: Optional[np.ndarray]):
@@ -1144,28 +1171,29 @@ class CognitiveLoop:
         cf.spatial_confidence = percept.spatial_confidence
         cf.overall_confidence = percept.overall_confidence
 
-        # ═══ GAP 1: Enrich with stable-region goal detection ═══
+        # ═══ GAP 1: Enrich with stable-region workspace detection ═══
         # If the perceiver's Channel 3 didn't find a goal (reference_panel
-        # is None), try our frame-history approach instead.
+        # is None), use our frame-history approach to identify the workspace
+        # and track modification coverage.
         if not percept.has_goal and self._stable_mask is not None:
             frame_array = self._perceiver._to_numpy(frame)
             if frame_array is not None:
-                goal_total, goal_correct = self._compute_goal_from_stable_regions(
+                goal_total, cells_modified = self._compute_workspace_delta(
                     frame_array
                 )
                 if goal_total > 0:
                     cf.goal_cells_total = goal_total
-                    cf.goal_cells_correct = goal_correct
-                    cf.goal_completion = goal_correct / max(goal_total, 1)
+                    cf.goal_cells_correct = cells_modified
+                    cf.goal_completion = cells_modified / max(goal_total, 1)
                     cf.stable_region_detected = True
                     self._goal_cells_total = goal_total  # loop-level
-                    # Also update the percept for downstream use
+                    # Update percept so downstream strategy can use it
                     percept.cells_total = goal_total
-                    percept.cells_matching_goal = goal_correct
-                    percept.goal_progress = goal_correct / max(goal_total, 1)
+                    percept.cells_matching_goal = cells_modified
+                    percept.goal_progress = cells_modified / max(goal_total, 1)
                     percept.has_goal = True
                     # Store delta count for strategy
-                    cf.delta_count = goal_total - goal_correct
+                    cf.delta_count = goal_total - cells_modified
                     self._last_goal_delta_count = cf.delta_count
 
         # ═══ GAP 5: Detect agent position on first frame ═══
@@ -1466,28 +1494,31 @@ class CognitiveLoop:
                 logger.debug(f"[COGNITIVE-LOOP] Rung system failed: {e}")
 
         # ─── SPEED 3: EXPLORE (maximize information gain) ─────────────
-        import random
 
         # --- 3a: Goal-guided exploration for click games ---
-        # If we have goal awareness AND productive targets, prefer those
+        # If we have goal awareness AND productive targets, rotate among
+        # the top candidates to avoid fixating on one position.
         if self._causal_map and 6 in self._available_actions:
             productive = self._causal_map.get_productive_targets()
             if productive and self._goal_cells_total > 0:
-                # We have goal awareness and know which spots help
-                best_pos = productive[0][0]  # highest productivity rate
+                # Rotate among top-3 productive positions
+                top_n = min(3, len(productive))
+                idx = self._productive_rotation_index % top_n
+                self._productive_rotation_index += 1
+                chosen_pos = productive[idx][0]
+                rate = productive[idx][1]
                 action_num = 6
-                action_data = {'x': best_pos[0], 'y': best_pos[1]}
-                rate = productive[0][1]
+                action_data = {'x': chosen_pos[0], 'y': chosen_pos[1]}
 
                 cf.action_speed = "explore"
                 cf.action_type = 6
-                cf.action_x = best_pos[0]
-                cf.action_y = best_pos[1]
-                cf.action_reason = f"Guided: productive_rate={rate:.2f}"
+                cf.action_x = chosen_pos[0]
+                cf.action_y = chosen_pos[1]
+                cf.action_reason = f"Guided: productive_rate={rate:.2f} [#{idx+1}/{top_n}]"
                 cf.action_confidence = min(0.8, rate)
                 cf.action_summary = (
-                    f"EXPLORE-GUIDED: Click ({best_pos[0]},{best_pos[1]})"
-                    f" | productive_rate={rate:.2f}"
+                    f"EXPLORE-GUIDED: Click ({chosen_pos[0]},{chosen_pos[1]})"
+                    f" | productive_rate={rate:.2f} [#{idx+1}/{top_n}]"
                 )
                 return action_num, action_data
 
@@ -1530,8 +1561,25 @@ class CognitiveLoop:
             )
             return action_num, action_data
 
-        # --- 3d: Wall-avoiding exploration for movement games ---
+        # --- 3c.5: Occasional pan for hybrid games (e.g. FT09) ---
+        # Hybrid games have both click (6) and movement/pan (1-4) actions.
+        # Sections 3a-3c always return clicks, so pan is never explored.
+        # Periodically choose a pan action to discover other quadrants.
         movement_actions = [a for a in self._available_actions if a in (1, 2, 3, 4)]
+        if movement_actions and 6 in self._available_actions:
+            # Hybrid game: pan every 5th EXPLORE action
+            if self._actions_taken % 5 == 0:
+                action_num = random.choice(movement_actions)
+                cf.action_speed = "explore"
+                cf.action_type = action_num
+                cf.action_reason = "Explore: pan to new quadrant (hybrid game)"
+                cf.action_summary = (
+                    f"EXPLORE-PAN: ACTION{action_num}"
+                    f" | periodic quadrant discovery"
+                )
+                return action_num, None
+
+        # --- 3d: Wall-avoiding exploration for movement-only games ---
         if movement_actions and self._causal_map:
             # Filter out known walls from current position
             pos = self._agent_position
@@ -1564,7 +1612,7 @@ class CognitiveLoop:
                 f"EXPLORE-MOVE: ACTION{action_num}"
                 f" | pos={pos} | {cf.action_reason}"
             )
-            return action_num, action_data
+            return action_num, None
 
         # Absolute fallback: random available action
         action_num = random.choice(self._available_actions)
@@ -1589,7 +1637,6 @@ class CognitiveLoop:
         3. Positions with non-background colors
         4. Random position within interactive bounds
         """
-        import random
 
         # Strategy 1: Click objects we haven't clicked yet
         # For click games, prefer small discrete objects (tiles/buttons) over
