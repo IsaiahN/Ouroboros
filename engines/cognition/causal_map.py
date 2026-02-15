@@ -35,14 +35,26 @@ class TileEffect:
     position: Tuple[int, int]              # (x, y) of the clicked tile
     affected: List[Tuple[int, int]]        # Positions that change when this is clicked
     color_transitions: Dict[Tuple[int, int], List[Tuple[int, int]]]
-    # {(x,y): [(old_color, new_color), ...]} — observed color changes
+    # {(x,y): [(old_color, new_color), ...]} -- observed color changes
     observation_count: int = 0
     last_frame_changed: bool = True
     confidence: float = 0.0
+    # Gap 4: Track goal-directedness of this effect
+    productive_count: int = 0              # Times clicking here moved toward goal
+    destructive_count: int = 0             # Times clicking here moved away from goal
+    neutral_count: int = 0                 # Times clicking here changed nothing goal-relevant
 
     def __post_init__(self):
         """Update confidence from observation count."""
         self.confidence = min(0.95, 0.3 + (self.observation_count * 0.15))
+
+    @property
+    def productivity_rate(self) -> float:
+        """How often clicking here is productive (0-1)."""
+        total = self.productive_count + self.destructive_count + self.neutral_count
+        if total == 0:
+            return 0.5  # Unknown
+        return self.productive_count / total
 
 
 @dataclass
@@ -108,6 +120,18 @@ class CausalMap:
         self._color_cycles: Dict[Tuple[int, int], List[int]] = {}
         # {(x,y): [color_a, color_b, color_a, ...]}
 
+        # Movement knowledge (Gap 3C / Gap 5 -- for movement games)
+        self._walls: Set[Tuple[Tuple[int, int], int]] = set()
+        # {((x, y), action_type)} -- blocked movement from position
+        self._open_paths: Set[Tuple[Tuple[int, int], int]] = set()
+        # {((x, y), action_type)} -- successful movement from position
+        self._visited_positions: Set[Tuple[int, int]] = set()
+        # All positions the agent has occupied
+
+        # Delayed effect tracking (Gap 4 -- for VC33-style games)
+        self._delayed_observations: List[Dict[str, Any]] = []
+        # Frames observed after an action, for detecting delayed effects
+
     # ─── Public Properties ────────────────────────────────────────────
 
     @property
@@ -160,6 +184,44 @@ class CausalMap:
         self._plan_step += 1
         if self._plan_step >= len(self._plan):
             self._plan_valid = False
+
+    # ─── Goal Progress Feedback (Gap 4) ───────────────────────────────
+
+    def record_goal_progress(
+        self,
+        click_pos: Tuple[int, int],
+        goal_delta_before: int,
+        goal_delta_after: int,
+    ):
+        """
+        Record whether an action moved toward or away from the goal.
+
+        This is the key feedback signal that makes the causal map
+        GOAL-DIRECTED, not just effect-tracking.
+        """
+        effect = self._effects.get(click_pos)
+        if effect is None:
+            return
+
+        progress = goal_delta_before - goal_delta_after
+        if progress > 0:
+            effect.productive_count += 1
+        elif progress < 0:
+            effect.destructive_count += 1
+        else:
+            effect.neutral_count += 1
+
+    def get_productive_targets(self) -> List[Tuple[Tuple[int, int], float]]:
+        """Get positions sorted by productivity rate (best first).
+
+        Returns list of (position, productivity_rate) for positions
+        that have been productive at least once.
+        """
+        productive = []
+        for pos, eff in self._effects.items():
+            if eff.productive_count > 0:
+                productive.append((pos, eff.productivity_rate))
+        return sorted(productive, key=lambda x: x[1], reverse=True)
 
     # ─── Writing to the Map (from ACT feedback) ──────────────────────
 
@@ -275,8 +337,9 @@ class CausalMap:
         Returns an ordered list of actions that should transform
         current state into goal state, based on known causal effects.
 
-        This is the 'leapfrog': if the map is complete enough,
-        we can PLAN instead of SEARCH.
+        Gap 3: Enhanced with color cycle awareness -- if we know a
+        position cycles through [A, B, C], and current=A, goal=C,
+        we need 2 clicks, not 1.
         """
         if not self._goal_cells or not self._current_cells:
             return []
@@ -292,26 +355,52 @@ class CausalMap:
             # Already at goal!
             return []
 
-        # Simple greedy planning: for each cell that needs to change,
-        # find an effect that changes it in the right direction
         plan = []
         step = 0
 
         for target_pos, (current_c, goal_c) in delta.items():
-            # Find an effect that changes this position
+            # Strategy 1: Use color cycle knowledge for direct computation
+            cycle = self._color_cycles.get(target_pos, [])
+            if len(cycle) >= 2:
+                # Deduplicate to find the cycle pattern
+                unique_cycle = []
+                for c in cycle:
+                    if not unique_cycle or c != unique_cycle[-1]:
+                        unique_cycle.append(c)
+                # Check if both colors are in the cycle
+                if current_c in unique_cycle and goal_c in unique_cycle:
+                    ci = unique_cycle.index(current_c)
+                    gi = unique_cycle.index(goal_c)
+                    # Compute forward clicks needed
+                    clicks_needed = (gi - ci) % len(unique_cycle)
+                    if clicks_needed == 0:
+                        clicks_needed = len(unique_cycle)  # Full cycle
+                    # Find click position that affects this target
+                    click_at = self._find_click_for_target(target_pos)
+                    if click_at is not None:
+                        for _ in range(clicks_needed):
+                            plan.append(PlannedAction(
+                                position=click_at,
+                                expected_changes=[(target_pos[0], target_pos[1], current_c, goal_c)],
+                                reason=f"Cycle ({target_pos[0]},{target_pos[1]}) {current_c}->{goal_c} ({clicks_needed} clicks)",
+                                step_number=step,
+                                confidence=min(0.9, 0.4 + len(unique_cycle) * 0.1),
+                            ))
+                            step += 1
+                        continue
+
+            # Strategy 2: Find any effect that produces the desired transition
             best_click = None
             best_changes = []
 
             for click_pos, effect in self._effects.items():
                 if target_pos in [p for p in effect.affected]:
-                    # This click affects our target position
                     transitions = effect.color_transitions.get(target_pos, [])
                     for old_c, new_c in transitions:
                         if old_c == current_c and new_c == goal_c:
-                            # Perfect match
                             expected = [
                                 (p[0], p[1], current_c, goal_c)
-                                for p in effect.affected[:5]  # Limit
+                                for p in effect.affected[:5]
                             ]
                             best_click = click_pos
                             best_changes = expected
@@ -333,6 +422,17 @@ class CausalMap:
         self._plan_valid = len(plan) > 0
         self._plan_step = 0
         return plan
+
+    def _find_click_for_target(self, target_pos: Tuple[int, int]) -> Optional[Tuple[int, int]]:
+        """Find which position to click to affect the target position."""
+        # First check: does clicking the target itself affect it?
+        if target_pos in self._effects and target_pos in self._effects[target_pos].affected:
+            return target_pos
+        # Otherwise search all effects for one that affects this target
+        for click_pos, effect in self._effects.items():
+            if target_pos in effect.affected:
+                return click_pos
+        return target_pos  # Default: try clicking the target directly
 
     # ─── Information Gain ─────────────────────────────────────────────
 
@@ -516,6 +616,40 @@ class CausalMap:
         """Mark the current plan as potentially invalid."""
         self._plan_valid = False
 
+    # ─── Movement Knowledge (Gap 3C / Gap 5) ─────────────────────────
+
+    def record_movement_result(
+        self,
+        action_type: int,
+        agent_pos_before: Optional[Tuple[int, int]],
+        agent_pos_after: Optional[Tuple[int, int]],
+    ):
+        """
+        Record whether a directional action moved the agent.
+
+        For movement games: tracks walls (action didn't move)
+        and open paths (action did move). This builds a spatial
+        map for pathfinding (Gap 3C).
+        """
+        if agent_pos_before is None or agent_pos_after is None:
+            return
+        moved = agent_pos_before != agent_pos_after
+        if not moved:
+            # Wall detected: from this position, this direction is blocked
+            self._walls.add((agent_pos_before, action_type))
+        else:
+            # Open path: from this position, this direction works
+            self._open_paths.add((agent_pos_before, action_type))
+            self._visited_positions.add(agent_pos_after)
+
+    def is_wall(self, position: Tuple[int, int], action: int) -> bool:
+        """Check if moving in a direction from a position is blocked."""
+        return (position, action) in self._walls
+
+    def get_visited_positions(self) -> Set[Tuple[int, int]]:
+        """Get all positions the agent has visited."""
+        return self._visited_positions
+
     # ─── Import from existing world_model dict ────────────────────────
 
     def import_from_world_model(self, world_model: Dict[str, Any]):
@@ -586,7 +720,13 @@ class CausalMap:
     def summary(self) -> str:
         """One-line summary for logging."""
         rules_str = ", ".join(r.rule_type for r in self._rules) if self._rules else "none"
+        wall_str = ""
+        if self._walls:
+            wall_str = f" walls:{len(self._walls)}"
+        productive = sum(1 for e in self._effects.values() if e.productive_count > 0)
+        prod_str = f" productive:{productive}" if productive else ""
         return (
             f"[MAP] effects:{len(self._effects)} explored:{len(self._explored)}/{len(self._all_positions)} "
             f"rules:[{rules_str}] complete:{self.completeness:.0%} plan:{'yes' if self.has_plan else 'no'}"
+            f"{wall_str}{prod_str}"
         )

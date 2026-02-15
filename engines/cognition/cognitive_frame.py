@@ -83,6 +83,28 @@ class CognitiveFrame:
     result_summary: str = ""
     # e.g. "Frame changed | 2 cells flipped | score +0.1 | [PROGRESS]"
 
+    # ─── GAP 4: RICH ACTION OUTCOME ──────────────────────────────────
+    pixels_changed: int = 0            # Raw pixel count that changed
+    goal_delta_before: int = 0         # Cells wrong before action
+    goal_delta_after: int = 0          # Cells wrong after action
+    goal_progress_delta: int = 0       # delta_before - delta_after (positive = good)
+    was_productive: bool = False       # goal_progress_delta > 0
+    was_destructive: bool = False      # goal_progress_delta < 0
+    was_neutral: bool = False          # frame changed but goal didn't improve
+    was_wasted: bool = False           # frame didn't change at all
+
+    # ─── GAP 5: STATE TRACKING ───────────────────────────────────────
+    timer_fraction: float = 1.0        # 0.0 to 1.0 (estimated from frame edges)
+    timer_urgency: str = "safe"        # "safe", "moderate", "critical"
+    hud_state_hash: int = 0            # Hash of HUD region for change detection
+    hud_state_changed: bool = False    # Did the HUD change this step?
+
+    # ─── GAP 1: GOAL-STATE FROM STABLE REGIONS ──────────────────────
+    stable_region_detected: bool = False
+    goal_cells_total: int = 0          # Total cells that must match
+    goal_cells_correct: int = 0        # Currently matching cells
+    goal_completion: float = 0.0       # correct / total
+
     def to_log_line(self) -> str:
         """Single-line log output for quick scanning."""
         act_str = f"A{self.action_type}"
@@ -91,12 +113,20 @@ class CognitiveFrame:
         result = "OK" if self.frame_changed else "NO-CHG"
         if self.level_changed:
             result = "LEVEL-UP"
+        # Append goal-progress indicator
+        goal_tag = ""
+        if self.goal_cells_total > 0:
+            goal_tag = f" G:{self.goal_cells_correct}/{self.goal_cells_total}"
+        if self.was_productive:
+            goal_tag += "[+]"
+        elif self.was_destructive:
+            goal_tag += "[-]"
         return (
             f"[{self.action_number:3d}] "
             f"P:{self.perception_summary[:40]:40s} | "
             f"T:{self.strategy:8s} cert:{self.certainty:.2f} | "
             f"M:{self.map_completeness:.0%} | "
-            f"{self.action_speed:8s} {act_str:12s} -> {result}"
+            f"{self.action_speed:8s} {act_str:12s} -> {result}{goal_tag}"
         )
 
     def to_dashboard(self) -> str:
@@ -154,4 +184,19 @@ class CognitiveFrame:
             'salience': self.salience,
             'momentum': self.momentum,
             'dominant_contributors': self.dominant_contributors,
+            # Gap 4: Rich action outcome
+            'pixels_changed': self.pixels_changed,
+            'goal_delta_before': self.goal_delta_before,
+            'goal_delta_after': self.goal_delta_after,
+            'goal_progress_delta': self.goal_progress_delta,
+            'was_productive': self.was_productive,
+            'was_destructive': self.was_destructive,
+            'was_wasted': self.was_wasted,
+            # Gap 5: State tracking
+            'timer_urgency': self.timer_urgency,
+            'hud_state_changed': self.hud_state_changed,
+            # Gap 1: Goal-state
+            'goal_cells_total': self.goal_cells_total,
+            'goal_cells_correct': self.goal_cells_correct,
+            'goal_completion': self.goal_completion,
         }

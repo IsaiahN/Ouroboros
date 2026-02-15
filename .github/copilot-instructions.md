@@ -403,8 +403,8 @@ action executed -> frame extracted -> coordinates captured -> notify_action_comp
 **Action**:
 1. Check that `context['visual_scene']` is populated with detected objects
 2. Check that the coordinate provider reads visual_scene objects
-3. Check that FT09's `available_actions=[6]` (click-only, no directional)
-4. Verify at least N distinct positions are being clicked per game (should be >=5 for a 9-cell grid)
+3. Check FT09's `available_actions=[1,2,3,4,5,6]` (hybrid: camera pan + click), LS20's `[1,2,3,4]` (movement only), VC33's `[6]` (click only)
+4. Verify at least N distinct positions are being clicked per game (should be >=10 for FT09's 32x32 grid with 16x16 viewport)
 
 ### 3.6 The Pipeline Health Check Protocol
 
@@ -479,8 +479,8 @@ When you see a generation's run log, analyze it in this exact order:
 For each agent's game session, check:
 
 **Action diversity**: Count unique (action_type, x, y) triples.
-- FT09: Should have >=5 unique positions (9-cell grid)
-- VC33: Should have >=10 unique positions (larger grid)
+- FT09: Should have >=10 unique positions (32x32 grid, 16x16 viewport, hybrid game with camera pan)
+- VC33: Should have >=5 unique positions (click-only, switch locations)
 - LS20: Should have all 4 directional actions represented
 
 **Rung diversity**: Count unique rung names.
@@ -544,11 +544,11 @@ scene.narrative        # Human-readable scene description
 
 ### 5.3 What To Look For
 
-**FT09 (click game, 6 levels)**:
-- Should see distinct colored cells in a grid pattern
-- Clicking a cell should toggle it and neighbors (von Neumann neighborhood)
-- Reference panel shows the goal state
-- Key metric: how many unique positions clicked, and did any produce frame changes
+**FT09 (hybrid game, 6 levels, actions=[1,2,3,4,5,6])**:
+- 32x32 grid with 16x16 camera viewport. Actions 1-4 PAN the camera to different quadrants.
+- Multiple mini-puzzles per level. Constraint sprites encode target colors for adjacent tiles.
+- Clicking a tile cycles its color through the level's palette. Standard tiles affect ONLY the clicked tile.
+- Key metric: positions clicked across all visible quadrants, frame changes per click, constraint satisfaction
 
 **LS20 (movement game, navigation)**:
 - Agent moves through a maze-like environment
@@ -556,10 +556,10 @@ scene.narrative        # Human-readable scene description
 - Key metric: wall-hit rate (should decrease over time as agent learns walls)
 - Key metric: unique positions visited (exploration coverage)
 
-**VC33 (click game, 7 levels)**:
-- Objects on a grid that can be clicked to produce effects
-- More complex spatial relationships (passengers, markers, conveyors)
-- Key metric: frame change rate per click, unique positions clicked
+**VC33 (click game, 7 levels, actions=[6])**:
+- Click-only game with switches that control dynamic systems (fluid/flow mechanics)
+- Effects are DELAYED -- clicking a switch changes system state, which causes movement over subsequent frames
+- Key metric: frame change rate WITHIN 5-10 frames after click (not just immediate), unique switch positions
 
 ### 5.4 Rendering Frames for Visual Inspection
 
