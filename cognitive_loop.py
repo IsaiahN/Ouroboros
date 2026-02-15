@@ -253,6 +253,7 @@ class CognitiveLoop:
         self,
         decision_system: Any = None,
         context_builder: Any = None,
+        db: Any = None,
         verbose: bool = False,
     ):
         """
@@ -261,10 +262,12 @@ class CognitiveLoop:
         Args:
             decision_system: DecisionRungSystem instance (for REASONED speed)
             context_builder: ContextBuilder instance (for backward compat context)
+            db: Database interface for loading prior knowledge
             verbose: Print cognitive frames to console
         """
         self._decision_system = decision_system
         self._context_builder = context_builder
+        self._db = db
         self._verbose = verbose
 
         # Core components
@@ -293,6 +296,11 @@ class CognitiveLoop:
 
         # Last action info (for temporal perception)
         self._last_action_info: Optional[Dict[str, Any]] = None
+
+        # Prior knowledge state
+        self._prior_knowledge_loaded: bool = False
+        self._prior_effects_count: int = 0  # How many position effects loaded from DB
+        self._prior_rules_count: int = 0    # How many rules loaded from DB
 
     # ─── Game Lifecycle ───────────────────────────────────────────────
 
@@ -325,6 +333,17 @@ class CognitiveLoop:
         self._bb_adapter.reset()
         self._phenomenology.reset()
 
+        # Reset prior knowledge state
+        self._prior_knowledge_loaded = False
+        self._prior_effects_count = 0
+        self._prior_rules_count = 0
+
+        # ═══ LOAD PRIOR KNOWLEDGE FROM DATABASE ═══
+        # This is the key difference from a blank-slate approach:
+        # we seed the causal map with knowledge from prior games,
+        # so the agent starts with understanding, not ignorance.
+        self._load_prior_knowledge(game_id)
+
         # Import any existing causal knowledge from context builder
         if self._context_builder is not None:
             try:
@@ -338,6 +357,14 @@ class CognitiveLoop:
             print(f"\n[COGNITIVE-LOOP] Game started: {game_id}")
             print(f"    Available actions: {available_actions}")
             print(f"    Budget: {max_actions} actions")
+            if self._prior_knowledge_loaded:
+                print(
+                    f"    Prior knowledge: {self._prior_effects_count} effects, "
+                    f"{self._prior_rules_count} rules loaded"
+                )
+                print(f"    {self._causal_map.summary()}")
+            else:
+                print("    Prior knowledge: none (first encounter)")
 
     def end_game(self) -> List[CognitiveFrame]:
         """End the game and return the replay."""
@@ -349,6 +376,211 @@ class CognitiveLoop:
             if self._causal_map:
                 print(f"    {self._causal_map.summary()}")
         return self._frames
+
+    # ─── Prior Knowledge Loading ──────────────────────────────────────
+
+    def _load_prior_knowledge(self, game_id: str):
+        """
+        Load accumulated knowledge from the database into the causal map.
+
+        This is what makes the system LEARN ACROSS GAMES rather than
+        starting from scratch. We load:
+
+        1. World model states — causal maps from prior sessions with
+           this same game, containing position-effect mappings that
+           were empirically discovered.
+
+        2. Action effectiveness — which actions produce frame changes
+           for this game type, so the agent knows what kinds of actions
+           are productive before taking its first step.
+
+        3. Game lessons — distilled insights from hundreds of games,
+           like "clicking toggles neighbors" or "avoid edges."
+
+        The loaded knowledge seeds the causal map with non-zero
+        completeness, which shifts strategy from "explore" (random)
+        to "experiment"/"exploit" (rung-system-informed), so the
+        cognitive architecture actually gets used.
+        """
+        if self._db is None:
+            return
+
+        import json
+
+        game_type = game_id[:4] if len(game_id) >= 4 else game_id
+        effects_loaded = 0
+        rules_loaded = 0
+
+        # ─── 1. Load best causal map from prior sessions ─────────────
+        try:
+            # Get the most complete world model state for this game
+            # (the one from the session with the most steps = most knowledge)
+            rows = self._db.execute_query("""
+                SELECT objects_json FROM world_model_states
+                WHERE game_id = ?
+                ORDER BY step_number DESC
+                LIMIT 1
+            """, (game_id,))
+
+            if rows and rows[0]:
+                obj_json = rows[0].get('objects_json') if isinstance(rows[0], dict) else rows[0][0]
+                if obj_json:
+                    data = json.loads(obj_json)
+                    causal_data = data.get('causal_map', {})
+
+                    for pos_key, effect_data in causal_data.items():
+                        try:
+                            if isinstance(pos_key, str):
+                                parts = pos_key.strip('()').split(',')
+                                pos = (int(parts[0].strip()), int(parts[1].strip()))
+                            elif isinstance(pos_key, tuple):
+                                pos = pos_key
+                            else:
+                                continue
+
+                            # Import into causal map
+                            observations = effect_data.get('observations', [])
+                            if observations:
+                                # Determine if this position produces changes
+                                any_change = any(
+                                    len(obs.get('changes', [])) > 0
+                                    for obs in observations
+                                )
+                                affected = []
+                                color_transitions = {}
+
+                                for obs in observations:
+                                    for ch in obs.get('changes', []):
+                                        cell = (ch.get('x', 0), ch.get('y', 0))
+                                        if cell not in affected:
+                                            affected.append(cell)
+                                        from_c = ch.get('from_color', 0)
+                                        to_c = ch.get('to_color', 0)
+                                        color_transitions[f"{cell}"] = {
+                                            'from': from_c, 'to': to_c
+                                        }
+
+                                from engines.cognition.causal_map import TileEffect
+                                self._causal_map._effects[pos] = TileEffect(
+                                    position=pos,
+                                    affected=affected,
+                                    color_transitions=color_transitions,
+                                    observation_count=len(observations),
+                                    last_frame_changed=any_change,
+                                )
+                                self._causal_map._explored.add(pos)
+                                self._causal_map._all_positions.add(pos)
+                                effects_loaded += 1
+
+                        except Exception:
+                            continue
+
+        except Exception as e:
+            logger.debug(f"[PRIOR-KNOWLEDGE] World model load failed: {e}")
+
+        # ─── 2. Load action effectiveness for this game ──────────────
+        try:
+            rows = self._db.execute_query("""
+                SELECT action_number, success_rate, attempts, successes
+                FROM action_effectiveness
+                WHERE game_id = ?
+            """, (game_id,))
+
+            if rows:
+                for row in rows:
+                    if isinstance(row, dict):
+                        action_num = row.get('action_number', 0)
+                        success_rate = row.get('success_rate', 0.0)
+                    else:
+                        action_num = row[0]
+                        success_rate = row[1] if len(row) > 1 else 0.0
+
+                    # Store as a rule-like insight
+                    if success_rate > 0.5:
+                        from engines.cognition.causal_map import CausalRule
+                        self._causal_map._rules.append(CausalRule(
+                            rule_type=f"action{action_num}_effective",
+                            description=(
+                                f"ACTION{action_num} produces frame changes "
+                                f"{success_rate:.0%} of the time"
+                            ),
+                            evidence_count=1,
+                            confidence=min(0.8, success_rate),
+                        ))
+                        rules_loaded += 1
+
+        except Exception as e:
+            logger.debug(f"[PRIOR-KNOWLEDGE] Action effectiveness load failed: {e}")
+
+        # ─── 3. Load game lessons ────────────────────────────────────
+        try:
+            rows = self._db.execute_query("""
+                SELECT lesson_text, lesson_type, confidence, key_action
+                FROM game_lessons_learned
+                WHERE game_type = ? AND confidence > 0.5
+                ORDER BY times_retrieved DESC, confidence DESC
+                LIMIT 10
+            """, (game_type,))
+
+            if rows:
+                for row in rows:
+                    if isinstance(row, dict):
+                        lesson = row.get('lesson_text', '')
+                        lesson_type = row.get('lesson_type', 'info')
+                        confidence = row.get('confidence', 0.5)
+                    else:
+                        lesson = row[0] if row else ''
+                        lesson_type = row[1] if len(row) > 1 else 'info'
+                        confidence = row[2] if len(row) > 2 else 0.5
+
+                    # Store as rules in the causal map
+                    from engines.cognition.causal_map import CausalRule
+                    self._causal_map._rules.append(CausalRule(
+                        rule_type=f"lesson_{lesson_type}",
+                        description=str(lesson)[:200],
+                        evidence_count=1,
+                        confidence=float(confidence) * 0.7,  # Discount slightly
+                    ))
+                    rules_loaded += 1
+
+        except Exception as e:
+            logger.debug(f"[PRIOR-KNOWLEDGE] Game lessons load failed: {e}")
+
+        # ─── 4. Load death zones as anti-knowledge ───────────────────
+        try:
+            rows = self._db.execute_query("""
+                SELECT x_min, x_max, y_min, y_max, danger_score
+                FROM death_zones
+                WHERE game_type = ? AND is_active = 1
+                ORDER BY danger_score DESC
+                LIMIT 20
+            """, (game_type,))
+
+            if rows:
+                for row in rows:
+                    if isinstance(row, dict):
+                        x_min = row.get('x_min', 0)
+                        x_max = row.get('x_max', 0)
+                        y_min = row.get('y_min', 0)
+                        y_max = row.get('y_max', 0)
+                    else:
+                        x_min, x_max, y_min, y_max = row[0], row[1], row[2], row[3]
+
+                    # Mark these positions as explored-and-dangerous
+                    for x in range(x_min, x_max + 1):
+                        for y in range(y_min, y_max + 1):
+                            pos = (x, y)
+                            self._causal_map._explored.add(pos)
+                            self._causal_map._all_positions.add(pos)
+
+        except Exception as e:
+            logger.debug(f"[PRIOR-KNOWLEDGE] Death zones load failed: {e}")
+
+        # ─── Summary ─────────────────────────────────────────────────
+        if effects_loaded > 0 or rules_loaded > 0:
+            self._prior_knowledge_loaded = True
+            self._prior_effects_count = effects_loaded
+            self._prior_rules_count = rules_loaded
 
     # ─── The Main Loop: Perceive -> Think -> Map -> Act ───────────────
 
@@ -635,7 +867,9 @@ class CognitiveLoop:
         self._phenomenology.inject(felt)
 
         # Derive action strategy from FeltState + game signals
-        strategy = self._derive_strategy(felt, percept)
+        strategy = self._derive_strategy(
+            felt, percept, _prior_loaded=self._prior_knowledge_loaded
+        )
 
         # Track strategy history for stability computation
         self._bb_adapter._recent_strategies.append(strategy)
@@ -678,7 +912,11 @@ class CognitiveLoop:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _derive_strategy(felt: FeltState, percept: PerceptualField) -> str:
+    def _derive_strategy(
+        felt: FeltState,
+        percept: PerceptualField,
+        _prior_loaded: bool = False,
+    ) -> str:
         """
         Derive action strategy from FeltState + game state.
 
@@ -687,6 +925,10 @@ class CognitiveLoop:
           exploit   - Good understanding, use what we know
           experiment - Something is wrong, break out of local optimum
           explore   - Low understanding, gather information
+
+        When prior knowledge is loaded, we lower the thresholds for
+        exploit/experiment so the rung system gets used from the start
+        instead of defaulting to pure exploration.
         """
         # EXECUTE: plan ready + confident + positive valence
         if (
@@ -704,13 +946,22 @@ class CognitiveLoop:
         if percept.consecutive_no_change > 8:
             return "experiment"
 
+        # With prior knowledge, we start with enough understanding to
+        # use the rung system (experiment/exploit) rather than random explore.
+        if _prior_loaded:
+            # EXPLOIT: even modest map coverage suffices with prior knowledge
+            if percept.map_completeness > 0.1 or felt.certainty > 0.2:
+                return "exploit"
+            # EXPERIMENT: we have knowledge, try applying it
+            return "experiment"
+
         # EXPLOIT: medium-high certainty with some map coverage
         if felt.certainty > 0.5 and percept.map_completeness > 0.4:
             return "exploit"
         if felt.valence == Valence.OPPORTUNITY and felt.agency > 0.5:
             return "exploit"
 
-        # EXPLORE: default — gather information
+        # EXPLORE: default -- gather information
         return "explore"
 
     def _consult_map(

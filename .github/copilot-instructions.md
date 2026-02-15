@@ -29,7 +29,7 @@
 - **Why**: Isolated dependencies, reproducible environment, no system conflicts
 
 **Verify venv is active**:
-```powershell
+```powershellru
 python -c "import sys; print(sys.prefix)"
 # Should output: C:\Users\Admin\Documents\GitHub\BitterTruth-AI\.venv
 # If it shows system Python path, venv is NOT active!

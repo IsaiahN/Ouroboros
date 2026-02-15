@@ -71,6 +71,7 @@ class CognitiveGamePlayer:
         loop = CognitiveLoop(
             decision_system=self._gp.decision_system,
             context_builder=self._gp.context_builder,
+            db=self._gp.db,
             verbose=self._verbose,
         )
 
@@ -130,6 +131,29 @@ class CognitiveGamePlayer:
         total_coord_attempts = 0
         total_coord_successes = 0
 
+        # ═══ FALLBACK: Load winning sequences (used only if cognitive loop stalls) ═══
+        fallback_sequence: List[str] = []
+        fallback_position = 0
+        fallback_active = False
+        fallback_threshold = min(150, self._gp.max_actions // 5)
+        # Only load sequences as a safety net -- cognitive loop is primary
+        game_type = game_id[:4] if len(game_id) >= 4 else game_id
+        try:
+            result = self._gp.db.execute_query("""
+                SELECT action_sequence FROM winning_sequences
+                WHERE game_type = ? AND level_number = 1 AND is_active = 1
+                ORDER BY efficiency_score DESC LIMIT 1
+            """, (game_type,))
+            if result:
+                import json
+                seq_data = result[0].get('action_sequence') if isinstance(result[0], dict) else result[0][0]
+                if seq_data:
+                    fallback_sequence = json.loads(seq_data) if isinstance(seq_data, str) else list(seq_data)
+                    if self._verbose:
+                        print(f"    [FALLBACK] Sequence loaded ({len(fallback_sequence)} actions) -- will use if stuck after {fallback_threshold} actions")
+        except Exception:
+            pass
+
         # ========== COGNITIVE GAME LOOP ==========
         while actions_taken < self._gp.max_actions:
             if not is_running_fn():
@@ -138,18 +162,57 @@ class CognitiveGamePlayer:
             obs = last_obs if last_obs else initial_obs
             current_available = getattr(obs, 'available_actions', None) or available_actions
 
+            # ═══ FALLBACK CHECK: If stuck too long with no progress, switch to replay ═══
+            if (
+                not fallback_active
+                and fallback_sequence
+                and actions_taken >= fallback_threshold
+                and prev_levels == 0
+            ):
+                fallback_active = True
+                fallback_position = 0
+                if self._verbose:
+                    print(f"    [FALLBACK-ACTIVE] No progress after {actions_taken} actions, replaying winning sequence")
+
             # Get frame
             frame = getattr(obs, 'frame', None)
 
-            # ═══ COGNITIVE LOOP CYCLE ═══
-            action_num, action_data, cf = loop.cycle(
-                frame=frame,
-                obs=obs,
-                agent_id=agent.agent_id,
-                agent_role=getattr(agent, 'role', 'pioneer'),
-                w_A=getattr(agent, 'w_A', 0.5),
-                w_B=getattr(agent, 'w_B', 0.5),
-            )
+            # ═══ ACTION SELECTION: Fallback replay OR cognitive cycle ═══
+            cf = None
+            if fallback_active and fallback_sequence and fallback_position < len(fallback_sequence):
+                # Replay from winning sequence
+                seq_entry = fallback_sequence[fallback_position]
+                fallback_position += 1
+                # Parse sequence entry: can be int, dict with 'action', or ACTION name
+                if isinstance(seq_entry, dict):
+                    action_num = seq_entry.get('action', seq_entry.get('action_num', 1))
+                    action_data = seq_entry.get('data', seq_entry.get('action_data', None))
+                elif isinstance(seq_entry, int):
+                    action_num = seq_entry
+                    action_data = None
+                elif isinstance(seq_entry, str) and seq_entry.startswith('ACTION'):
+                    action_num = int(seq_entry.replace('ACTION', ''))
+                    action_data = None
+                else:
+                    action_num = int(seq_entry) if seq_entry else 1
+                    action_data = None
+                if fallback_position >= len(fallback_sequence):
+                    fallback_active = False
+                    if self._verbose:
+                        print(f"    [FALLBACK-DONE] Sequence exhausted after {fallback_position} actions, returning to cognitive loop")
+            else:
+                # Normal cognitive cycle
+                if fallback_active:
+                    # Sequence ran out, back to cognitive
+                    fallback_active = False
+                action_num, action_data, cf = loop.cycle(
+                    frame=frame,
+                    obs=obs,
+                    agent_id=agent.agent_id,
+                    agent_role=getattr(agent, 'role', 'pioneer'),
+                    w_A=getattr(agent, 'w_A', 0.5),
+                    w_B=getattr(agent, 'w_B', 0.5),
+                )
 
             # Validate action
             if action_num not in current_available:
@@ -299,7 +362,7 @@ class CognitiveGamePlayer:
                 coord_str = ''
                 if action.name == 'ACTION6' and action_data:
                     coord_str = f" @({action_data.get('x', '?')},{action_data.get('y', '?')})"
-                speed = cf.action_speed
+                speed = cf.action_speed if cf else 'FALLBACK'
                 print(
                     f"    [{actions_taken:3d}] {action.name}{coord_str} "
                     f"[{speed}] -> levels={current_levels}/{win_levels} "
