@@ -35,6 +35,16 @@ python -c "import sys; print(sys.prefix)"
 # If it shows system Python path, venv is NOT active!
 ```
 
+### Terminal Management (Background Processes)
+- When a **long-running process** is launched as a background task (e.g., `evolution_runner.py`), **ANY `run_in_terminal` command targeting that same terminal WILL KILL the running process** -- no exceptions
+- The **ONLY safe way** to check on a background process is `get_terminal_output` with the terminal ID -- this reads the output buffer without sending anything to the shell
+- **NEVER** run `Get-Item`, `cat`, `grep`, `python`, or ANY command in a terminal with an active background process
+- **Pattern for safe monitoring**:
+  1. Launch background process in Terminal A (note the terminal ID)
+  2. Use `get_terminal_output` with that ID to peek at output (safe, does not interrupt)
+  3. If you need to run ANY command (file checks, DB queries, git), use a **different terminal**
+- **Why**: `run_in_terminal` sends a command to the shell, which interrupts/kills whatever is currently running in that shell session
+
 ---
 
 ## 16 CRITICAL OPERATING RULES (NON-NEGOTIABLE)

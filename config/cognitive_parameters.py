@@ -153,7 +153,7 @@ class CognitiveParameters:
     phenomenology_transition_cooldown: int = 3   # Cycles before can transition again
 
     # PhenomenologyLayer class constants
-    phenomenology_compression_budget_ms: float = 5.0  # Max ms for compression
+    phenomenology_compression_budget_ms: float = 180_000.0  # Max ms for compression (3 min - this is critical processing)
     phenomenology_max_history: int = 100         # Max FeltState history
     phenomenology_max_trace_log: int = 500       # Max trace entries
 
