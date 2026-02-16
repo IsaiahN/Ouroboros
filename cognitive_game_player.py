@@ -139,6 +139,12 @@ class CognitiveGamePlayer:
         total_coord_attempts = 0
         total_coord_successes = 0
 
+        # Per-level action budget: starts at max_actions (150), extends
+        # by actions_per_level on each level-up. Unused actions carry
+        # forward as a speed bonus for fast solvers.
+        actions_per_level = self._gp.max_actions
+        action_budget = actions_per_level
+
         # ═══ FALLBACK: Load winning sequences (used only if cognitive loop stalls) ═══
         fallback_sequence: List[str] = []
         fallback_position = 0
@@ -163,7 +169,7 @@ class CognitiveGamePlayer:
             pass
 
         # ========== COGNITIVE GAME LOOP ==========
-        while actions_taken < self._gp.max_actions:
+        while actions_taken < action_budget:
             if not is_running_fn():
                 break
 
@@ -364,6 +370,21 @@ class CognitiveGamePlayer:
 
             # Publish events (preserve existing behavior)
             if level_up:
+                # ═══ PER-LEVEL BUDGET EXTENSION ═══
+                # Grant another actions_per_level actions for the new level.
+                # Any unspent actions from previous levels carry forward.
+                old_budget = action_budget
+                action_budget += actions_per_level
+                remaining = action_budget - actions_taken
+                if self._verbose:
+                    print(f"    [BUDGET] Level {current_levels}: "
+                          f"budget {old_budget} -> {action_budget} "
+                          f"({remaining} actions remaining)")
+
+                # Update cognitive loop's internal budget so strategy
+                # planning knows the extended horizon
+                loop._max_actions = action_budget
+
                 # ═══ TIER 2: Snapshot on level-up ═══
                 post_frame_arr = self._get_frame_array(new_obs)
                 self._write_frame_snapshot(
