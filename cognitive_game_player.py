@@ -35,6 +35,13 @@ from evolution_types import AgentState, GameResult
 
 logger = logging.getLogger(__name__)
 
+# Lazy IThread import (may not be available in all configurations)
+try:
+    from engines.consciousness.i_thread import IThread
+    _ITHREAD_AVAILABLE = True
+except ImportError:
+    _ITHREAD_AVAILABLE = False
+
 
 class CognitiveGamePlayer:
     """
@@ -139,6 +146,26 @@ class CognitiveGamePlayer:
         total_coord_attempts = 0
         total_coord_successes = 0
 
+        # ═══ TWO-STREAMS: Load live w_A/w_B from IThread ═══
+        # These weights evolve during gameplay based on action outcomes.
+        self._i_thread = None
+        self._live_w_A = 0.5
+        self._live_w_B = 0.5
+        if _ITHREAD_AVAILABLE:
+            try:
+                self._i_thread = IThread(self._gp.db)
+                state = self._i_thread.get_state(agent.agent_id)
+                self._live_w_A = state.w_a
+                self._live_w_B = state.w_b
+                if self._verbose:
+                    print(
+                        f"    [I-THREAD] Loaded w_A={self._live_w_A:.2f} "
+                        f"w_B={self._live_w_B:.2f} "
+                        f"({state.personality_label})"
+                    )
+            except Exception as e:
+                logger.debug(f"[I-THREAD] Failed to load state: {e}")
+
         # Per-level action budget: starts at max_actions (150), extends
         # by actions_per_level on each level-up. Unused actions carry
         # forward as a speed bonus for fast solvers.
@@ -224,8 +251,8 @@ class CognitiveGamePlayer:
                     obs=obs,
                     agent_id=agent.agent_id,
                     agent_role=getattr(agent, 'role', 'pioneer'),
-                    w_A=getattr(agent, 'w_A', 0.5),
-                    w_B=getattr(agent, 'w_B', 0.5),
+                    w_A=self._live_w_A,
+                    w_B=self._live_w_B,
                     available_actions=current_available,
                 )
 
@@ -324,6 +351,60 @@ class CognitiveGamePlayer:
                     )
                 except Exception:
                     pass
+
+            # ═══ TWO-STREAMS: Learn from action outcome ═══
+            # Update w_A/w_B based on whether the action was productive.
+            # This is the CRITICAL feedback loop that was missing for 5000+ gens.
+            if self._i_thread is not None and cf is not None:
+                try:
+                    # Determine which stream drove this action
+                    speed = cf.action_speed  # 'mapped', 'reasoned', 'explore'
+                    if speed == 'mapped':
+                        # CausalMap plan = private experience (Stream A)
+                        chosen_source = 'stream_a'
+                    elif speed == 'explore':
+                        # Exploration = private experience (Stream A)
+                        chosen_source = 'stream_a'
+                    else:
+                        # Reasoned = rung system, treat as network (Stream B)
+                        chosen_source = 'stream_b'
+
+                    # Determine outcome quality
+                    if level_up:
+                        outcome = 'positive'  # Level completion = strong positive
+                    elif cf.was_productive:
+                        outcome = 'positive'  # Goal progress = positive
+                    elif cf.was_destructive:
+                        outcome = 'negative'  # Goal regression = negative
+                    elif not frame_changed:
+                        outcome = 'negative'  # No effect = wasted action
+                    else:
+                        outcome = 'neutral'   # Frame changed but no goal impact
+
+                    # Only learn from clear signals (skip neutral)
+                    if outcome != 'neutral':
+                        new_w_a, new_w_b = self._i_thread.learn_from_outcome(
+                            agent_id=agent.agent_id,
+                            chosen_source=chosen_source,
+                            outcome=outcome,
+                            game_id=game_id,
+                            level_number=prev_levels + 1,
+                            action_taken=f'ACTION{action_num}',
+                            conflict_score=0.0,
+                            surprise_score=cf.surprise,
+                        )
+                        # Update live weights for next cycle
+                        old_w_a = self._live_w_A
+                        self._live_w_A = new_w_a
+                        self._live_w_B = new_w_b
+                        # Log weight changes (only when they actually shift)
+                        if abs(new_w_a - old_w_a) > 0.001 and self._verbose:
+                            print(
+                                f"    [STREAMS] w_A={new_w_a:.2f} w_B={new_w_b:.2f} "
+                                f"({chosen_source}={outcome})"
+                            )
+                except Exception as e:
+                    logger.debug(f"[I-THREAD] learn_from_outcome failed: {e}")
 
             # ═══ TIER 1 OBSERVATION LOGGING (structured JSONL) ═══
             self._write_observation_record(

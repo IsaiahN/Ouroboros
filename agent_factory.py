@@ -70,17 +70,20 @@ class AgentFactory:
         )
 
         # Two-Streams Phase 2: Role-specific self/network bias defaults
-        # self_network_bias: 0.0 = fully trust network (hive mind), 1.0 = fully trust self
+        # self_network_bias is stored as w_B (network trust weight).
+        # IThread reads it as: w_b = self_network_bias, w_a = 1.0 - w_b
+        # So: 0.0 = fully trust self (w_A=1.0), 1.0 = fully trust network (w_A=0.0)
         ROLE_BIAS_DEFAULTS = {
-            'pioneer': 0.7,       # Trust self more (exploring unknown)
-            'optimizer': 0.3,     # Trust network more (refining known solutions)
-            'exploiter': 0.2,     # Trust network more (replaying proven sequences)
-            'generalist': 0.5,    # Balanced
-            'pattern_specialist': 0.6,
-            'score_optimizer': 0.4,
-            'exploration_agent': 0.65,
-            'win_focused_agent': 0.45,
-            'hybrid_agent': 0.5
+            # Values are w_B (network trust). Lower = more self-trust.
+            'pioneer': 0.3,       # w_A=0.7 — Trust self more (exploring unknown)
+            'optimizer': 0.7,     # w_A=0.3 — Trust network more (refining known)
+            'exploiter': 0.8,     # w_A=0.2 — Trust network most (replaying proven)
+            'generalist': 0.5,    # w_A=0.5 — Balanced
+            'pattern_specialist': 0.4,   # w_A=0.6 — Slight self-trust
+            'score_optimizer': 0.6,      # w_A=0.4 — Slight network-trust
+            'exploration_agent': 0.35,   # w_A=0.65 — Self-trusting explorer
+            'win_focused_agent': 0.55,   # w_A=0.45 — Slight network-trust
+            'hybrid_agent': 0.5          # w_A=0.5 — Balanced
         }
 
         # Get role from genome if available, else use agent_type
