@@ -59,7 +59,8 @@ class CognitiveGamePlayer:
 
         # ═══ Tier 1 Observation Logging ═══
         self._observation_log_path = "log/observation_log.jsonl"
-        self._observation_max_lines = 10_000  # Ring buffer size
+        self._observation_max_lines = 40_000  # Ring buffer size
+        self._obs_writes_since_check = 0  # Counter for truncation trigger
 
     def play_game(
         self,
@@ -738,8 +739,12 @@ class CognitiveGamePlayer:
                 f.write(_json.dumps(record, separators=(',', ':')) + '\n')
 
             # Ring-buffer: truncate when file exceeds max lines.
-            # Check every 1000 actions to avoid I/O overhead.
-            if step % 1000 == 0:
+            # Use class-level counter (persists across games) to avoid
+            # the step%1000 bug where step resets each game and never
+            # reaches 1000 when max_actions < 1000.
+            self._obs_writes_since_check += 1
+            if self._obs_writes_since_check >= 5000:
+                self._obs_writes_since_check = 0
                 try:
                     with open(self._observation_log_path, 'r', encoding='utf-8') as rf:
                         lines = rf.readlines()

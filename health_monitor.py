@@ -116,20 +116,17 @@ class HealthMonitor:
                 print(f"  [HEALTH-ERR] Health check failed: {e}")
 
     def run_safe_cleanup(self, current_generation: int) -> None:
-        """Rule 12 compliance: Run SafeDatabaseCleaner every 10 generations.
+        """Rule 12 compliance: Run SafeDatabaseCleaner every 30 generations.
 
-        Per Master Ruleset: "Automatic: Runs every 10 generations in
-        autonomous_evolution_runner.py"
-
-        Also truncates observation_log.jsonl to keep only the latest 10k lines.
+        Also truncates observation_log.jsonl to keep only the latest 40k lines.
 
         Args:
             current_generation: Current generation number.
         """
-        if current_generation % 10 != 0 or current_generation == 0:
+        if current_generation % 30 != 0 or current_generation == 0:
             return
 
-        # Truncate observation log (rolling 10k lines)
+        # Truncate observation log (rolling 40k lines)
         self._truncate_observation_log()
 
         try:
@@ -145,7 +142,7 @@ class HealthMonitor:
                 print(f"  [CLEANUP-ERR] Safe cleanup failed: {e}")
 
     def _truncate_observation_log(
-        self, path: str = "log/observation_log.jsonl", max_lines: int = 10_000
+        self, path: str = "log/observation_log.jsonl", max_lines: int = 40_000
     ) -> None:
         """Keep only the latest max_lines in the observation log."""
         import os
