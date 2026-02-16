@@ -675,6 +675,7 @@ class CausalMap:
         4. THEN update the effects as usual
         """
         self._explored.add(click_pos)
+        self._all_positions.add(click_pos)
 
         if pre_frame is None or post_frame is None:
             return

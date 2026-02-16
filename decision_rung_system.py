@@ -889,12 +889,14 @@ class DecisionRungSystem:
                 self._last_winning_rung = rung
                 rung.record_outcome(was_accepted=True)
                 self.last_decision_metadata = result.metadata or {}
+                self.last_decision_metadata['rung_name'] = rung.name
                 return result.action or get_random_available_action(context), f"[{rung.name}] {result.reason}"
 
         action, reason = self._weighted_random_choice(accumulated_weights, context), "Weighted fallback after ladder"
+        self.last_decision_metadata['rung_name'] = 'weighted_fallback'
         if action == 'ACTION6':
             coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
-            self.last_decision_metadata = coords
+            self.last_decision_metadata = {**coords, 'rung_name': 'weighted_fallback'}
             reason += f" [coords: ({coords['x']},{coords['y']})]"
         return action, reason
 
@@ -989,6 +991,9 @@ class DecisionRungSystem:
         if best_action in rung_contributions:
             self._last_winning_rung = rung_contributions[best_action][0]
             self._last_winning_rung.record_outcome(was_accepted=True)
+            self.last_decision_metadata['rung_name'] = rung_contributions[best_action][2]
+        else:
+            self.last_decision_metadata['rung_name'] = 'aggregate'
 
         reason = f"Weighted vote: {best_action} ({action_votes[best_action]:.2f}) from [{', '.join(reasons[:3])}]"
 
@@ -1033,8 +1038,11 @@ class DecisionRungSystem:
             self.rung_wins[best_rung.name] = self.rung_wins.get(best_rung.name, 0) + 1
             self._last_winning_rung = best_rung
             best_rung.record_outcome(was_accepted=True)
+            self.last_decision_metadata = best_result.metadata or {}
+            self.last_decision_metadata['rung_name'] = best_rung.name
             return best_result.action or get_random_available_action(context), f"[{best_rung.name}] {best_result.reason}"
 
+        self.last_decision_metadata['rung_name'] = 'no_suggestion'
         return get_random_available_action(context), "No suggestions from any rung"
 
     def _weighted_random_choice(self, weights: Dict[str, float], context: Optional[Dict[str, Any]] = None) -> str:
@@ -1162,6 +1170,7 @@ class DecisionRungSystem:
                     self.last_decision_metadata = result.metadata or {}
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
                 rung.record_outcome(was_accepted=True)
+                self.last_decision_metadata['rung_name'] = rung.name
                 return result.action or get_random_available_action(context), f"[EMERGENCY:{rung.name}] {result.reason}"
         return None
 
@@ -1216,18 +1225,23 @@ class DecisionRungSystem:
 
         if best_score < 0.15:
             action, reason = self._weighted_random_choice(accumulated_weights, context), "Weighted random (low confidence)"
+            self.last_decision_metadata['rung_name'] = 'weighted_random'
             if action == 'ACTION6':
                 coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
-                self.last_decision_metadata = coords
+                self.last_decision_metadata = {**coords, 'rung_name': 'weighted_random'}
                 reason += f" [coords: ({coords['x']},{coords['y']})]"
             return action, reason
 
         top_contributors = ', '.join(reasons[:3]) if reasons else 'filters only'
         reason = f"[WEIGHTED] {best_action} ({best_score:.2f}) from [{top_contributors}]"
 
+        # Extract winning rung name from top contributor
+        _wnr_rung = reasons[0].split(':')[0] if reasons else 'aggregate'
+        self.last_decision_metadata['rung_name'] = _wnr_rung
+
         if best_action == 'ACTION6':
             coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
-            self.last_decision_metadata = {**self.last_decision_metadata, **coords}
+            self.last_decision_metadata = {**self.last_decision_metadata, **coords, 'rung_name': _wnr_rung}
             reason += f" [coords: ({coords['x']},{coords['y']})]"
 
         return best_action, reason
@@ -1256,12 +1270,14 @@ class DecisionRungSystem:
                 self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
                 rung.record_outcome(was_accepted=True)
                 self.last_decision_metadata = result.metadata or {}
+                self.last_decision_metadata['rung_name'] = rung.name
                 return result.action or get_random_available_action(context), f"[{rung.name}] {result.reason}"
 
         action, reason = self._weighted_random_choice(accumulated_weights, context), "Weighted fallback after ladder"
+        self.last_decision_metadata['rung_name'] = 'weighted_fallback'
         if action == 'ACTION6':
             coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
-            self.last_decision_metadata = coords
+            self.last_decision_metadata = {**coords, 'rung_name': 'weighted_fallback'}
             reason += f" [coords: ({coords['x']},{coords['y']})]"
         return action, reason
 
@@ -1289,6 +1305,7 @@ class DecisionRungSystem:
                 if rung_obj:
                     rung_obj.record_outcome(was_accepted=True)
                     self._last_winning_rung = rung_obj
+                self.last_decision_metadata['rung_name'] = rung_name
                 return seq_action, f"[COGNITIVE:{rung_name}] Replay fast-path: step {seq_pos + 1}/{len(active_seq)}"
 
         # Initialize router per game
@@ -1414,6 +1431,8 @@ class DecisionRungSystem:
                 self.rung_wins[rung_name] = self.rung_wins.get(rung_name, 0) + 1
                 self._cognitive_last_winning_rung.record_outcome(was_accepted=True)
 
+            self.last_decision_metadata['rung_name'] = rung_name
+
             if not action or not is_action_available(action, context):
                 weighted_action, weighted_reason = self._decide_weighted_non_emergency(game_state, context)
                 action = weighted_action
@@ -1427,7 +1446,7 @@ class DecisionRungSystem:
                 coords = self._cognitive_last_rung_metadata
                 if 'x' not in coords or 'y' not in coords:
                     coords = Action6CoordinateProvider.get_coordinates(context, self._engine_registry, game_state)
-                self.last_decision_metadata = coords
+                self.last_decision_metadata = {**coords, 'rung_name': rung_name}
                 reasoning += f" [coords: ({coords.get('x', 32)},{coords.get('y', 32)})]"
 
             # Record trace
