@@ -193,10 +193,19 @@ class PerceptualBlackboardAdapter:
         if key == "recent_success_rate":
             if p.actions_taken == 0:
                 return 0.5
-            return max(
+            base_rate = max(
                 0.0,
                 1.0 - p.consecutive_no_change / max(p.actions_taken, 1),
             )
+            # Penalize monotonous action repetition: repeating the same
+            # action isn't "success" even if the frame changes (e.g.
+            # walking in one direction forever).  Each repetition past 5
+            # reduces the success rate by 10%.
+            same_action = getattr(self, '_consecutive_same_action', 0)
+            if same_action > 5:
+                penalty = min(0.8, (same_action - 5) * 0.10)
+                base_rate = max(0.0, base_rate - penalty)
+            return base_rate
 
         # -- Novelty / surprise --
         if key == "novelty_score":
@@ -291,6 +300,10 @@ class CognitiveLoop:
         self._prev_frame: Optional[np.ndarray] = None
         self._consecutive_no_change: int = 0
 
+        # Action repetition tracking (monopoly detection)
+        self._last_action_type: Optional[int] = None
+        self._consecutive_same_action: int = 0
+
         # Replay
         self._frames: List[CognitiveFrame] = []
         self._current_frame: Optional[CognitiveFrame] = None
@@ -349,6 +362,8 @@ class CognitiveLoop:
         self._score = 0.0
         self._prev_frame = None
         self._consecutive_no_change = 0
+        self._last_action_type = None
+        self._consecutive_same_action = 0
         self._last_action_info = None
         self._frames = []
         self._current_frame = None
@@ -763,6 +778,13 @@ class CognitiveLoop:
         # Store frame and action info for next cycle
         frame_array = self._perceiver._to_numpy(frame)
         self._prev_frame = frame_array
+        # Track action repetition (monopoly detection)
+        if self._last_action_type == action_num:
+            self._consecutive_same_action += 1
+        else:
+            self._consecutive_same_action = 0
+        self._last_action_type = action_num
+
         self._last_action_info = {
             'type': action_num,
             'x': action_data.get('x') if action_data else None,
@@ -771,6 +793,7 @@ class CognitiveLoop:
             'score_delta': 0.0,
             'level_changed': False,
             'consecutive_no_change': self._consecutive_no_change,
+            'consecutive_same_action': self._consecutive_same_action,
         }
 
         self._actions_taken += 1
@@ -1019,6 +1042,9 @@ class CognitiveLoop:
             self._goal_cells_total = 0
             self._last_goal_delta_count = 0
             self._productive_rotation_index = 0
+            # Reset action monotony -- new level is a fresh context
+            self._consecutive_same_action = 0
+            self._last_action_type = None
         self._score = new_score if new_score else self._score + score_delta
 
         # Build result summary
@@ -1889,6 +1915,16 @@ class CognitiveLoop:
         Enhanced with Gap 2C (goal-delta awareness) and
         Gap 5D (timer urgency awareness).
         """
+        # ═══ ACTION MONOPOLY BREAKER ═══
+        # If the same action has been repeated many times without level
+        # progress, the rung system is stuck in a loop.  Force a strategy
+        # change so the agent tries something different.
+        if self._consecutive_same_action >= 8:
+            # Escalating response: experiment first, then explore
+            if self._consecutive_same_action >= 20:
+                return "explore"   # Full reset — random walk
+            return "experiment"    # Break the pattern
+
         # ═══ GAP 5D: Timer urgency override ═══
         # When the timer is critical, stop exploring — exploit what we know NOW.
         last_cf = self._frames[-1] if self._frames else None
