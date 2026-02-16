@@ -321,6 +321,17 @@ class CognitiveLoop:
         self._prev_hud_hash: int = 0
         self._hud_edge_size: int = 6  # Pixels from frame edge considered HUD
 
+        # ═══ GAP 5C: Per-region HUD tracking ═══
+        self._prev_hud_region_hashes: Dict[str, int] = {
+            'top': 0, 'bottom': 0, 'left': 0, 'right': 0
+        }
+        self._prev_hud_region_states: Dict[str, Dict[str, Any]] = {}
+        # Tracks per-region: {hash, unique_colors, colored_fraction, object_count}
+
+        # ═══ SEMANTIC GOAL: Reference panel detection ═══
+        self._reference_panel: Optional[Dict[str, Any]] = None
+        # {region: (y1,y2,x1,x2), cells: {(x,y): color}, detected_at_action: N}
+
     # ─── Game Lifecycle ───────────────────────────────────────────────
 
     def start_game(
@@ -352,6 +363,11 @@ class CognitiveLoop:
         self._active_plan = []
         self._agent_position = None
         self._prev_hud_hash = 0
+        self._prev_hud_region_hashes = {
+            'top': 0, 'bottom': 0, 'left': 0, 'right': 0
+        }
+        self._prev_hud_region_states = {}
+        self._reference_panel = None
         self._productive_rotation_index = 0  # Fix 3: rotate among productive targets
 
         # Create fresh causal map for this game
@@ -444,8 +460,7 @@ class CognitiveLoop:
 
         # ─── 1. Load best causal map from prior sessions ─────────────
         try:
-            # Get the most complete world model state for this game
-            # (the one from the session with the most steps = most knowledge)
+            # First: try exact game_id match (best — same game instance)
             rows = self._db.execute_query("""
                 SELECT objects_json FROM world_model_states
                 WHERE game_id = ?
@@ -453,9 +468,22 @@ class CognitiveLoop:
                 LIMIT 1
             """, (game_id,))
 
-            if rows and rows[0]:
-                obj_json = rows[0].get('objects_json') if isinstance(rows[0], dict) else rows[0][0]
-                if obj_json:
+            # Second: if no exact match, load from same game TYPE
+            # (cross-agent knowledge — other agents who played the
+            # same game type, including horizontal transfers)
+            if not rows:
+                rows = self._db.execute_query("""
+                    SELECT objects_json FROM world_model_states
+                    WHERE game_id LIKE ?
+                    ORDER BY step_number DESC
+                    LIMIT 3
+                """, (f'{game_type}%',))
+
+            if rows:
+                for row_entry in rows:
+                    obj_json = row_entry.get('objects_json') if isinstance(row_entry, dict) else row_entry[0]
+                    if not obj_json:
+                        continue
                     data = json.loads(obj_json)
                     causal_data = data.get('causal_map', {})
 
@@ -471,14 +499,20 @@ class CognitiveLoop:
 
                             # Import into causal map
                             observations = effect_data.get('observations', [])
+                            obs_count = effect_data.get('observation_count', 0)
+                            productive = effect_data.get('productive_count', 0)
+                            destructive = effect_data.get('destructive_count', 0)
                             if observations:
                                 # Determine if this position produces changes
                                 any_change = any(
                                     len(obs.get('changes', [])) > 0
                                     for obs in observations
                                 )
-                                affected = []
-                                color_transitions = {}
+                                affected: list = []
+                                # color_transitions must use tuple keys and
+                                # list-of-tuple values to match TileEffect's
+                                # type: Dict[Tuple[int,int], List[Tuple[int,int]]]
+                                color_transitions: dict = {}
 
                                 for obs in observations:
                                     for ch in obs.get('changes', []):
@@ -487,22 +521,53 @@ class CognitiveLoop:
                                             affected.append(cell)
                                         from_c = ch.get('from_color', 0)
                                         to_c = ch.get('to_color', 0)
-                                        color_transitions[f"{cell}"] = {
-                                            'from': from_c, 'to': to_c
-                                        }
+                                        if cell not in color_transitions:
+                                            color_transitions[cell] = []
+                                        color_transitions[cell].append(
+                                            (from_c, to_c)
+                                        )
 
                                 from engines.cognition.causal_map import TileEffect
                                 self._causal_map._effects[pos] = TileEffect(
                                     position=pos,
                                     affected=affected,
                                     color_transitions=color_transitions,
-                                    observation_count=len(observations),
+                                    observation_count=max(len(observations), obs_count),
                                     last_frame_changed=any_change,
+                                    productive_count=productive,
+                                    destructive_count=destructive,
                                 )
                                 self._causal_map._explored.add(pos)
                                 self._causal_map._all_positions.add(pos)
                                 effects_loaded += 1
 
+                        except Exception:
+                            continue
+
+                    # ── Load color cycles ──
+                    color_cycles_data = data.get('color_cycles', {})
+                    for pos_key, cycle in color_cycles_data.items():
+                        try:
+                            if isinstance(pos_key, str):
+                                parts = pos_key.strip('()').split(',')
+                                pos = (int(parts[0].strip()), int(parts[1].strip()))
+                            else:
+                                continue
+                            if isinstance(cycle, list) and cycle:
+                                self._causal_map._color_cycles[pos] = cycle
+                        except Exception:
+                            continue
+
+                    # ── Load walls ──
+                    walls_data = data.get('walls', [])
+                    for wall in walls_data:
+                        try:
+                            wpos = wall.get('pos', [])
+                            wact = wall.get('action', 0)
+                            if len(wpos) == 2:
+                                self._causal_map._walls.add(
+                                    (tuple(wpos), wact)
+                                )
                         except Exception:
                             continue
 
@@ -623,6 +688,7 @@ class CognitiveLoop:
         agent_role: str = "pioneer",
         w_A: float = 0.5,
         w_B: float = 0.5,
+        available_actions: Optional[List[int]] = None,
         **extra_context,
     ) -> Tuple[int, Optional[Dict], CognitiveFrame]:
         """
@@ -635,6 +701,9 @@ class CognitiveLoop:
             agent_role: Agent role
             w_A: Stream A weight
             w_B: Stream B weight
+            available_actions: Current available actions from API
+                (may change between levels — e.g. FT09 Level 1 has
+                [6] only, later levels add [1,2,3,4,5,6]).
             **extra_context: Additional context passed to rung system
 
         Returns:
@@ -643,6 +712,25 @@ class CognitiveLoop:
             action_data: {x, y} for ACTION6, None otherwise
             cognitive_frame: Observable record of this cycle
         """
+        # ═══ Per-level action availability update ═══
+        # Games can change available_actions between levels (e.g. FT09
+        # Level 1 = [6] only, Level 2+ = [1,2,3,4,5,6] with camera pan).
+        # Update our internal state when the API reports a change.
+        if available_actions and sorted(available_actions) != sorted(self._available_actions):
+            old = self._available_actions
+            self._available_actions = list(available_actions)
+            if self._verbose:
+                print(
+                    f"    [ACTIONS-UPDATE] Available actions changed: "
+                    f"{old} -> {self._available_actions}"
+                )
+            # Reset stable regions since new actions may change the viewport
+            # (e.g. camera pan actions reveal new parts of the board)
+            if any(a in available_actions for a in (1, 2, 3, 4)) and not any(a in old for a in (1, 2, 3, 4)):
+                self._stable_region_attempts = 0
+                self._stable_mask = None
+                self._reference_snapshot = None
+                self._reference_panel = None
         cf = CognitiveFrame(
             action_number=self._actions_taken,
             timestamp=time.time(),
@@ -751,27 +839,60 @@ class CognitiveLoop:
         # ═══ GAP 5: HUD state tracking ═══
         self._check_hud_state(cf, post_array)
 
-        # Calculate surprise
+        # ═══ GAP 5B: Feed HUD changes into CausalMap ═══
+        # If the HUD changed after this action, record the association
+        # so the system learns which actions affect environmental state.
+        if cf.hud_state_changed and self._causal_map and self._last_action_info:
+            action_pos = None
+            if self._last_action_info.get('x') is not None:
+                action_pos = (self._last_action_info['x'], self._last_action_info['y'])
+            self._causal_map.record_hud_change(
+                action_pos=action_pos,
+                action_type=self._last_action_info.get('type', 0),
+                timer_urgency=cf.timer_urgency,
+            )
+
+        # Calculate surprise using the CausalMap's prediction system
         if self._causal_map and self._last_action_info:
             click_pos = None
             if self._last_action_info.get('x') is not None:
                 click_pos = (self._last_action_info['x'], self._last_action_info['y'])
 
-            if click_pos and click_pos in self._causal_map._effects:
-                # We had a prediction -- how surprising is the result?
-                expected_change = self._causal_map._effects[click_pos].last_frame_changed
-                if expected_change == frame_changed:
-                    cf.surprise = 0.1  # As expected
+            if click_pos:
+                prediction = self._causal_map.predict(click_pos)
+                if prediction is not None:
+                    # We had a prediction -- how surprising is the result?
+                    if prediction.confidence > 0.5:
+                        expected_change = len(prediction.expected_affected) > 0
+                        if expected_change == frame_changed:
+                            cf.surprise = 0.1  # As expected
+                        else:
+                            cf.surprise = 0.8  # Surprising!
+                    else:
+                        cf.surprise = 0.4  # Low-confidence prediction
                 else:
-                    cf.surprise = 0.8  # Surprising!
+                    cf.surprise = 0.5  # No prediction, moderate surprise
             else:
-                cf.surprise = 0.5  # No prediction, moderate surprise
+                cf.surprise = 0.3  # Non-click action
 
         # ═══ MAP UPDATE: Learn from the action's consequence ═══
         if self._causal_map and self._last_action_info:
             click_x = self._last_action_info.get('x')
             click_y = self._last_action_info.get('y')
             action_type = self._last_action_info.get('type', 0)
+
+            # ═══ CONTEXT TRACKING: Record every action type ═══
+            # This feeds the prediction-surprise system. Non-click
+            # actions (pans, movements) are the CONTEXT that explains
+            # why click effects change. Must record ALL actions.
+            self._causal_map.record_action_context(action_type)
+
+            # ═══ TEMPORAL CAUSAL LEARNING: Feed frame to delayed observers ═══
+            # Every frame is fed into active delayed observation windows,
+            # regardless of what action was just taken. This lets us detect
+            # effects that unfold over multiple frames (VC33 fluid dynamics).
+            if post_array is not None and self._causal_map.has_active_delayed_observations:
+                self._causal_map.observe_delayed_frame(post_array)
 
             if click_x is not None and click_y is not None:
                 pre = self._prev_frame
@@ -783,6 +904,31 @@ class CognitiveLoop:
                     post_frame=post,
                     frame_changed=frame_changed,
                 )
+
+                # ═══ GAP 2A: Feed abstract state to CausalMap ═══
+                # Keep CausalMap aware of current cell states for planning
+                if post is not None:
+                    abstract_state = self._abstract_frame_state(post)
+                    if abstract_state:
+                        self._causal_map.set_current_state(abstract_state)
+
+                # ═══ TEMPORAL CAUSAL LEARNING: Start delayed observation ═══
+                # For click-only games (likely VC33), start watching for
+                # delayed effects that unfold over subsequent frames.
+                # Only for click actions that DIDN'T produce immediate change.
+                is_click_only_game = (
+                    6 in self._available_actions
+                    and not any(a in self._available_actions for a in (1, 2, 3, 4))
+                )
+                if is_click_only_game and post is not None:
+                    # Start delayed observation for EVERY click in click-only games
+                    # because even "immediate" changes may have delayed secondary effects
+                    self._causal_map.start_delayed_observation(
+                        action_pos=(click_x, click_y),
+                        action_type=action_type,
+                        frame_at_action=post,
+                        window_size=5,
+                    )
 
                 # ═══ GAP 4B: Feed goal progress into CausalMap ═══
                 if cf.goal_progress_delta != 0 or cf.was_productive or cf.was_destructive:
@@ -808,19 +954,49 @@ class CognitiveLoop:
 
             # ═══ GAP 3C: Track movement results for directional games ═══
             elif action_type in (1, 2, 3, 4) and post_array is not None:
-                # Directional action -- detect agent movement
-                new_agent_pos = self._detect_agent_position(post_array)
-                if new_agent_pos is not None:
-                    self._causal_map.record_movement_result(
-                        action_type=action_type,
-                        agent_pos_before=self._agent_position,
-                        agent_pos_after=new_agent_pos,
-                    )
-                    if self._agent_position != new_agent_pos:
-                        cf.map_update = f"Moved to ({new_agent_pos[0]},{new_agent_pos[1]})"
-                    else:
-                        cf.map_update = f"Wall at ({self._agent_position[0] if self._agent_position else '?'},{self._agent_position[1] if self._agent_position else '?'}) dir={action_type}"
-                    self._agent_position = new_agent_pos
+                # ═══ CAMERA-PAN DETECTION ═══
+                # For hybrid games (FT09): directional actions may PAN
+                # the camera rather than move an agent. A pan shifts >80%
+                # of pixels uniformly. Detect this to avoid misclassifying
+                # a pan as agent movement.
+                is_hybrid = (6 in self._available_actions
+                             and any(a in self._available_actions for a in (1, 2, 3, 4)))
+                detected_pan = False
+
+                if is_hybrid and self._prev_frame is not None:
+                    try:
+                        if self._prev_frame.shape == post_array.shape:
+                            diff_mask = self._prev_frame != post_array
+                            total_px = diff_mask.size
+                            changed_px = int(diff_mask.sum())
+                            # Pan: >80% of pixels changed (whole viewport shifted)
+                            if total_px > 0 and changed_px / total_px > 0.80:
+                                detected_pan = True
+                                cf.map_update = (
+                                    f"Camera pan via ACTION{action_type}"
+                                    f" ({changed_px}/{total_px} px changed)"
+                                )
+                                # Reset stable regions since the viewport changed
+                                self._stable_region_attempts = 0
+                                self._stable_mask = None
+                                self._reference_snapshot = None
+                    except Exception:
+                        pass
+
+                if not detected_pan:
+                    # Directional action -- detect agent movement
+                    new_agent_pos = self._detect_agent_position(post_array)
+                    if new_agent_pos is not None:
+                        self._causal_map.record_movement_result(
+                            action_type=action_type,
+                            agent_pos_before=self._agent_position,
+                            agent_pos_after=new_agent_pos,
+                        )
+                        if self._agent_position != new_agent_pos:
+                            cf.map_update = f"Moved to ({new_agent_pos[0]},{new_agent_pos[1]})"
+                        else:
+                            cf.map_update = f"Wall at ({self._agent_position[0] if self._agent_position else '?'},{self._agent_position[1] if self._agent_position else '?'}) dir={action_type}"
+                        self._agent_position = new_agent_pos
 
         # Update last action info for next temporal perception
         if self._last_action_info:
@@ -916,6 +1092,9 @@ class CognitiveLoop:
 
                 if self._verbose:
                     print(f"    [GAP1-STABLE] Stable region: {stable_fraction:.0%} pixels never changed")
+
+                # Try to detect a reference/goal panel among the stable pixels
+                self._detect_reference_panel(base)
             else:
                 # Everything changes or nothing changes -- can't split
                 # Don't set _stable_mask so retry is possible with more frames
@@ -924,6 +1103,46 @@ class CognitiveLoop:
 
         except Exception as e:
             logger.debug(f"[GAP1] Stable region computation failed: {e}")
+
+    def _abstract_frame_state(
+        self, frame: np.ndarray
+    ) -> Dict[Tuple[int, int], int]:
+        """
+        Gap 2A: Convert raw frame into abstract {(x,y): color} dict.
+
+        Uses the stable mask to focus on the INTERACTIVE workspace
+        (changing pixels only). Each pixel in the workspace becomes
+        a keyed cell. This abstract state is suitable for:
+        - Goal comparison (diff against reference)
+        - CausalMap state tracking (set_current_state)
+        - Frame-to-frame delta computation
+
+        Returns empty dict if stable mask hasn't been computed yet.
+        """
+        if self._stable_mask is None:
+            return {}
+
+        try:
+            if frame.shape != self._stable_mask.shape:
+                return {}
+
+            # The changing region IS the interactive workspace
+            changing = ~self._stable_mask
+            if not changing.any():
+                return {}
+
+            # Extract (y, x) positions of changing pixels
+            ys, xs = np.where(changing)
+
+            state: Dict[Tuple[int, int], int] = {}
+            for i in range(len(ys)):
+                pos = (int(xs[i]), int(ys[i]))
+                state[pos] = int(frame[ys[i], xs[i]])
+
+            return state
+
+        except Exception:
+            return {}
 
     def _compute_workspace_delta(
         self, current_frame: np.ndarray
@@ -964,6 +1183,229 @@ class CognitiveLoop:
         except Exception:
             return 0, 0
 
+    def _detect_reference_panel(self, frame: np.ndarray) -> bool:
+        """
+        Goal-discovery: find stable colored regions that may encode goals.
+
+        IMPORTANT: This does NOT assume a separate "reference panel" that
+        spatially maps to the workspace. In many games:
+        - FT09: Key sprites are INLINE within the interactive grid,
+          adjacent to each tile. The agent sees through a camera viewport.
+        - LS20: Lock pattern is displayed in the HUD (already tracked
+          by _check_hud_state's region analysis).
+        - VC33: Goals are dynamic (fluid reaching target positions).
+
+        Game-agnostic strategy:
+        1. Find stable, non-background, non-HUD colored pixels
+        2. Group them into small clusters (connected components)
+        3. Record each cluster's position and color — these are
+           candidate "goal indicators" (key sprites, markers, etc.)
+        4. Do NOT assume a single bounding-box panel or spatial scaling
+
+        The CausalMap + constraint decoder use these indicators to
+        determine per-tile target colors.
+
+        Returns True if any goal indicators were found or updated.
+        """
+        if self._stable_mask is None:
+            return False
+
+        try:
+            h, w = frame.shape[:2]
+            edge = self._hud_edge_size
+
+            # Build mask: stable, non-HUD, non-background
+            stable_inner = self._stable_mask.copy()
+            if h > edge * 2 and w > edge * 2:
+                stable_inner[:edge, :] = False
+                stable_inner[-edge:, :] = False
+                stable_inner[:, :edge] = False
+                stable_inner[:, -edge:] = False
+
+            non_bg = frame != 0
+            indicator_mask = stable_inner & non_bg
+
+            if not indicator_mask.any():
+                return False
+
+            # Find individual colored pixels that are stable
+            ys, xs = np.where(indicator_mask)
+            if len(ys) < 2:
+                return False
+
+            # Group into clusters using simple flood-fill
+            visited = set()
+            clusters: list = []
+            for i in range(len(ys)):
+                pos = (int(xs[i]), int(ys[i]))
+                if pos in visited:
+                    continue
+                # BFS to find connected component
+                cluster_cells: Dict[Tuple[int, int], int] = {}
+                stack = [pos]
+                while stack:
+                    cx, cy = stack.pop()
+                    if (cx, cy) in visited:
+                        continue
+                    if not (0 <= cy < h and 0 <= cx < w):
+                        continue
+                    if not indicator_mask[cy, cx]:
+                        continue
+                    visited.add((cx, cy))
+                    cluster_cells[(cx, cy)] = int(frame[cy, cx])
+                    for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nx, ny = cx + dx, cy + dy
+                        if (nx, ny) not in visited:
+                            stack.append((nx, ny))
+
+                if len(cluster_cells) >= 2:
+                    # Compute cluster centroid and color
+                    cxs = [p[0] for p in cluster_cells]
+                    cys = [p[1] for p in cluster_cells]
+                    centroid = (
+                        sum(cxs) // len(cxs),
+                        sum(cys) // len(cys),
+                    )
+                    colors = list(set(cluster_cells.values()))
+                    clusters.append({
+                        'centroid': centroid,
+                        'cells': cluster_cells,
+                        'colors': colors,
+                        'primary_color': colors[0] if len(colors) == 1 else max(
+                            set(cluster_cells.values()),
+                            key=list(cluster_cells.values()).count,
+                        ),
+                        'size': len(cluster_cells),
+                    })
+
+            if not clusters:
+                return False
+
+            # Store as goal indicators (not a single panel)
+            self._reference_panel = {
+                'type': 'distributed_indicators',
+                'clusters': clusters,
+                'total_indicators': len(clusters),
+                'region': None,  # No single bounding box
+                'cells': {},  # Flatten for backward compat
+            }
+            # Flatten all cluster cells into cells dict
+            for cluster in clusters:
+                self._reference_panel['cells'].update(cluster['cells'])
+
+            if self._verbose:
+                print(
+                    f"    [GOAL-DETECT] Found {len(clusters)} goal indicators, "
+                    f"{sum(c['size'] for c in clusters)} pixels, "
+                    f"colors: {sorted(set(c['primary_color'] for c in clusters))}"
+                )
+
+            return True
+
+        except Exception as e:
+            logger.debug(f"[GOAL-DETECT] Goal indicator detection failed: {e}")
+            return False
+
+    def _compute_goal_match(
+        self, frame: np.ndarray
+    ) -> Tuple[int, int, float]:
+        """
+        Goal-match: compare current interactive cells against known targets.
+
+        Instead of assuming a spatial correspondence between a "reference
+        panel" and the "workspace," this method uses the CausalMap's
+        knowledge to count how many interactive tiles currently match
+        their target colors.
+
+        Target colors come from:
+        1. Goal indicators (stable colored clusters detected by
+           _detect_reference_panel) — used as hints, not spatial maps
+        2. CausalMap's goal_cells (if set by constraint decoder)
+        3. Score-delta feedback (positions where changes improved score)
+
+        For camera-viewport games (FT09): the goal match is computed
+        only for the CURRENTLY VISIBLE portion of the game. The agent
+        must pan to see other quadrants.
+
+        Returns (match_cells, mismatch_cells, match_fraction).
+        """
+        if self._causal_map is None:
+            return 0, 0, 0.0
+
+        try:
+            # Strategy 1: Use CausalMap's goal cells if available
+            goal_cells = self._causal_map._goal_cells
+            if goal_cells:
+                match_count = 0
+                mismatch_count = 0
+                h, w = frame.shape[:2]
+                for (gx, gy), target_color in goal_cells.items():
+                    if 0 <= gy < h and 0 <= gx < w:
+                        current_color = int(frame[gy, gx])
+                        if current_color == target_color:
+                            match_count += 1
+                        else:
+                            mismatch_count += 1
+                total = match_count + mismatch_count
+                if total > 0:
+                    return match_count, mismatch_count, match_count / total
+
+            # Strategy 2: Use goal indicators + CausalMap effects to
+            # count tiles at their target color. Each indicator cluster
+            # near a known interactive position suggests a target color.
+            if (self._reference_panel
+                    and self._reference_panel.get('type') == 'distributed_indicators'):
+                clusters = self._reference_panel.get('clusters', [])
+                if not clusters:
+                    return 0, 0, 0.0
+
+                match_count = 0
+                mismatch_count = 0
+                h, w = frame.shape[:2]
+
+                for cluster in clusters:
+                    indicator_color = cluster.get('primary_color', 0)
+                    centroid = cluster.get('centroid', (0, 0))
+
+                    # Find the nearest interactive (explored) position
+                    nearest_pos = None
+                    nearest_dist = float('inf')
+                    for pos in self._causal_map._explored:
+                        dist = abs(pos[0] - centroid[0]) + abs(pos[1] - centroid[1])
+                        if dist < nearest_dist:
+                            nearest_dist = dist
+                            nearest_pos = pos
+
+                    if nearest_pos and nearest_dist < 20:
+                        px, py = nearest_pos
+                        if 0 <= py < h and 0 <= px < w:
+                            current_color = int(frame[py, px])
+                            if current_color == indicator_color:
+                                match_count += 1
+                            else:
+                                mismatch_count += 1
+
+                total = match_count + mismatch_count
+                if total > 0:
+                    return match_count, mismatch_count, match_count / total
+
+            # Strategy 3: Use productive target tracking as a proxy
+            # (positions where clicking improved the score)
+            productive = self._causal_map.get_productive_targets()
+            if productive:
+                # Count how many productive positions still need clicks
+                match_count = len([p for p in productive if p[1] >= 0.8])
+                mismatch_count = len([p for p in productive if p[1] < 0.8])
+                total = match_count + mismatch_count
+                if total > 0:
+                    return match_count, mismatch_count, match_count / total
+
+            return 0, 0, 0.0
+
+        except Exception as e:
+            logger.debug(f"[GOAL-MATCH] Goal match computation failed: {e}")
+            return 0, 0, 0.0
+
     def _compute_rich_outcome(self, cf: CognitiveFrame, post_array: Optional[np.ndarray]):
         """
         Gap 4: Compute rich action outcome with goal-progress tracking.
@@ -998,6 +1440,27 @@ class CognitiveLoop:
             if goal_total > 0:
                 self._goal_cells_total = goal_total
 
+            # ═══ Semantic goal matching: use TRUE goal match when available ═══
+            # If we have a detected reference panel, compute how many
+            # workspace cells actually match the goal pattern. This
+            # replaces the "exploration coverage" proxy with a real metric.
+            if self._reference_panel is not None:
+                match_cells, mismatch_cells, match_frac = (
+                    self._compute_goal_match(post_array)
+                )
+                cf.reference_panel_detected = True
+                cf.goal_match_cells = match_cells
+                cf.goal_mismatch_cells = mismatch_cells
+                cf.goal_match_fraction = match_frac
+
+                # Override the exploration-based goal_cells with true match
+                ref_total = match_cells + mismatch_cells
+                if ref_total > 0:
+                    cf.goal_cells_total = ref_total
+                    cf.goal_cells_correct = match_cells
+                    cf.goal_completion = match_frac
+                    cf.goal_delta_after = mismatch_cells
+
             # Update for next action
             self._last_goal_delta_count = cf.goal_delta_after
         else:
@@ -1028,14 +1491,19 @@ class CognitiveLoop:
 
     def _check_hud_state(self, cf: CognitiveFrame, frame_array: Optional[np.ndarray]):
         """
-        Gap 5: Detect HUD state changes from frame edges.
+        Gap 5 + 5C: Semantic HUD state extraction from frame edges.
 
-        Many games display timer bars, lives, key displays, and other
-        state information along the edges of the frame. This method
-        extracts and hashes the edge pixels to detect state changes.
+        Splits the HUD into 4 independent sub-regions (top, bottom,
+        left, right). For each region:
+        - Tracks hash for change detection
+        - Extracts color composition
+        - Counts discrete objects (connected non-background blobs)
+        - Estimates timer (bottom row shrinking bar)
+        - Detects carried-state changes (non-timer regions changing)
+        - Estimates lives (discrete same-colored objects)
 
-        Game-agnostic: just notices "the edges changed" without
-        knowing what the edges mean.
+        Game-agnostic: discovers what the edges mean by observing
+        how they change over time.
         """
         if frame_array is None:
             return
@@ -1044,34 +1512,149 @@ class CognitiveLoop:
             h, w = frame_array.shape[:2]
             edge = self._hud_edge_size
 
-            # Extract edge regions (top, bottom, left, right strips)
-            top = frame_array[:edge, :].ravel() if h > edge else np.array([])
-            bottom = frame_array[-edge:, :].ravel() if h > edge else np.array([])
-            left = frame_array[:, :edge].ravel() if w > edge else np.array([])
-            right = frame_array[:, -edge:].ravel() if w > edge else np.array([])
+            if h <= edge * 2 or w <= edge * 2:
+                return
 
-            # Combine and hash
-            all_edges = np.concatenate([top, bottom, left, right])
+            # Extract the 4 edge regions as 2D arrays (not raveled)
+            regions: Dict[str, np.ndarray] = {
+                'top': frame_array[:edge, :],
+                'bottom': frame_array[-edge:, :],
+                'left': frame_array[:, :edge],
+                'right': frame_array[:, -edge:],
+            }
+
+            # ─── Overall hash (backward compat) ───
+            all_edges = np.concatenate([r.ravel() for r in regions.values()])
             hud_hash = hash(all_edges.tobytes())
-
             cf.hud_state_hash = hud_hash
-            cf.hud_state_changed = (self._prev_hud_hash != 0 and hud_hash != self._prev_hud_hash)
+            cf.hud_state_changed = (
+                self._prev_hud_hash != 0 and hud_hash != self._prev_hud_hash
+            )
             self._prev_hud_hash = hud_hash
 
-            # Timer estimation: count non-zero (colored) pixels in bottom row
-            # Many games use a colored bar that shrinks as timer runs out
-            if len(bottom) > 0:
-                colored = np.count_nonzero(bottom)
-                cf.timer_fraction = colored / max(len(bottom), 1)
-                if cf.timer_fraction < 0.2:
-                    cf.timer_urgency = "critical"
-                elif cf.timer_fraction < 0.5:
-                    cf.timer_urgency = "moderate"
-                else:
-                    cf.timer_urgency = "safe"
+            # ─── Per-region semantic analysis ───
+            region_changes: Dict[str, bool] = {}
+            region_states: Dict[str, Dict[str, Any]] = {}
+            non_timer_changed = False
+
+            for name, region_2d in regions.items():
+                region_flat = region_2d.ravel()
+                region_hash = hash(region_flat.tobytes())
+
+                # Did this specific region change?
+                prev_hash = self._prev_hud_region_hashes.get(name, 0)
+                changed = (prev_hash != 0 and region_hash != prev_hash)
+                region_changes[name] = changed
+                self._prev_hud_region_hashes[name] = region_hash
+
+                # Color composition
+                unique_colors = set(int(c) for c in np.unique(region_flat))
+                colored_pixels = int(np.count_nonzero(region_flat))
+                total_pixels = len(region_flat)
+                colored_fraction = colored_pixels / max(total_pixels, 1)
+
+                # Object counting: connected non-background blobs
+                # Use simple run-length counting on rows for speed
+                object_count = self._count_hud_objects(region_2d)
+
+                state = {
+                    'hash': region_hash,
+                    'unique_colors': sorted(unique_colors),
+                    'colored_fraction': round(colored_fraction, 3),
+                    'object_count': object_count,
+                    'changed': changed,
+                }
+                region_states[name] = state
+
+                # Non-timer regions changing = carried state change
+                if changed and name != 'bottom':
+                    non_timer_changed = True
+
+            # ─── Timer estimation (bottom region) ───
+            bottom_state = region_states.get('bottom', {})
+            cf.timer_fraction = bottom_state.get('colored_fraction', 1.0)
+            if cf.timer_fraction < 0.2:
+                cf.timer_urgency = "critical"
+            elif cf.timer_fraction < 0.5:
+                cf.timer_urgency = "moderate"
+            else:
+                cf.timer_urgency = "safe"
+
+            # ─── Lives estimation ───
+            # Look for discrete objects in top or right region that
+            # could be life indicators. Prefer top region.
+            lives_region = region_states.get('top', {})
+            obj_count = lives_region.get('object_count', 0)
+            if obj_count > 0 and obj_count <= 10:
+                # Plausible life count (1-10)
+                cf.lives_remaining = obj_count
+            else:
+                cf.lives_remaining = -1  # Unknown
+
+            # ─── Carried state ───
+            cf.carried_state_changed = non_timer_changed
+            cf.hud_region_changes = region_changes
+            cf.carried_state = {
+                name: {
+                    'colors': st.get('unique_colors', []),
+                    'colored_frac': st.get('colored_fraction', 0),
+                    'objects': st.get('object_count', 0),
+                    'changed': st.get('changed', False),
+                }
+                for name, st in region_states.items()
+            }
+
+            self._prev_hud_region_states = region_states
 
         except Exception as e:
-            logger.debug(f"[GAP5] HUD state check failed: {e}")
+            logger.debug(f"[GAP5C] Semantic HUD check failed: {e}")
+
+    @staticmethod
+    def _count_hud_objects(region_2d: np.ndarray) -> int:
+        """
+        Count discrete non-background objects in a HUD region.
+
+        Uses simple flood-fill on non-zero pixels. Objects are
+        connected components of non-background color. Counts
+        objects >= 2 pixels to filter noise.
+
+        Returns count of distinct objects found.
+        """
+        if region_2d.size == 0:
+            return 0
+        try:
+            # Binary mask: non-background pixels
+            mask = region_2d != 0
+            if not mask.any():
+                return 0
+
+            h, w = mask.shape
+            visited = np.zeros_like(mask, dtype=bool)
+            objects = 0
+
+            for y in range(h):
+                for x in range(w):
+                    if mask[y, x] and not visited[y, x]:
+                        # Flood-fill this component
+                        size = 0
+                        stack = [(y, x)]
+                        while stack:
+                            cy, cx = stack.pop()
+                            if (0 <= cy < h and 0 <= cx < w
+                                    and mask[cy, cx]
+                                    and not visited[cy, cx]):
+                                visited[cy, cx] = True
+                                size += 1
+                                stack.extend([
+                                    (cy - 1, cx), (cy + 1, cx),
+                                    (cy, cx - 1), (cy, cx + 1),
+                                ])
+                        if size >= 2:  # Filter single-pixel noise
+                            objects += 1
+
+            return objects
+        except Exception:
+            return 0
 
     def _detect_agent_position(self, frame: np.ndarray) -> Optional[Tuple[int, int]]:
         """
@@ -1288,8 +1871,8 @@ class CognitiveLoop:
     # Strategy derivation from FeltState
     # ------------------------------------------------------------------
 
-    @staticmethod
     def _derive_strategy(
+        self,
         felt: FeltState,
         percept: PerceptualField,
         _prior_loaded: bool = False,
@@ -1306,6 +1889,34 @@ class CognitiveLoop:
         Enhanced with Gap 2C (goal-delta awareness) and
         Gap 5D (timer urgency awareness).
         """
+        # ═══ GAP 5D: Timer urgency override ═══
+        # When the timer is critical, stop exploring — exploit what we know NOW.
+        last_cf = self._frames[-1] if self._frames else None
+        if last_cf is not None:
+            if last_cf.timer_urgency == "critical":
+                # No time left to explore — use whatever knowledge we have
+                if percept.has_plan:
+                    return "execute"
+                return "exploit"
+
+            # HUD state changed → something new happened in the environment.
+            # Re-evaluate by experimenting (the world just shifted).
+            if last_cf.hud_state_changed and felt.certainty < 0.7:
+                return "experiment"
+
+            # ═══ GAP 5C: Lives awareness ═══
+            # If we detect lives and they're dropping, shift to exploit
+            # (stop experimenting, use what we know before game over).
+            if (getattr(last_cf, 'lives_remaining', -1) > 0
+                    and getattr(last_cf, 'lives_remaining', -1) <= 1):
+                if percept.has_plan:
+                    return "execute"
+                return "exploit"
+
+            # Carried-state change (non-timer HUD changed, e.g. picked up key)
+            # → something interesting happened, experiment to learn the effect
+            if getattr(last_cf, 'carried_state_changed', False) and felt.certainty < 0.6:
+                return "experiment"
         # EXECUTE: plan ready + confident + positive valence
         if (
             percept.has_plan
@@ -1439,6 +2050,47 @@ class CognitiveLoop:
                 self._causal_map.advance_plan()
 
             return action_num, action_data
+
+        # ─── SPEED 1b: MAPPED MOVEMENT (BFS pathfinding) ─────────────
+        # For movement games with a known target, use BFS to find
+        # shortest path avoiding known walls (Gap 3C).
+        if (strategy == "execute"
+                and self._causal_map
+                and self._agent_position is not None
+                and any(a in self._available_actions for a in (1, 2, 3, 4))
+                and 6 not in self._available_actions):
+            # Movement-only game: try BFS to an unvisited position
+            visited = self._causal_map.get_visited_positions()
+            # Pick an exploration target: nearest unvisited adjacent cell
+            # or a known interesting position from perception
+            target = None
+            if percept.visual_scene_dict:
+                # Try to reach an interesting detected object
+                objects = percept.visual_scene_dict.get('objects', [])
+                for obj in objects:
+                    obj_pos = (obj.get('cx', 0), obj.get('cy', 0))
+                    if obj_pos not in visited:
+                        target = obj_pos
+                        break
+
+            if target is not None:
+                path = self._causal_map.find_path_bfs(
+                    self._agent_position, target
+                )
+                if path:
+                    action_num = path[0]  # Take first step
+                    cf.action_speed = "mapped"
+                    cf.action_type = action_num
+                    cf.action_reason = (
+                        f"BFS path to ({target[0]},{target[1]}), "
+                        f"{len(path)} steps"
+                    )
+                    cf.action_summary = (
+                        f"MAPPED-BFS: ACTION{action_num}"
+                        f" | target=({target[0]},{target[1]})"
+                        f" | path_len={len(path)}"
+                    )
+                    return action_num, None
 
         # ─── SPEED 2: REASONED (delegate to rung system) ─────────────
         if self._decision_system is not None and strategy in ("exploit", "experiment"):
@@ -1769,6 +2421,35 @@ class CognitiveLoop:
         if self._causal_map:
             context['world_model']['causal_map_typed'] = self._causal_map
             context['world_model']['map_completeness'] = self._causal_map.completeness
+
+        # ═══ GAP 4D: Inject last-action outcome so rungs can read it ═══
+        # Rungs can use these to adjust confidence: a rung whose last
+        # suggestion was_destructive should lower its confidence.
+        last_cf = self._frames[-1] if self._frames else None
+        if last_cf is not None:
+            context['last_was_productive'] = last_cf.was_productive
+            context['last_was_destructive'] = last_cf.was_destructive
+            context['last_was_wasted'] = last_cf.was_wasted
+            context['last_was_neutral'] = last_cf.was_neutral
+            context['last_goal_progress_delta'] = last_cf.goal_progress_delta
+            context['last_pixels_changed'] = last_cf.pixels_changed
+        # ═══ GAP 5D: Inject timer/HUD state for strategy-aware rungs ═══
+        context['timer_urgency'] = getattr(last_cf, 'timer_urgency', 'safe') if last_cf else 'safe'
+        context['hud_state_changed'] = getattr(last_cf, 'hud_state_changed', False) if last_cf else False
+
+        # ═══ GAP 5C: Inject semantic HUD state for rungs ═══
+        if last_cf is not None:
+            context['carried_state'] = getattr(last_cf, 'carried_state', {})
+            context['carried_state_changed'] = getattr(last_cf, 'carried_state_changed', False)
+            context['lives_remaining'] = getattr(last_cf, 'lives_remaining', -1)
+            context['hud_region_changes'] = getattr(last_cf, 'hud_region_changes', {})
+
+        # ═══ Semantic goal matching: inject reference panel awareness ═══
+        if last_cf is not None and getattr(last_cf, 'reference_panel_detected', False):
+            context['reference_panel_detected'] = True
+            context['goal_match_fraction'] = getattr(last_cf, 'goal_match_fraction', 0.0)
+            context['goal_match_cells'] = getattr(last_cf, 'goal_match_cells', 0)
+            context['goal_mismatch_cells'] = getattr(last_cf, 'goal_mismatch_cells', 0)
 
         return context
 

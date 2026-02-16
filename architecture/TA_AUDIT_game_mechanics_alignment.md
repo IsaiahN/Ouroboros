@@ -384,23 +384,27 @@ These observations would validate or invalidate assumptions in the Implementatio
 
 ## SECTION 8: COPILOT-INSTRUCTIONS.MD CORRECTIONS
 
-The following corrections should be applied to `copilot-instructions.md`:
+The following corrections have been applied to `copilot-instructions.md` (verified 2026-02-15):
 
-### Line 406 (Section 3.5)
+### ~~Line 406 (Section 3.5)~~ [APPLIED]
 **Current**: `Check that FT09's available_actions=[6] (click-only, no directional)`
 **Corrected**: `Check that FT09's available_actions=[1,2,3,4,5,6] (hybrid: camera pan + click)`
+**Status**: Applied. Line 406 now reads: `Check FT09's available_actions=[1,2,3,4,5,6] (hybrid: camera pan + click)`
 
-### Line 482 (Section 3.5)
+### ~~Line 482 (Section 3.5)~~ [APPLIED]
 **Current**: `Verify at least N distinct positions are being clicked per game (should be >=5 for a 9-cell grid)`
 **Corrected**: `Verify at least N distinct positions are being clicked per game (should be >=10 for a 32x32 grid with 16x16 viewport)`
+**Status**: Applied. Line 482 now reads: `FT09: Should have >=10 unique positions (32x32 grid, 16x16 viewport, hybrid game with camera pan)`
 
-### Lines 547-549 (Section 5.3)
+### ~~Lines 547-549 (Section 5.3)~~ [APPLIED]
 **Current**: `FT09 (click game, 6 levels)`
 **Corrected**: `FT09 (hybrid game, 6 levels)` — and update the description to note camera panning + tile clicking
+**Status**: Applied. Line 547 now reads: `FT09 (hybrid game, 6 levels, actions=[1,2,3,4,5,6])` with correct mechanics description.
 
-### Lines 552-553
+### ~~Lines 552-553~~ [APPLIED]
 **Current**: Describes FT09 as having "distinct colored cells in a grid pattern" with "clicking a cell should toggle it and neighbors (von Neumann neighborhood)"
 **Corrected**: Remove the "and neighbors (von Neumann neighborhood)" claim. Standard tiles (`Hkx`) only affect the clicked tile.
+**Status**: Applied. Lines 549-551 now describe constraint sprites, palette cycling, and "Standard tiles affect ONLY the clicked tile."
 
 ---
 

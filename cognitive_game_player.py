@@ -19,6 +19,7 @@ Usage in evolution_runner.py:
     result = player.play_game(agent, game_id, generation, is_running_fn)
 """
 
+import json as _json
 import logging
 import time
 import uuid
@@ -44,15 +45,21 @@ class CognitiveGamePlayer:
     Intercepts the decision path to run through CognitiveLoop instead.
     """
 
-    def __init__(self, game_player: Any, verbose: bool = True):
+    def __init__(self, game_player: Any, verbose: bool = True, observe: bool = False):
         """
         Args:
             game_player: Existing GamePlayer instance (fully initialized).
             verbose: Print cognitive frames to console.
+            observe: Enable Tier 2 observation (frame snapshots at key moments).
         """
         self._gp = game_player
         self._verbose = verbose
+        self._observe = observe
         self._last_replay: List[CognitiveFrame] = []
+
+        # ═══ Tier 1 Observation Logging ═══
+        self._observation_log_path = "observation_log.jsonl"
+        self._observation_max_lines = 10_000  # Ring buffer size
 
     def play_game(
         self,
@@ -212,6 +219,7 @@ class CognitiveGamePlayer:
                     agent_role=getattr(agent, 'role', 'pioneer'),
                     w_A=getattr(agent, 'w_A', 0.5),
                     w_B=getattr(agent, 'w_B', 0.5),
+                    available_actions=current_available,
                 )
 
             # Validate action
@@ -278,6 +286,8 @@ class CognitiveGamePlayer:
                 print(cf.to_log_line())
 
             # ═══ NOTIFY RUNGS (close the feedback loop for all 80+ rungs) ═══
+            # Gap 4D: Pass rich outcome context so rungs can adjust confidence
+            # based on whether the action was productive/destructive/wasted
             if hasattr(self._gp.decision_system, 'notify_action_complete'):
                 try:
                     frame_before = self._get_frame_array(obs)
@@ -286,13 +296,49 @@ class CognitiveGamePlayer:
                         frame_before = frame_before.tolist()
                     if frame_after is not None and hasattr(frame_after, 'tolist'):
                         frame_after = frame_after.tolist()
+                    # Build rich outcome context from cognitive frame
+                    outcome_context = {}
+                    if cf:
+                        outcome_context = {
+                            'frame_changed': frame_changed,
+                            'was_productive': cf.was_productive,
+                            'was_destructive': cf.was_destructive,
+                            'was_wasted': cf.was_wasted,
+                            'was_neutral': cf.was_neutral,
+                            'goal_progress_delta': cf.goal_progress_delta,
+                            'goal_cells_total': cf.goal_cells_total,
+                            'goal_cells_correct': cf.goal_cells_correct,
+                            'pixels_changed': cf.pixels_changed,
+                        }
                     self._gp.decision_system.notify_action_complete(
                         action=action.name, action_data=action_data or {},
                         frame_before=frame_before, frame_after=frame_after,
-                        context={},
+                        context=outcome_context,
                     )
                 except Exception:
                     pass
+
+            # ═══ TIER 1 OBSERVATION LOGGING (structured JSONL) ═══
+            self._write_observation_record(
+                agent_id=agent.agent_id,
+                game_id=game_id,
+                generation=current_generation,
+                step=actions_taken,
+                level=current_levels,
+                action_type=action_num,
+                action_data=action_data,
+                frame_changed=frame_changed,
+                cf=cf,
+            )
+
+            # ═══ TIER 2: Periodic frame snapshot (every 20 actions) ═══
+            if actions_taken % 20 == 0:
+                self._write_frame_snapshot(
+                    reason='periodic', agent_id=agent.agent_id,
+                    game_id=game_id, generation=current_generation,
+                    step=actions_taken, level=current_levels,
+                    frame=self._get_frame_array(new_obs), cf=cf,
+                )
 
             # ═══ RECORD ACTION TRACE (persist to DB) ═══
             try:
@@ -317,6 +363,15 @@ class CognitiveGamePlayer:
 
             # Publish events (preserve existing behavior)
             if level_up:
+                # ═══ TIER 2: Snapshot on level-up ═══
+                post_frame_arr = self._get_frame_array(new_obs)
+                self._write_frame_snapshot(
+                    reason='level_up', agent_id=agent.agent_id,
+                    game_id=game_id, generation=current_generation,
+                    step=actions_taken, level=current_levels,
+                    frame=post_frame_arr, cf=cf,
+                )
+
                 from event_bus import EventType, make_event
                 self._gp.event_bus.publish(make_event(
                     EventType.LEVEL_UP,
@@ -386,6 +441,13 @@ class CognitiveGamePlayer:
                 ))
                 break
             if new_obs and new_obs.state == GameState.GAME_OVER:
+                # ═══ TIER 2: Snapshot on game-over ═══
+                self._write_frame_snapshot(
+                    reason='game_over', agent_id=agent.agent_id,
+                    game_id=game_id, generation=current_generation,
+                    step=actions_taken, level=current_levels,
+                    frame=self._get_frame_array(new_obs), cf=cf,
+                )
                 if self._verbose:
                     print(f"    [GAME OVER] after {actions_taken} actions")
                 from event_bus import EventType, make_event
@@ -400,6 +462,15 @@ class CognitiveGamePlayer:
         # End game and get replay
         replay = loop.end_game()
         self._last_replay = replay
+
+        # ═══ PERSIST CAUSAL MAP KNOWLEDGE TO DATABASE ═══
+        # Save what the agent learned (effects, rules, color cycles)
+        # so the next generation inherits this understanding.
+        self._persist_causal_knowledge(loop, game_id, agent.agent_id, current_generation)
+
+        # ═══ RECORD ACTION PRODUCTIVITY (Gap 4C) ═══
+        # Replace dead avg_score_impact with goal-directed productivity
+        self._record_action_productivity(replay, game_id)
 
         # Extract results
         levels_completed = 0
@@ -431,6 +502,318 @@ class CognitiveGamePlayer:
                 print()
             else:
                 print(cf.to_log_line())
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GAP 4C: ACTION PRODUCTIVITY METRIC
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _record_action_productivity(
+        self,
+        replay: List[CognitiveFrame],
+        game_id: str,
+    ):
+        """
+        Record action productivity to the database.
+
+        Replaces the dead avg_score_impact metric with goal-directed
+        productivity: what fraction of actions moved toward the goal.
+        Updates the action_effectiveness table with frame_change_rate
+        and goal_productivity columns.
+        """
+        if not replay:
+            return
+        try:
+            # Aggregate per action type
+            action_stats: dict = {}
+            for cf in replay:
+                a = cf.action_type
+                if a not in action_stats:
+                    action_stats[a] = {
+                        'attempts': 0, 'frame_changes': 0,
+                        'productive': 0, 'destructive': 0, 'wasted': 0,
+                    }
+                action_stats[a]['attempts'] += 1
+                if cf.frame_changed:
+                    action_stats[a]['frame_changes'] += 1
+                if cf.was_productive:
+                    action_stats[a]['productive'] += 1
+                if cf.was_destructive:
+                    action_stats[a]['destructive'] += 1
+                if cf.was_wasted:
+                    action_stats[a]['wasted'] += 1
+
+            for action_num, stats in action_stats.items():
+                attempts = stats['attempts']
+                if attempts == 0:
+                    continue
+                success_rate = stats['frame_changes'] / attempts
+                productivity = stats['productive'] / attempts
+                # Upsert into action_effectiveness
+                self._gp.db.execute_query("""
+                    INSERT INTO action_effectiveness
+                        (game_id, action_number, attempts, successes,
+                         success_rate, avg_score_impact)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(game_id, action_number) DO UPDATE SET
+                        attempts = attempts + excluded.attempts,
+                        successes = successes + excluded.successes,
+                        success_rate = (
+                            (successes + excluded.successes) * 1.0 /
+                            NULLIF(attempts + excluded.attempts, 0)
+                        ),
+                        avg_score_impact = ?,
+                        last_updated = CURRENT_TIMESTAMP
+                """, (
+                    game_id, action_num, attempts, stats['frame_changes'],
+                    success_rate, productivity,
+                    productivity,
+                ))
+        except Exception as e:
+            logger.debug(f"[GAP4C] Action productivity recording failed: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # CAUSAL MAP PERSISTENCE
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _persist_causal_knowledge(
+        self,
+        loop: CognitiveLoop,
+        game_id: str,
+        agent_id: str,
+        generation: int,
+    ):
+        """
+        Persist learned causal knowledge to the database.
+
+        Saves the CausalMap's effects, rules, and color cycles
+        as a world_model_state so the next generation inherits
+        this understanding. This is what makes learning compound
+        across agent lifetimes.
+        """
+        causal_map = loop.causal_map
+        if causal_map is None:
+            return
+
+        try:
+            import uuid as _uuid
+
+            # Build a serializable snapshot of causal knowledge
+            causal_data = {}
+            for pos, effect in causal_map._effects.items():
+                pos_key = f"({pos[0]},{pos[1]})"
+                observations = []
+                for affected_pos in effect.affected:
+                    transitions = effect.color_transitions.get(affected_pos, [])
+                    if isinstance(transitions, list):
+                        for old_c, new_c in transitions:
+                            observations.append({
+                                'changes': [{
+                                    'x': affected_pos[0],
+                                    'y': affected_pos[1],
+                                    'from_color': old_c,
+                                    'to_color': new_c,
+                                }]
+                            })
+                    elif isinstance(transitions, dict):
+                        observations.append({
+                            'changes': [{
+                                'x': affected_pos[0],
+                                'y': affected_pos[1],
+                                'from_color': transitions.get('from', 0),
+                                'to_color': transitions.get('to', 0),
+                            }]
+                        })
+
+                causal_data[pos_key] = {
+                    'observations': observations,
+                    'observation_count': effect.observation_count,
+                    'productive_count': effect.productive_count,
+                    'destructive_count': effect.destructive_count,
+                    'confidence': effect.confidence,
+                }
+
+            # Include color cycle knowledge
+            color_cycles = {}
+            for pos, cycle in causal_map._color_cycles.items():
+                color_cycles[f"({pos[0]},{pos[1]})"] = cycle
+
+            # Include movement knowledge
+            walls = [
+                {'pos': list(pos), 'action': act}
+                for pos, act in causal_map._walls
+            ]
+
+            objects_json = _json.dumps({
+                'causal_map': causal_data,
+                'color_cycles': color_cycles,
+                'walls': walls,
+                'rules': [
+                    {'type': r.rule_type, 'desc': r.description,
+                     'evidence': r.evidence_count, 'confidence': r.confidence}
+                    for r in causal_map._rules
+                ],
+                'completeness': causal_map.completeness,
+            })
+
+            state_id = f"wms_{_uuid.uuid4().hex[:12]}"
+            step_number = len(causal_map._effects)  # Proxy for knowledge depth
+
+            self._gp.db.execute_query("""
+                INSERT OR REPLACE INTO world_model_states
+                    (state_id, game_id, session_id, step_number,
+                     objects_json, grid_hash, score, metadata, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (
+                state_id, game_id, f"gen_{generation}_{agent_id[:8]}",
+                step_number, objects_json, '', 0.0,
+                _json.dumps({'generation': generation, 'agent_id': agent_id}),
+            ))
+
+            if self._verbose:
+                print(
+                    f"    [PERSIST] Saved {len(causal_map._effects)} effects, "
+                    f"{len(causal_map._rules)} rules, "
+                    f"{len(causal_map._color_cycles)} color cycles"
+                )
+        except Exception as e:
+            logger.debug(f"[PERSIST] Causal knowledge save failed: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # TIER 1 OBSERVATION LOGGING
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _write_observation_record(
+        self,
+        agent_id: str,
+        game_id: str,
+        generation: int,
+        step: int,
+        level: int,
+        action_type: int,
+        action_data: Optional[dict],
+        frame_changed: bool,
+        cf: Optional[CognitiveFrame],
+    ):
+        """
+        Write a structured observation record to the JSONL log.
+
+        Tier 1 of the observation system: zero-infrastructure,
+        immediate value. Produces a ring-buffer JSONL file that
+        both humans and LLM can analyze after runs.
+        """
+        try:
+            record = {
+                'ts': datetime.now().isoformat(timespec='milliseconds'),
+                'agent': agent_id[:12],
+                'game': game_id[:8] if game_id else '',
+                'gen': generation,
+                'step': step,
+                'level': level,
+                'action': action_type,
+            }
+            if action_data:
+                record['x'] = action_data.get('x')
+                record['y'] = action_data.get('y')
+            record['frame_chg'] = frame_changed
+
+            if cf:
+                record['strategy'] = cf.strategy
+                record['speed'] = cf.action_speed
+                record['rung'] = cf.rung_name or None
+                record['confidence'] = round(cf.action_confidence, 3)
+                record['map_pct'] = round(cf.map_completeness, 3)
+                record['productive'] = cf.was_productive
+                record['destructive'] = cf.was_destructive
+                record['wasted'] = cf.was_wasted
+                record['goal_delta'] = cf.goal_progress_delta
+                record['goal_total'] = cf.goal_cells_total
+                record['goal_correct'] = cf.goal_cells_correct
+                record['pixels_chg'] = cf.pixels_changed
+                record['surprise'] = round(cf.surprise, 3)
+                record['hud_chg'] = cf.hud_state_changed
+                record['timer'] = cf.timer_urgency
+
+            # Append to ring-buffer log file
+            with open(self._observation_log_path, 'a', encoding='utf-8') as f:
+                f.write(_json.dumps(record, separators=(',', ':')) + '\n')
+
+            # Ring-buffer: truncate when file exceeds max lines.
+            # Check periodically (every 500 steps) to avoid stat overhead.
+            if step % 500 == 0:
+                try:
+                    import os as _os
+                    fsize = _os.path.getsize(self._observation_log_path)
+                    # ~200 bytes per line, so max ~2MB for 10k lines
+                    if fsize > self._observation_max_lines * 250:
+                        with open(self._observation_log_path, 'r', encoding='utf-8') as rf:
+                            lines = rf.readlines()
+                        if len(lines) > self._observation_max_lines:
+                            keep = lines[-self._observation_max_lines:]
+                            with open(self._observation_log_path, 'w', encoding='utf-8') as wf:
+                                wf.writelines(keep)
+                except Exception:
+                    pass
+
+        except Exception:
+            pass  # Never let logging crash the game loop
+
+    # ═══════════════════════════════════════════════════════════════════
+    # TIER 2 OBSERVATION: FRAME SNAPSHOTS (--observe flag)
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _write_frame_snapshot(
+        self,
+        reason: str,
+        agent_id: str,
+        game_id: str,
+        generation: int,
+        step: int,
+        level: int,
+        frame: 'Optional[np.ndarray]',
+        cf: Optional[CognitiveFrame],
+    ):
+        """
+        Tier 2: Save a frame snapshot to the observation log.
+
+        Only active when --observe flag is set. Captures the full
+        frame grid (as a list-of-lists) at key moments:
+        - Level-up: what the game looked like when we leveled up
+        - Game-over: final state for post-mortem analysis
+        - Every 20th action: periodic checkpoints
+
+        These snapshots enable visual replay and LLM analysis of
+        what the agent actually saw.
+        """
+        if not self._observe or frame is None:
+            return
+        try:
+            record = {
+                'ts': datetime.now().isoformat(timespec='milliseconds'),
+                'type': 'frame_snapshot',
+                'reason': reason,
+                'agent': agent_id[:12],
+                'game': game_id[:8] if game_id else '',
+                'gen': generation,
+                'step': step,
+                'level': level,
+            }
+            # Convert frame to compact list-of-lists (int)
+            if isinstance(frame, np.ndarray):
+                record['frame'] = frame.tolist()
+            elif isinstance(frame, list):
+                record['frame'] = frame
+            else:
+                return  # Can't serialize, skip
+
+            if cf:
+                record['strategy'] = cf.strategy
+                record['map_pct'] = round(cf.map_completeness, 3)
+
+            with open(self._observation_log_path, 'a', encoding='utf-8') as f:
+                f.write(_json.dumps(record, separators=(',', ':')) + '\n')
+
+        except Exception:
+            pass  # Never let snapshots crash the game loop
 
     @staticmethod
     def _compute_frame_hash(obs: Any) -> str:

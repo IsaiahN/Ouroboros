@@ -1087,7 +1087,38 @@ class DecisionRungSystem:
     def notify_action_complete(self, action: str, action_data: Dict[str, Any],
                                frame_before: Any, frame_after: Any,
                                context: Dict[str, Any]) -> None:
-        """Notify rungs that have on_action_complete hooks."""
+        """Notify rungs that have on_action_complete hooks.
+
+        Gap 4D: Also adjusts rung confidence based on action outcome.
+        If the action was destructive or wasted, the rung that suggested
+        it should lose confidence. If productive, confidence is boosted.
+        """
+        # ═══ GAP 4D: Outcome-based confidence adjustment ═══
+        # Find which rung was responsible for the last action
+        last_rung_name = context.get('last_rung_name') or (
+            self._last_winning_rung.name if self._last_winning_rung else None)
+        was_productive = context.get('was_productive', False)
+        was_destructive = context.get('was_destructive', False)
+        was_wasted = context.get('was_wasted', False)
+
+        if last_rung_name:
+            for rung in self.rungs:
+                if rung.name == last_rung_name:
+                    # Adjust confidence threshold based on outcome
+                    if was_destructive:
+                        # Rung produced harmful action -> raise threshold (harder to fire)
+                        rung.confidence_threshold = min(
+                            0.95, rung.confidence_threshold + 0.05)
+                    elif was_wasted:
+                        # Rung produced no-effect action -> slight threshold increase
+                        rung.confidence_threshold = min(
+                            0.95, rung.confidence_threshold + 0.02)
+                    elif was_productive:
+                        # Rung produced good action -> lower threshold (easier to fire)
+                        rung.confidence_threshold = max(
+                            0.1, rung.confidence_threshold - 0.03)
+                    break
+
         for rung in self.rungs:
             if hasattr(rung, 'on_action_complete'):
                 try:

@@ -124,6 +124,8 @@ CREATE TABLE action_effectiveness (
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_action_effectiveness_game_action
+    ON action_effectiveness(game_id, action_number);
 
 CREATE TABLE action_effects (
             effect_id TEXT PRIMARY KEY,

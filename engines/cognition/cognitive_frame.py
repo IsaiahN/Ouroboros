@@ -99,11 +99,26 @@ class CognitiveFrame:
     hud_state_hash: int = 0            # Hash of HUD region for change detection
     hud_state_changed: bool = False    # Did the HUD change this step?
 
+    # ─── GAP 5C: SEMANTIC HUD STATE ──────────────────────────────────
+    carried_state: Dict[str, Any] = field(default_factory=dict)
+    # Per-region HUD semantics: e.g. {'top': {hash, colors, objects},
+    # 'bottom': {hash, colored_frac}, 'left': {...}, 'right': {...}}
+    carried_state_changed: bool = False  # Did any non-timer HUD region change?
+    lives_remaining: int = -1          # -1 = unknown; >=0 = detected count
+    hud_region_changes: Dict[str, bool] = field(default_factory=dict)
+    # Which HUD sub-regions changed: {'top': True, 'bottom': False, ...}
+
     # ─── GAP 1: GOAL-STATE FROM STABLE REGIONS ──────────────────────
     stable_region_detected: bool = False
     goal_cells_total: int = 0          # Total cells that must match
     goal_cells_correct: int = 0        # Currently matching cells
     goal_completion: float = 0.0       # correct / total
+
+    # ─── SEMANTIC GOAL MATCHING ───────────────────────────────────────
+    reference_panel_detected: bool = False  # True if a goal/reference region found
+    goal_match_cells: int = 0          # Workspace cells matching reference panel
+    goal_mismatch_cells: int = 0       # Workspace cells NOT matching reference
+    goal_match_fraction: float = 0.0   # match / (match + mismatch)
 
     def to_log_line(self) -> str:
         """Single-line log output for quick scanning."""
@@ -115,7 +130,10 @@ class CognitiveFrame:
             result = "LEVEL-UP"
         # Append goal-progress indicator
         goal_tag = ""
-        if self.goal_cells_total > 0:
+        if self.reference_panel_detected and self.goal_match_cells + self.goal_mismatch_cells > 0:
+            # Semantic goal match available — use it
+            goal_tag = f" G:{self.goal_match_cells}/{self.goal_match_cells + self.goal_mismatch_cells}"
+        elif self.goal_cells_total > 0:
             goal_tag = f" G:{self.goal_cells_correct}/{self.goal_cells_total}"
         if self.was_productive:
             goal_tag += "[+]"
@@ -195,8 +213,16 @@ class CognitiveFrame:
             # Gap 5: State tracking
             'timer_urgency': self.timer_urgency,
             'hud_state_changed': self.hud_state_changed,
+            'carried_state_changed': self.carried_state_changed,
+            'lives_remaining': self.lives_remaining,
+            'hud_region_changes': self.hud_region_changes,
             # Gap 1: Goal-state
             'goal_cells_total': self.goal_cells_total,
             'goal_cells_correct': self.goal_cells_correct,
             'goal_completion': self.goal_completion,
+            # Semantic goal matching
+            'reference_panel_detected': self.reference_panel_detected,
+            'goal_match_cells': self.goal_match_cells,
+            'goal_mismatch_cells': self.goal_mismatch_cells,
+            'goal_match_fraction': self.goal_match_fraction,
         }

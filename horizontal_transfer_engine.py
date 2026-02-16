@@ -610,9 +610,69 @@ class HorizontalTransferEngine:
                         UPDATE agents SET sensation_profile = ? WHERE agent_id = ?
                     """, (json.dumps(recipient_sensations), recipient_id))
 
+            # ─── Transfer causal knowledge (rules, effects, cycles) ────
+            # This is the HIGH-VALUE transfer: causal rules generalize
+            # across levels and sessions, unlike raw action sequences
+            # which are position/level-specific.
+            causal_transferred = 0
+            try:
+                # Find donor's best causal knowledge for each game type
+                donor_causal = self.db.execute_query("""
+                    SELECT game_id, objects_json, step_number
+                    FROM world_model_states
+                    WHERE metadata LIKE ?
+                    ORDER BY step_number DESC
+                    LIMIT 5
+                """, (f'%"agent_id": "{donor_id[:8]}%',))
+
+                if not donor_causal:
+                    # Fallback: match by session_id pattern
+                    donor_causal = self.db.execute_query("""
+                        SELECT game_id, objects_json, step_number
+                        FROM world_model_states
+                        WHERE session_id LIKE ?
+                        ORDER BY step_number DESC
+                        LIMIT 5
+                    """, (f'%{donor_id[:8]}%',))
+
+                if donor_causal:
+                    for row in donor_causal:
+                        game_id = row['game_id'] if isinstance(row, dict) else row[0]
+                        obj_json = row['objects_json'] if isinstance(row, dict) else row[1]
+                        if not obj_json:
+                            continue
+
+                        # Re-insert as a new world_model_state attributed
+                        # to the recipient so _load_prior_knowledge finds it
+                        import uuid as _uuid
+                        state_id = f"htx_{_uuid.uuid4().hex[:12]}"
+                        self.db.execute_query("""
+                            INSERT OR REPLACE INTO world_model_states
+                                (state_id, game_id, session_id, step_number,
+                                 objects_json, grid_hash, score, metadata,
+                                 created_at)
+                            VALUES (?, ?, ?, ?, ?, '', 0.0, ?, datetime('now'))
+                        """, (
+                            state_id, game_id,
+                            f"htransfer_{recipient_id[:8]}",
+                            row['step_number'] if isinstance(row, dict) else row[2],
+                            obj_json,
+                            json.dumps({
+                                'horizontal_transfer': True,
+                                'donor_agent': donor_id,
+                                'recipient_agent': recipient_id,
+                                'transfer_id': transfer_id,
+                            }),
+                        ))
+                        causal_transferred += 1
+
+            except Exception as e:
+                logger.debug(f"[HTX] Causal knowledge transfer failed: {e}")
+
             # Record successful transfer
             knowledge_content = {
                 'sequences_transferred': transferred_count,
+                'causal_maps_transferred': causal_transferred,
                 'sensation_mappings_transferred': len(donor_sensations.get('object_sensations', {})),
                 'emotional_context_included': True,
                 'layer': 3
@@ -624,7 +684,7 @@ class HorizontalTransferEngine:
                 WHERE transfer_id = ?
             """, (json.dumps(knowledge_content), transfer_id))
 
-            return transferred_count > 0
+            return transferred_count > 0 or causal_transferred > 0
 
         except Exception as e:
             print(f"Error in somatic knowledge transfer: {e}")

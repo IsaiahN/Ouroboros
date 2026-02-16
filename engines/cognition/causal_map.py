@@ -43,6 +43,11 @@ class TileEffect:
     productive_count: int = 0              # Times clicking here moved toward goal
     destructive_count: int = 0             # Times clicking here moved away from goal
     neutral_count: int = 0                 # Times clicking here changed nothing goal-relevant
+    # Prediction-surprise: track which action context this was observed under
+    context_tags: List[Tuple[int, ...]] = field(default_factory=list)
+    # Each tag is the action_context tuple at time of observation
+    surprise_count: int = 0                # Times prediction was wrong at this position
+    prediction_count: int = 0              # Times we predicted before clicking here
 
     def __post_init__(self):
         """Update confidence from observation count."""
@@ -55,6 +60,16 @@ class TileEffect:
         if total == 0:
             return 0.5  # Unknown
         return self.productive_count / total
+
+    @property
+    def reliability(self) -> float:
+        """How reliably we can predict effects at this position (0-1).
+
+        Low reliability means the position's effects are context-dependent.
+        """
+        if self.prediction_count == 0:
+            return 0.5  # Unknown
+        return 1.0 - (self.surprise_count / self.prediction_count)
 
 
 @dataclass
@@ -76,6 +91,30 @@ class PlannedAction:
     reason: str                            # Why this action
     step_number: int = 0
     confidence: float = 0.0
+
+
+@dataclass
+class Prediction:
+    """What we expect to happen when clicking a position."""
+    position: Tuple[int, int]
+    expected_affected: List[Tuple[int, int]]  # Positions we expect to change
+    expected_transitions: Dict[Tuple[int, int], Tuple[int, int]]
+    # {(x,y): (from_color, to_color)} -- predicted color changes
+    confidence: float = 0.0
+    source: str = "effects"  # 'effects', 'context_rule', 'cycle'
+
+
+@dataclass
+class SurpriseEvent:
+    """A prediction failure -- the world did something unexpected."""
+    position: Tuple[int, int]              # Where the action was
+    action_context: Tuple[int, ...]        # Recent action history preceding this
+    predicted_affected: int                # How many cells we expected to change
+    actual_affected: int                   # How many actually changed
+    predicted_change: bool                 # Did we expect a frame change?
+    actual_change: bool                    # Did the frame actually change?
+    mismatch_type: str                     # 'new_effects', 'missing_effects', 'different_effects'
+    step_number: int = 0
 
 
 class CausalMap:
@@ -132,6 +171,35 @@ class CausalMap:
         self._delayed_observations: List[Dict[str, Any]] = []
         # Frames observed after an action, for detecting delayed effects
 
+        # HUD/environmental state tracking (Gap 5B)
+        self._hud_change_positions: Dict[Tuple[int, int], int] = {}
+        # {(x,y): count} -- positions whose actions caused HUD changes
+
+        # ─── Prediction-Surprise-Context System ───────────────────────
+        # Enables discovery of context-dependent mechanics (camera pans,
+        # mode switches, state-dependent effects) through prediction
+        # failure analysis rather than hardcoded assumptions.
+
+        # Rolling window of recent action types (last N actions)
+        self._action_context: List[int] = []
+        self._context_window_size: int = 5
+
+        # Surprise log -- prediction failures with their action context
+        self._surprise_log: List[SurpriseEvent] = []
+        self._max_surprise_log: int = 200
+
+        # Context-dependent effects: when the SAME position produces
+        # DIFFERENT effects depending on what actions preceded the click.
+        # Key: context prefix tuple (e.g., (2,) means "after ACTION2")
+        # Value: dict of position -> observed TileEffect under that context
+        self._context_effects: Dict[
+            Tuple[int, ...],
+            Dict[Tuple[int, int], TileEffect]
+        ] = {}
+
+        # Total steps for surprise event numbering
+        self._total_steps: int = 0
+
     # ─── Public Properties ────────────────────────────────────────────
 
     @property
@@ -184,6 +252,305 @@ class CausalMap:
         self._plan_step += 1
         if self._plan_step >= len(self._plan):
             self._plan_valid = False
+
+    # ─── Prediction-Surprise-Context System ───────────────────────────
+    #
+    # This is how the CausalMap discovers context-dependent mechanics:
+    #
+    #   1. PREDICT: Before an action, predict what will happen based on
+    #      known effects. "Clicking (5,3) should toggle red->blue."
+    #
+    #   2. OBSERVE: After the action, compare prediction to reality.
+    #
+    #   3. SURPRISE: If prediction was wrong, log a SurpriseEvent with
+    #      the action_context (what actions preceded this one).
+    #
+    #   4. CORRELATE: After enough surprises, check if the same context
+    #      prefix keeps appearing. "Every surprise at (5,3) happened
+    #      after ACTION2" = context-dependent effect.
+    #
+    #   5. LEARN: Store context-dependent effects so future predictions
+    #      use context: "after ACTION2, clicking (5,3) does Y instead."
+    #
+    # This handles camera panning, mode switches, state-dependent
+    # mechanics, and any other quirk where the same position produces
+    # different effects depending on recent actions.
+
+    def record_action_context(self, action_type: int):
+        """
+        Record that an action was taken (any type: click, pan, move).
+
+        This maintains the rolling context window that gets tagged
+        onto observations. EVERY action must call this, not just
+        clicks, because non-click actions (pans, mode switches)
+        are exactly the context that explains why click effects
+        change.
+        """
+        self._action_context.append(action_type)
+        if len(self._action_context) > self._context_window_size:
+            self._action_context = self._action_context[-self._context_window_size:]
+        self._total_steps += 1
+
+    def predict(self, position: Tuple[int, int]) -> Optional[Prediction]:
+        """
+        Predict what will happen if we click this position.
+
+        First checks context-dependent effects (if we've learned that
+        after certain actions, this position behaves differently).
+        Falls back to the default position effects.
+
+        Returns None if we have no knowledge about this position.
+        """
+        ctx = tuple(self._action_context)
+
+        # Strategy 1: Check context-specific effects
+        # Try progressively shorter context prefixes
+        for prefix_len in range(len(ctx), 0, -1):
+            prefix = ctx[-prefix_len:]
+            ctx_effects = self._context_effects.get(prefix)
+            if ctx_effects and position in ctx_effects:
+                eff = ctx_effects[position]
+                # Build prediction from context-specific knowledge
+                transitions = {}
+                for aff_pos, trans_list in eff.color_transitions.items():
+                    if trans_list:
+                        last = trans_list[-1]  # Most recent transition
+                        transitions[aff_pos] = last
+                return Prediction(
+                    position=position,
+                    expected_affected=list(eff.affected),
+                    expected_transitions=transitions,
+                    confidence=eff.confidence * 0.9,  # Slight discount
+                    source='context_rule',
+                )
+
+        # Strategy 2: Default position effects
+        eff = self._effects.get(position)
+        if eff is None:
+            return None
+
+        transitions = {}
+        for aff_pos, trans_list in eff.color_transitions.items():
+            if trans_list:
+                last = trans_list[-1]
+                transitions[aff_pos] = last
+
+        return Prediction(
+            position=position,
+            expected_affected=list(eff.affected),
+            expected_transitions=transitions,
+            confidence=eff.confidence,
+            source='effects',
+        )
+
+    def check_surprise(
+        self,
+        click_pos: Tuple[int, int],
+        prediction: Optional[Prediction],
+        actual_affected: List[Tuple[int, int]],
+        actual_changed: bool,
+    ) -> Optional[SurpriseEvent]:
+        """
+        Compare prediction to actual outcome and log surprises.
+
+        This is the key learning signal. When predictions fail, the
+        action context at the time of failure tells us WHAT CAUSED
+        the different outcome.
+
+        Returns a SurpriseEvent if surprised, None if as expected.
+        """
+        if prediction is None:
+            return None  # No prediction = nothing to be surprised about
+
+        # Determine mismatch type
+        predicted_change = len(prediction.expected_affected) > 0
+        actual_set = set(actual_affected)
+        predicted_set = set(prediction.expected_affected)
+
+        # Check for surprise conditions
+        surprised = False
+        mismatch_type = ''
+
+        if predicted_change != actual_changed:
+            # Expected change but got none, or vice versa
+            surprised = True
+            mismatch_type = 'change_mismatch'
+        elif actual_changed and predicted_change:
+            # Both changed, but did different things change?
+            overlap = predicted_set & actual_set
+            union = predicted_set | actual_set
+
+            # Check 1: spatial overlap -- are the same positions changing?
+            if union and len(overlap) / len(union) < 0.6:
+                surprised = True
+                if actual_set - predicted_set:
+                    mismatch_type = 'new_effects'
+                elif predicted_set - actual_set:
+                    mismatch_type = 'missing_effects'
+                else:
+                    mismatch_type = 'different_effects'
+
+            # Check 2: magnitude change -- did the NUMBER of affected
+            # cells change dramatically? (e.g., predicted 1 cell changed
+            # but 50 changed = camera pan or mode switch)
+            if not surprised and len(predicted_set) > 0:
+                ratio = len(actual_set) / len(predicted_set)
+                if ratio > 3.0 or ratio < 0.33:
+                    surprised = True
+                    mismatch_type = 'magnitude_change'
+
+        if not surprised:
+            # Update prediction success tracking
+            eff = self._effects.get(click_pos)
+            if eff:
+                eff.prediction_count += 1
+            return None
+
+        # ─── SURPRISE DETECTED ───────────────────────────────────────
+        ctx = tuple(self._action_context)
+        event = SurpriseEvent(
+            position=click_pos,
+            action_context=ctx,
+            predicted_affected=len(predicted_set),
+            actual_affected=len(actual_set),
+            predicted_change=predicted_change,
+            actual_change=actual_changed,
+            mismatch_type=mismatch_type,
+            step_number=self._total_steps,
+        )
+
+        # Update surprise tracking on the effect
+        eff = self._effects.get(click_pos)
+        if eff:
+            eff.surprise_count += 1
+            eff.prediction_count += 1
+            eff.context_tags.append(ctx)
+
+        # Log the surprise
+        self._surprise_log.append(event)
+        if len(self._surprise_log) > self._max_surprise_log:
+            self._surprise_log = self._surprise_log[-self._max_surprise_log:]
+
+        logger.debug(
+            f"[SURPRISE] at ({click_pos[0]},{click_pos[1]}) "
+            f"type={mismatch_type} context={ctx} "
+            f"predicted={len(predicted_set)} actual={len(actual_set)}"
+        )
+
+        # After accumulating surprises, try to learn context rules
+        self._learn_context_rules()
+
+        return event
+
+    def _learn_context_rules(self):
+        """
+        Extract context-dependent rules from the surprise log.
+
+        Pattern: if surprises at a position consistently happen after
+        the same action prefix, then that prefix CHANGES what the
+        position does. Store the actual effects observed under that
+        context as context_effects.
+
+        This is how the system discovers:
+        - "After ACTION1 (pan up), tile positions show different content"
+        - "After ACTION5 (mode switch), clicking does something else"
+        - Any context-dependent mechanic, without hardcoding
+        """
+        if len(self._surprise_log) < 3:
+            return  # Need enough data
+
+        # Group surprises by position
+        pos_surprises: Dict[Tuple[int, int], List[SurpriseEvent]] = defaultdict(list)
+        for event in self._surprise_log:
+            pos_surprises[event.position].append(event)
+
+        for pos, events in pos_surprises.items():
+            if len(events) < 2:
+                continue
+
+            # Find common context prefix across surprises at this position
+            # Try each prefix length from 1 to context_window_size
+            for prefix_len in range(1, self._context_window_size + 1):
+                # Extract the prefix of each surprise's context
+                prefix_counts: Dict[Tuple[int, ...], int] = defaultdict(int)
+                for event in events:
+                    if len(event.action_context) >= prefix_len:
+                        # Use the LAST prefix_len actions as the context key
+                        prefix = event.action_context[-prefix_len:]
+                        prefix_counts[prefix] += 1
+
+                # If a prefix appears in >60% of surprises at this position,
+                # that prefix is the context that changes the effect
+                for prefix, count in prefix_counts.items():
+                    if count >= 2 and count / len(events) > 0.6:
+                        # This context prefix correlates with surprises!
+                        # Store the actual effects observed under this context
+                        if prefix not in self._context_effects:
+                            self._context_effects[prefix] = {}
+
+                        # The actual effect under this context comes from
+                        # the most recent observation at this position
+                        # (the surprise showed the old prediction was wrong,
+                        # so the current _effects entry IS the new-context effect)
+                        eff = self._effects.get(pos)
+                        if eff and pos not in self._context_effects[prefix]:
+                            self._context_effects[prefix][pos] = TileEffect(
+                                position=pos,
+                                affected=list(eff.affected),
+                                color_transitions=dict(eff.color_transitions),
+                                observation_count=count,
+                                last_frame_changed=eff.last_frame_changed,
+                                confidence=min(0.8, count * 0.2),
+                            )
+
+                            logger.debug(
+                                f"[CONTEXT-RULE] Learned: after {prefix}, "
+                                f"pos ({pos[0]},{pos[1]}) has different effects "
+                                f"(from {count} surprises)"
+                            )
+
+                            # Also create a CausalRule for this discovery
+                            rule_type = f"context_dependent_{'_'.join(str(a) for a in prefix)}"
+                            existing = [
+                                r for r in self._rules if r.rule_type == rule_type
+                            ]
+                            if not existing:
+                                self._rules.append(CausalRule(
+                                    rule_type=rule_type,
+                                    description=(
+                                        f"After actions {prefix}, effects change "
+                                        f"at {count} positions"
+                                    ),
+                                    evidence_count=count,
+                                    confidence=min(0.8, count * 0.2),
+                                    parameters={
+                                        'context_prefix': list(prefix),
+                                        'affected_positions': [list(pos)],
+                                    },
+                                ))
+
+    @property
+    def surprise_rate(self) -> float:
+        """Fraction of predictions that were wrong (0-1).
+
+        High surprise rate means the effects are context-dependent
+        and the system hasn't fully learned the context rules yet.
+        """
+        total_pred = sum(e.prediction_count for e in self._effects.values())
+        total_surp = sum(e.surprise_count for e in self._effects.values())
+        if total_pred == 0:
+            return 0.0
+        return total_surp / total_pred
+
+    @property
+    def has_context_rules(self) -> bool:
+        """Whether any context-dependent rules have been learned."""
+        return len(self._context_effects) > 0
+
+    @property
+    def context_rule_count(self) -> int:
+        """Number of distinct context prefixes with learned effects."""
+        return len(self._context_effects)
 
     # ─── Goal Progress Feedback (Gap 4) ───────────────────────────────
 
@@ -252,14 +619,28 @@ class CausalMap:
         This is the MAP phase of the PTMA loop:
         We clicked at click_pos, and the frame changed (or didn't).
         Record what happened so we know for next time.
+
+        Integrates with the prediction-surprise system:
+        1. BEFORE updating, predict what should happen (from prior knowledge)
+        2. Compute actual changes
+        3. Compare prediction to reality -> detect surprises
+        4. THEN update the effects as usual
         """
         self._explored.add(click_pos)
 
         if pre_frame is None or post_frame is None:
             return
 
+        # ─── Step 1: Predict (before updating) ───────────────────────
+        prediction = self.predict(click_pos)
+
         if not frame_changed:
-            # Clicking here did nothing — record that
+            # Clicking here did nothing — check if that's surprising
+            self.check_surprise(
+                click_pos, prediction,
+                actual_affected=[], actual_changed=False,
+            )
+            # Record the non-effect
             if click_pos not in self._effects:
                 self._effects[click_pos] = TileEffect(
                     position=click_pos,
@@ -296,6 +677,16 @@ class CausalMap:
             # Deduplicate affected positions
             affected_unique = sorted(set(affected))
 
+            # ─── Step 2: Check surprise ───────────────────────────────
+            self.check_surprise(
+                click_pos, prediction,
+                actual_affected=affected_unique,
+                actual_changed=True,
+            )
+
+            # ─── Step 3: Update effects as usual ──────────────────────
+            ctx = tuple(self._action_context)
+
             if click_pos in self._effects:
                 # Update existing effect
                 eff = self._effects[click_pos]
@@ -307,6 +698,9 @@ class CausalMap:
                 eff.observation_count += 1
                 eff.last_frame_changed = True
                 eff.confidence = min(0.95, 0.3 + (eff.observation_count * 0.15))
+                # Tag with current action context
+                if ctx:
+                    eff.context_tags.append(ctx)
             else:
                 self._effects[click_pos] = TileEffect(
                     position=click_pos,
@@ -314,6 +708,7 @@ class CausalMap:
                     color_transitions=dict(color_transitions),
                     observation_count=1,
                     last_frame_changed=True,
+                    context_tags=[ctx] if ctx else [],
                 )
 
             # Update color cycle knowledge
@@ -517,87 +912,119 @@ class CausalMap:
         return sorted(candidates)
 
     def _try_extract_rules(self):
-        """Try to generalize from individual effects to rules."""
+        """Try to generalize from individual effects to rules.
+
+        Data-driven rule extraction: discovers patterns from observations
+        rather than looking for specific hardcoded patterns (e.g. von Neumann).
+
+        Detects:
+        - self_toggle: clicking affects only the clicked cell
+        - multi_cell: clicking affects multiple cells (pattern learned from data)
+        - color_cycle_N: tiles cycle through N colors
+        - no_effect: some positions produce no change
+        """
         if len(self._effects) < 3:
             return  # Not enough data
 
-        # Detect grid spacing from known interactive positions
-        spacing = self._detect_grid_spacing()
-
-        # Check for von Neumann neighborhood pattern
-        # (clicking toggles self + 4 cardinal neighbors)
-        vn_evidence = 0
         total_effects = 0
+        self_only_count = 0
+        multi_cell_count = 0
+        no_effect_count = 0
+        affected_counts: list = []  # How many cells each click affects
 
-        for click_pos, effect in self._effects.items():
+        for _click_pos, effect in self._effects.items():
             if not effect.last_frame_changed:
+                no_effect_count += 1
                 continue
             total_effects += 1
 
             affected_set = set(effect.affected)
-            if click_pos in affected_set:
-                # Check if affected positions form a cross pattern
-                cx, cy = click_pos
-                # Try each detected spacing
-                found_vn = False
-                for sp in spacing:
-                    expected_vn = {
-                        (cx, cy),
-                        (cx - sp, cy), (cx + sp, cy),
-                        (cx, cy - sp), (cx, cy + sp),
-                    }
-                    overlap = len(affected_set & expected_vn)
-                    if overlap >= 3:
-                        vn_evidence += 1
-                        found_vn = True
-                        break
-                if not found_vn:
-                    # Fallback: check if ANY 4 affected positions form a cross
-                    # by computing distances from click_pos
-                    dists = sorted(
-                        {abs(ax - cx) + abs(ay - cy) for (ax, ay) in affected_set if (ax, ay) != click_pos}
-                    )
-                    # If all same distance and >=4 points -> cross-like
-                    if len(dists) >= 1 and len(affected_set) >= 3:
-                        cardinal_dist = dists[0] if dists else 0
-                        if cardinal_dist > 0:
-                            expected_vn = {
-                                (cx, cy),
-                                (cx - cardinal_dist, cy), (cx + cardinal_dist, cy),
-                                (cx, cy - cardinal_dist), (cx, cy + cardinal_dist),
-                            }
-                            overlap = len(affected_set & expected_vn)
-                            if overlap >= 3:
-                                vn_evidence += 1
+            n_affected = len(affected_set)
+            affected_counts.append(n_affected)
 
-        if total_effects > 0 and vn_evidence / total_effects > 0.5:
-            # Von Neumann rule detected
-            existing_vn = [r for r in self._rules if r.rule_type == 'von_neumann']
-            if not existing_vn:
-                self._rules.append(CausalRule(
-                    rule_type='von_neumann',
-                    description='Clicking toggles self + 4 cardinal neighbors',
-                    evidence_count=vn_evidence,
-                    confidence=min(0.9, vn_evidence / total_effects),
-                ))
+            if n_affected <= 1:
+                self_only_count += 1
             else:
-                existing_vn[0].evidence_count = vn_evidence
-                existing_vn[0].confidence = min(0.9, vn_evidence / total_effects)
+                multi_cell_count += 1
 
-        # Check for simple toggle (clicking only affects self)
-        self_only = sum(
-            1 for eff in self._effects.values()
-            if eff.last_frame_changed and len(set(eff.affected)) == 1
-        )
-        if total_effects > 0 and self_only / total_effects > 0.5:
-            existing_toggle = [r for r in self._rules if r.rule_type == 'self_toggle']
-            if not existing_toggle:
+        if total_effects == 0:
+            return
+
+        # ── Rule: self_toggle (clicking only affects the clicked cell) ──
+        if self_only_count / total_effects > 0.5:
+            existing = [r for r in self._rules if r.rule_type == 'self_toggle']
+            if not existing:
                 self._rules.append(CausalRule(
                     rule_type='self_toggle',
-                    description='Clicking toggles only the clicked cell',
-                    evidence_count=self_only,
-                    confidence=min(0.9, self_only / total_effects),
+                    description='Clicking affects only the clicked cell',
+                    evidence_count=self_only_count,
+                    confidence=min(0.9, self_only_count / total_effects),
                 ))
+            else:
+                existing[0].evidence_count = self_only_count
+                existing[0].confidence = min(0.9, self_only_count / total_effects)
+
+        # ── Rule: multi_cell (clicking affects multiple cells) ──
+        # Discovered from data — describes what was observed, not assumed
+        if multi_cell_count / total_effects > 0.3:
+            # Compute average affected count for multi-cell effects
+            multi_counts = [c for c in affected_counts if c > 1]
+            avg_affected = (
+                sum(multi_counts) / len(multi_counts) if multi_counts else 0
+            )
+            existing = [r for r in self._rules if r.rule_type == 'multi_cell']
+            desc = (
+                f'Clicking affects ~{avg_affected:.1f} cells on average '
+                f'({multi_cell_count}/{total_effects} observations)'
+            )
+            if not existing:
+                self._rules.append(CausalRule(
+                    rule_type='multi_cell',
+                    description=desc,
+                    evidence_count=multi_cell_count,
+                    confidence=min(0.9, multi_cell_count / total_effects),
+                ))
+            else:
+                existing[0].evidence_count = multi_cell_count
+                existing[0].confidence = min(0.9, multi_cell_count / total_effects)
+                existing[0].description = desc
+
+        # ── Rule: color_cycle_N (tiles cycle through N colors) ──
+        cycle_lengths: list = []
+        for pos, cycle in self._color_cycles.items():
+            if len(cycle) >= 2:
+                # Detect cycle length: find repeat in the sequence
+                unique_colors = []
+                for c in cycle:
+                    if c in unique_colors:
+                        break
+                    unique_colors.append(c)
+                if len(unique_colors) >= 2:
+                    cycle_lengths.append(len(unique_colors))
+
+        if cycle_lengths:
+            from collections import Counter as _Counter
+            most_common_len = _Counter(cycle_lengths).most_common(1)[0][0]
+            existing = [
+                r for r in self._rules
+                if r.rule_type.startswith('color_cycle')
+            ]
+            desc = (
+                f'Tiles cycle through {most_common_len} colors '
+                f'(observed at {len(cycle_lengths)} positions)'
+            )
+            rule_type = f'color_cycle_{most_common_len}'
+            if not existing:
+                self._rules.append(CausalRule(
+                    rule_type=rule_type,
+                    description=desc,
+                    evidence_count=len(cycle_lengths),
+                    confidence=min(0.9, len(cycle_lengths) / max(total_effects, 1)),
+                ))
+            else:
+                existing[0].rule_type = rule_type
+                existing[0].description = desc
+                existing[0].evidence_count = len(cycle_lengths)
 
     def _update_color_cycles(
         self, transitions: Dict[Tuple[int, int], List[Tuple[int, int]]]
@@ -649,6 +1076,250 @@ class CausalMap:
     def get_visited_positions(self) -> Set[Tuple[int, int]]:
         """Get all positions the agent has visited."""
         return self._visited_positions
+
+    def find_path_bfs(
+        self,
+        from_pos: Tuple[int, int],
+        to_pos: Tuple[int, int],
+        grid_size: int = 64,
+    ) -> List[int]:
+        """
+        Gap 3C: BFS pathfinding for movement games.
+
+        Uses known walls and open paths to find the shortest sequence
+        of directional actions (1=up, 2=down, 3=left, 4=right) from
+        from_pos to to_pos.
+
+        Returns a list of action_type ints representing the path,
+        or an empty list if no path is found within the explored map.
+
+        The BFS only considers positions we've visited or can infer
+        are reachable. Unknown positions are treated as passable
+        (optimistic exploration).
+        """
+        if from_pos == to_pos:
+            return []
+
+        # Direction offsets: action -> (dx, dy)
+        direction_offsets = {
+            1: (0, -1),   # up
+            2: (0, 1),    # down
+            3: (-1, 0),   # left
+            4: (1, 0),    # right
+        }
+
+        # BFS
+        from collections import deque as bfs_deque
+        queue: 'bfs_deque[Tuple[Tuple[int, int], List[int]]]' = bfs_deque()
+        queue.append((from_pos, []))
+        visited: Set[Tuple[int, int]] = {from_pos}
+
+        # Limit search to prevent runaway on large grids
+        max_steps = min(grid_size * grid_size, 500)
+        steps = 0
+
+        while queue and steps < max_steps:
+            steps += 1
+            current, path = queue.popleft()
+
+            for action, (dx, dy) in direction_offsets.items():
+                next_pos = (current[0] + dx, current[1] + dy)
+
+                # Bounds check
+                if not (0 <= next_pos[0] < grid_size and 0 <= next_pos[1] < grid_size):
+                    continue
+
+                # Already visited in BFS
+                if next_pos in visited:
+                    continue
+
+                # Known wall? Skip.
+                if (current, action) in self._walls:
+                    continue
+
+                visited.add(next_pos)
+                new_path = path + [action]
+
+                if next_pos == to_pos:
+                    return new_path
+
+                queue.append((next_pos, new_path))
+
+        return []  # No path found
+
+    # ─── Environmental State Changes (Gap 5B) ─────────────────────────
+
+    def record_hud_change(
+        self,
+        action_pos: Optional[Tuple[int, int]],
+        action_type: int,
+        timer_urgency: str = "safe",
+    ):
+        """
+        Record that an action caused the HUD/environment state to change.
+
+        Gap 5B: The HUD (edge pixels) changed after this action. This
+        might mean a timer advanced, a life was lost, a key was picked up,
+        etc. We record the association so that the system can learn which
+        actions cause environmental state transitions.
+
+        This enriches per-position effects with 'environmental impact' --
+        some positions do more than just change tiles; they change
+        the game state itself.
+        """
+        if action_pos is None:
+            return
+
+        effect = self._effects.get(action_pos)
+        if effect is not None:
+            # Tag this effect as having environmental impact
+            if not hasattr(effect, 'hud_change_count'):
+                effect.hud_change_count = 0  # type: ignore[attr-defined]
+            effect.hud_change_count += 1  # type: ignore[attr-defined]
+
+        # Store separately for global awareness
+        self._hud_change_positions[action_pos] = (
+            self._hud_change_positions.get(action_pos, 0) + 1
+        )
+
+    # ─── Temporal Causal Learning (VC33 delayed effects) ──────────────
+
+    def start_delayed_observation(
+        self,
+        action_pos: Tuple[int, int],
+        action_type: int,
+        frame_at_action: Optional[np.ndarray],
+        window_size: int = 5,
+    ):
+        """
+        Begin tracking delayed effects from an action.
+
+        For VC33-style games where clicking a switch doesn't
+        produce immediate visible results -- the effect unfolds
+        over subsequent frames (fluid flow, passenger movement).
+
+        Args:
+            action_pos: Where the action was taken
+            action_type: What action was taken
+            frame_at_action: Frame state when action was taken
+            window_size: How many subsequent frames to observe
+        """
+        if frame_at_action is None:
+            return
+
+        obs = {
+            'action_pos': action_pos,
+            'action_type': action_type,
+            'start_frame': frame_at_action.copy(),
+            'window_size': window_size,
+            'frames_remaining': window_size,
+            'total_pixels_changed': 0,
+            'delayed_changes': [],  # (step_offset, pixels_changed, regions)
+        }
+        self._delayed_observations.append(obs)
+
+    def observe_delayed_frame(self, current_frame: np.ndarray):
+        """
+        Feed a new frame into all active delayed observation windows.
+
+        Call this EVERY frame (even frames where no action was taken)
+        so that delayed effects are attributed to the action that
+        caused them.
+        """
+        completed = []
+
+        for i, obs in enumerate(self._delayed_observations):
+            if obs['frames_remaining'] <= 0:
+                completed.append(i)
+                continue
+
+            obs['frames_remaining'] -= 1
+            step_offset = obs['window_size'] - obs['frames_remaining']
+
+            try:
+                start = obs['start_frame']
+                if start.shape != current_frame.shape:
+                    continue
+
+                diff = start != current_frame
+                pixels_changed = int(diff.sum())
+
+                if pixels_changed > 0:
+                    obs['total_pixels_changed'] += pixels_changed
+
+                    # Find the regions that changed
+                    ys, xs = np.where(diff)
+                    if len(xs) > 0:
+                        cx = int(np.mean(xs))
+                        cy = int(np.mean(ys))
+                        obs['delayed_changes'].append({
+                            'offset': step_offset,
+                            'pixels': pixels_changed,
+                            'centroid': (cx, cy),
+                        })
+
+            except Exception:
+                continue
+
+            if obs['frames_remaining'] <= 0:
+                completed.append(i)
+
+        # Process completed observations
+        for i in sorted(completed, reverse=True):
+            obs = self._delayed_observations.pop(i)
+            self._process_completed_delayed_observation(obs)
+
+    def _process_completed_delayed_observation(self, obs: Dict[str, Any]):
+        """
+        Process a completed delayed observation window.
+
+        If significant delayed changes were detected, record them
+        as effects of the original action. This lets the CausalMap
+        understand that "clicking switch S caused passenger movement
+        5 frames later."
+        """
+        action_pos = obs['action_pos']
+        total_changed = obs['total_pixels_changed']
+        delayed_changes = obs['delayed_changes']
+
+        if total_changed == 0 or not delayed_changes:
+            return  # No delayed effects observed
+
+        # Record as extended effect
+        effect = self._effects.get(action_pos)
+        if effect is None:
+            # Create a new effect for this position
+            effect = TileEffect(
+                position=action_pos,
+                affected=[],
+                color_transitions={},
+                observation_count=0,
+                last_frame_changed=True,
+            )
+            self._effects[action_pos] = effect
+
+        # Add delayed-change regions as affected positions
+        for change in delayed_changes:
+            centroid = change['centroid']
+            if centroid not in effect.affected:
+                effect.affected.append(centroid)
+
+        effect.observation_count += 1
+        effect.last_frame_changed = True
+        effect.confidence = min(0.95, 0.3 + (effect.observation_count * 0.15))
+
+        self._explored.add(action_pos)
+        self._all_positions.add(action_pos)
+
+        logger.debug(
+            f"[CAUSAL-MAP] Delayed effect: action at {action_pos} caused "
+            f"{total_changed} pixel changes over {len(delayed_changes)} frames"
+        )
+
+    @property
+    def has_active_delayed_observations(self) -> bool:
+        """Whether any delayed observation windows are still active."""
+        return len(self._delayed_observations) > 0
 
     # ─── Import from existing world_model dict ────────────────────────
 
@@ -715,6 +1386,9 @@ class CausalMap:
             'has_plan': self.has_plan,
             'plan_length': len(self._plan),
             'plan_step': self._plan_step,
+            'surprise_rate': self.surprise_rate,
+            'context_rules': self.context_rule_count,
+            'surprise_count': len(self._surprise_log),
         }
 
     def summary(self) -> str:
@@ -725,8 +1399,14 @@ class CausalMap:
             wall_str = f" walls:{len(self._walls)}"
         productive = sum(1 for e in self._effects.values() if e.productive_count > 0)
         prod_str = f" productive:{productive}" if productive else ""
+        surprise_str = ""
+        if self._surprise_log:
+            surprise_str = f" surprises:{len(self._surprise_log)}({self.surprise_rate:.0%})"
+        ctx_str = ""
+        if self._context_effects:
+            ctx_str = f" ctx_rules:{self.context_rule_count}"
         return (
             f"[MAP] effects:{len(self._effects)} explored:{len(self._explored)}/{len(self._all_positions)} "
             f"rules:[{rules_str}] complete:{self.completeness:.0%} plan:{'yes' if self.has_plan else 'no'}"
-            f"{wall_str}{prod_str}"
+            f"{wall_str}{prod_str}{surprise_str}{ctx_str}"
         )

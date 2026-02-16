@@ -233,9 +233,11 @@ class EvolutionRunner:
         verbose: bool = False,
         rung_ordering: str = "comprehensive",
         use_cognitive_loop: bool = True,
+        observe: bool = False,
     ):
         self.mode = mode
         self.verbose = verbose
+        self.observe = observe
         self.rung_ordering = rung_ordering
         self._use_cognitive_loop = use_cognitive_loop and COGNITIVE_LOOP_AVAILABLE
         self.db = DatabaseInterface(db_path)
@@ -498,6 +500,7 @@ class EvolutionRunner:
                 self._cognitive_player = CognitiveGamePlayer(
                     game_player=self._game_player,
                     verbose=self.verbose,
+                    observe=self.observe,
                 )
                 if self.verbose:
                     print("[INIT] CognitiveGamePlayer initialized - PTMA loop active")
@@ -1528,6 +1531,9 @@ def main():
                        help='Rung ordering preset (default: comprehensive)')
     parser.add_argument('--log-file', type=str, default=None,
                        help='Write all output to this file (unbuffered)')
+    parser.add_argument('--observe', action='store_true',
+                       help='Enable Tier 2 observation: save frame snapshots at '
+                            'level-ups, game-overs, and every 20th action')
 
     args = parser.parse_args()
 
@@ -1569,6 +1575,7 @@ def main():
         target_game=args.game,
         verbose=args.verbose,
         rung_ordering=args.rungs,
+        observe=getattr(args, 'observe', False),
     )
 
     runner.run()
