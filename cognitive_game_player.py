@@ -58,7 +58,7 @@ class CognitiveGamePlayer:
         self._last_replay: List[CognitiveFrame] = []
 
         # ═══ Tier 1 Observation Logging ═══
-        self._observation_log_path = "observation_log.jsonl"
+        self._observation_log_path = "log/observation_log.jsonl"
         self._observation_max_lines = 10_000  # Ring buffer size
 
     def play_game(
