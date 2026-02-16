@@ -466,9 +466,12 @@ class CognitiveLoop:
         """
         if self._db is None:
             return
+        if self._causal_map is None:
+            return
 
         import json
 
+        causal_map = self._causal_map  # Local ref for Pylance narrowing
         game_type = game_id[:4] if len(game_id) >= 4 else game_id
         effects_loaded = 0
         rules_loaded = 0
@@ -543,7 +546,7 @@ class CognitiveLoop:
                                         )
 
                                 from engines.cognition.causal_map import TileEffect
-                                self._causal_map._effects[pos] = TileEffect(
+                                causal_map._effects[pos] = TileEffect(
                                     position=pos,
                                     affected=affected,
                                     color_transitions=color_transitions,
@@ -552,8 +555,8 @@ class CognitiveLoop:
                                     productive_count=productive,
                                     destructive_count=destructive,
                                 )
-                                self._causal_map._explored.add(pos)
-                                self._causal_map._all_positions.add(pos)
+                                causal_map._explored.add(pos)
+                                causal_map._all_positions.add(pos)
                                 effects_loaded += 1
 
                         except Exception:
@@ -569,7 +572,7 @@ class CognitiveLoop:
                             else:
                                 continue
                             if isinstance(cycle, list) and cycle:
-                                self._causal_map._color_cycles[pos] = cycle
+                                causal_map._color_cycles[pos] = cycle
                         except Exception:
                             continue
 
@@ -580,7 +583,7 @@ class CognitiveLoop:
                             wpos = wall.get('pos', [])
                             wact = wall.get('action', 0)
                             if len(wpos) == 2:
-                                self._causal_map._walls.add(
+                                causal_map._walls.add(
                                     (tuple(wpos), wact)
                                 )
                         except Exception:
@@ -609,7 +612,7 @@ class CognitiveLoop:
                     # Store as a rule-like insight
                     if success_rate > 0.5:
                         from engines.cognition.causal_map import CausalRule
-                        self._causal_map._rules.append(CausalRule(
+                        causal_map._rules.append(CausalRule(
                             rule_type=f"action{action_num}_effective",
                             description=(
                                 f"ACTION{action_num} produces frame changes "
@@ -646,7 +649,7 @@ class CognitiveLoop:
 
                     # Store as rules in the causal map
                     from engines.cognition.causal_map import CausalRule
-                    self._causal_map._rules.append(CausalRule(
+                    causal_map._rules.append(CausalRule(
                         rule_type=f"lesson_{lesson_type}",
                         description=str(lesson)[:200],
                         evidence_count=1,
@@ -681,8 +684,8 @@ class CognitiveLoop:
                     for x in range(x_min, x_max + 1):
                         for y in range(y_min, y_max + 1):
                             pos = (x, y)
-                            self._causal_map._explored.add(pos)
-                            self._causal_map._all_positions.add(pos)
+                            causal_map._explored.add(pos)
+                            causal_map._all_positions.add(pos)
 
         except Exception as e:
             logger.debug(f"[PRIOR-KNOWLEDGE] Death zones load failed: {e}")
@@ -736,7 +739,7 @@ class CognitiveLoop:
                     except Exception:
                         params = {}
 
-                    self._causal_map._rules.append(CausalRule(
+                    causal_map._rules.append(CausalRule(
                         rule_type=f"mechanic_{mech_type}",
                         description=(
                             f"[{origin_tag}] Mechanic '{mech_type}' "
