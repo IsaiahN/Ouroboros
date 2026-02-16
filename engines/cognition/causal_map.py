@@ -253,6 +253,54 @@ class CausalMap:
         if self._plan_step >= len(self._plan):
             self._plan_valid = False
 
+    def reset_for_new_level(self):
+        """Reset level-specific state while preserving game-level knowledge.
+
+        PRESERVES (game-level mechanics that carry across levels):
+        - _effects: position->effect mappings (mechanics don't change)
+        - _rules: generalized causal rules
+        - _color_cycles: tile color cycling patterns
+        - _walls: known wall positions (LS20 maze layout may change, but
+          the CONCEPT of walls persists)
+        - _open_paths: known open paths
+        - _context_effects: context-dependent effect knowledge
+        - _surprise_log: prediction failures inform future predictions
+        - _action_context: recent action history
+
+        RESETS (level-specific layout that changes each level):
+        - _goal_cells / _current_cells: new level = new goal layout
+        - _plan / _plan_valid / _plan_step: old plan is invalid
+        - _explored / _all_positions: new spatial layout to discover
+        - _interactive_positions: new interactive region
+        - _visited_positions: start fresh exploration
+        - _delayed_observations: stale temporal data
+        - _hud_change_positions: HUD layout may change
+        """
+        # Level-specific layout resets
+        self._goal_cells = {}
+        self._current_cells = {}
+        self._plan = []
+        self._plan_valid = False
+        self._plan_step = 0
+        self._explored = set()
+        self._all_positions = set()
+        self._interactive_positions = set()
+        self._visited_positions = set()
+        self._delayed_observations = []
+        self._hud_change_positions = {}
+
+        # For movement games: walls from prior level may not apply to
+        # new layout, but we keep them as weak priors. The agent will
+        # re-confirm or override through interaction.
+        # (We do NOT clear _walls or _open_paths.)
+
+        logger.info(
+            "[CAUSAL-MAP] Level reset: preserved %d effects, %d rules, "
+            "%d color cycles, %d walls. Cleared goal/plan/explored.",
+            len(self._effects), len(self._rules),
+            len(self._color_cycles), len(self._walls),
+        )
+
     # ─── Prediction-Surprise-Context System ───────────────────────────
     #
     # This is how the CausalMap discovers context-dependent mechanics:
@@ -1153,7 +1201,7 @@ class CausalMap:
         self,
         action_pos: Optional[Tuple[int, int]],
         action_type: int,
-        timer_urgency: str = "safe",
+        _timer_urgency: str = "safe",
     ):
         """
         Record that an action caused the HUD/environment state to change.

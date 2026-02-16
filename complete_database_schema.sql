@@ -6237,6 +6237,31 @@ CREATE TABLE IF NOT EXISTS spatial_effects (
 
 CREATE INDEX IF NOT EXISTS idx_spatial_game ON spatial_effects(game_type);
 
+-- =============================================================================
+-- LEARNED GAME MECHANICS - Cross-game transfer learning
+-- =============================================================================
+-- Distilled mechanics discovered through interaction, stored per game_type.
+-- Used for cross-game inference: "new game X might use toggle_neighbors
+-- because it looks like FT09" or "it might use walls because it looks like LS20".
+-- This is the meta-level knowledge that enables jumpstart on novel games.
+
+CREATE TABLE IF NOT EXISTS learned_game_mechanics (
+    mechanic_id TEXT PRIMARY KEY,           -- deterministic: {game_type}_{mechanic_type}
+    game_type TEXT NOT NULL,                -- e.g. 'ft09', 'ls20', 'vc33'
+    mechanic_type TEXT NOT NULL,            -- e.g. 'color_cycle', 'toggle_neighbors', 'wall_blocked',
+                                            --      'delayed_effect', 'camera_pan', 'movement_grid'
+    mechanic_data TEXT NOT NULL,            -- JSON: parameters specific to mechanic type
+    observation_count INTEGER DEFAULT 1,    -- how many times observed
+    confidence REAL DEFAULT 0.5,            -- 0-1: how reliable is this knowledge
+    first_discovered_gen INTEGER DEFAULT 0, -- generation when first found
+    last_confirmed_gen INTEGER DEFAULT 0,   -- generation when last confirmed
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_mechanics_game ON learned_game_mechanics(game_type);
+CREATE INDEX IF NOT EXISTS idx_mechanics_type ON learned_game_mechanics(mechanic_type);
+CREATE INDEX IF NOT EXISTS idx_mechanics_confidence ON learned_game_mechanics(confidence DESC);
+
 -- Track goal configurations for multi-tile puzzles
 CREATE TABLE IF NOT EXISTS goal_configurations (
     config_id INTEGER PRIMARY KEY AUTOINCREMENT,

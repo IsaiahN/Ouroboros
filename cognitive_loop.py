@@ -687,6 +687,70 @@ class CognitiveLoop:
         except Exception as e:
             logger.debug(f"[PRIOR-KNOWLEDGE] Death zones load failed: {e}")
 
+        # ─── 5. Cross-game mechanic transfer ─────────────────────────
+        # Query ALL learned mechanics from ALL game types. Mechanics
+        # from the *same* game type arrive with full confidence.
+        # Mechanics from *other* game types arrive discounted — they
+        # are hypotheses ("this new game MIGHT work like that one"),
+        # not certainties. This is the meta-level transfer path.
+        try:
+            rows = self._db.execute_query("""
+                SELECT game_type, mechanic_type, mechanic_data,
+                       observation_count, confidence
+                FROM learned_game_mechanics
+                WHERE confidence > 0.3
+                ORDER BY confidence DESC
+                LIMIT 50
+            """)
+
+            if rows:
+                from engines.cognition.causal_map import CausalRule
+                for row in rows:
+                    if isinstance(row, dict):
+                        src_game = row.get('game_type', '')
+                        mech_type = row.get('mechanic_type', '')
+                        mech_data = row.get('mechanic_data', '{}')
+                        obs_count = row.get('observation_count', 1)
+                        confidence = row.get('confidence', 0.3)
+                    else:
+                        src_game = row[0] if row else ''
+                        mech_type = row[1] if len(row) > 1 else ''
+                        mech_data = row[2] if len(row) > 2 else '{}'
+                        obs_count = row[3] if len(row) > 3 else 1
+                        confidence = row[4] if len(row) > 4 else 0.3
+
+                    # Same game type -> full import
+                    # Different game type -> heavy discount (hypothesis only)
+                    same_game = src_game == game_type
+                    weight = float(confidence) if same_game else float(confidence) * 0.25
+
+                    # Skip very weak cross-game signals
+                    if weight < 0.1:
+                        continue
+
+                    origin_tag = "same-type" if same_game else f"transfer:{src_game}"
+
+                    # Parse mechanic data to surface relevant params
+                    try:
+                        params = json.loads(mech_data)
+                    except Exception:
+                        params = {}
+
+                    self._causal_map._rules.append(CausalRule(
+                        rule_type=f"mechanic_{mech_type}",
+                        description=(
+                            f"[{origin_tag}] Mechanic '{mech_type}' "
+                            f"(obs={obs_count})"
+                        ),
+                        evidence_count=int(obs_count),
+                        confidence=weight,
+                        parameters=params,
+                    ))
+                    rules_loaded += 1
+
+        except Exception as e:
+            logger.debug(f"[PRIOR-KNOWLEDGE] Cross-game mechanics load failed: {e}")
+
         # ─── Summary ─────────────────────────────────────────────────
         if effects_loaded > 0 or rules_loaded > 0:
             self._prior_knowledge_loaded = True
@@ -872,7 +936,7 @@ class CognitiveLoop:
             self._causal_map.record_hud_change(
                 action_pos=action_pos,
                 action_type=self._last_action_info.get('type', 0),
-                timer_urgency=cf.timer_urgency,
+                _timer_urgency=cf.timer_urgency,
             )
 
         # Calculate surprise using the CausalMap's prediction system
@@ -1045,6 +1109,10 @@ class CognitiveLoop:
             # Reset action monotony -- new level is a fresh context
             self._consecutive_same_action = 0
             self._last_action_type = None
+            # Reset level-specific causal map data while preserving
+            # game-level mechanics (rules, effects, color cycles)
+            if self._causal_map:
+                self._causal_map.reset_for_new_level()
         self._score = new_score if new_score else self._score + score_delta
 
         # Build result summary

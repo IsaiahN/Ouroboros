@@ -677,19 +677,39 @@ class CognitiveGamePlayer:
                 'completeness': causal_map.completeness,
             })
 
-            state_id = f"wms_{_uuid.uuid4().hex[:12]}"
+            # Upsert per game_type: use deterministic state_id so we
+            # replace the prior snapshot rather than creating unbounded rows.
+            # The game_type's best knowledge always overwrites the old one.
+            game_type = game_id[:4] if len(game_id) >= 4 else game_id
+            state_id = f"wms_{game_type}_best"
             step_number = len(causal_map._effects)  # Proxy for knowledge depth
 
-            self._gp.db.execute_query("""
-                INSERT OR REPLACE INTO world_model_states
-                    (state_id, game_id, session_id, step_number,
-                     objects_json, grid_hash, score, metadata, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """, (
-                state_id, game_id, f"gen_{generation}_{agent_id[:8]}",
-                step_number, objects_json, '', 0.0,
-                _json.dumps({'generation': generation, 'agent_id': agent_id}),
-            ))
+            # Only overwrite if this session learned MORE than what's stored
+            existing = self._gp.db.execute_query("""
+                SELECT step_number FROM world_model_states
+                WHERE state_id = ?
+            """, (state_id,))
+            existing_depth = 0
+            if existing:
+                existing_depth = int(existing[0].get('step_number', 0)
+                                     if isinstance(existing[0], dict)
+                                     else existing[0][0] or 0)
+
+            if step_number >= existing_depth:
+                self._gp.db.execute_query("""
+                    INSERT OR REPLACE INTO world_model_states
+                        (state_id, game_id, session_id, step_number,
+                         objects_json, grid_hash, score, metadata, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """, (
+                    state_id, game_id, f"gen_{generation}_{agent_id[:8]}",
+                    step_number, objects_json, '', 0.0,
+                    _json.dumps({'generation': generation, 'agent_id': agent_id}),
+                ))
+
+            # Also persist distilled mechanics to learned_game_mechanics
+            # for cross-game transfer learning
+            self._persist_mechanics(causal_map, game_type, generation)
 
             if self._verbose:
                 print(
@@ -699,6 +719,196 @@ class CognitiveGamePlayer:
                 )
         except Exception as e:
             logger.debug(f"[PERSIST] Causal knowledge save failed: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # MECHANIC PERSISTENCE (cross-game transfer learning)
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _persist_mechanics(
+        self,
+        causal_map,
+        game_type: str,
+        generation: int,
+    ):
+        """Distill and persist game mechanics for cross-game transfer.
+
+        Extracts high-level mechanic types from the causal map and
+        upserts them into learned_game_mechanics. These are then
+        available to ALL agents playing ANY game, enabling inference
+        like 'this new game might use toggle_neighbors because the
+        spatial effects pattern matches FT09'.
+        """
+        try:
+            # Ensure table exists (safe for first run)
+            self._gp.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS learned_game_mechanics (
+                    mechanic_id TEXT PRIMARY KEY,
+                    game_type TEXT NOT NULL,
+                    mechanic_type TEXT NOT NULL,
+                    mechanic_data TEXT NOT NULL,
+                    observation_count INTEGER DEFAULT 1,
+                    confidence REAL DEFAULT 0.5,
+                    first_discovered_gen INTEGER DEFAULT 0,
+                    last_confirmed_gen INTEGER DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            mechanics_saved = 0
+
+            # --- Color cycles -> 'color_cycle' mechanic ---
+            if causal_map._color_cycles:
+                # Find the most common cycle length
+                cycle_lengths = [len(c) for c in causal_map._color_cycles.values() if c]
+                if cycle_lengths:
+                    common_len = max(set(cycle_lengths), key=cycle_lengths.count)
+                    # Get unique colors involved
+                    all_colors = set()
+                    for cycle in causal_map._color_cycles.values():
+                        all_colors.update(cycle)
+                    mechanic_data = _json.dumps({
+                        'cycle_length': common_len,
+                        'colors_involved': sorted(all_colors),
+                        'positions_with_cycles': len(causal_map._color_cycles),
+                    })
+                    self._upsert_mechanic(
+                        game_type, 'color_cycle', mechanic_data,
+                        len(causal_map._color_cycles), generation,
+                    )
+                    mechanics_saved += 1
+
+            # --- Neighbor effects -> 'toggle_neighbors' mechanic ---
+            # If clicking a position affects OTHER positions too
+            multi_effect_count = sum(
+                1 for e in causal_map._effects.values()
+                if len(e.affected) > 1
+            )
+            if multi_effect_count > 0:
+                # Analyze the neighbor pattern
+                neighbor_offsets = []
+                for e in causal_map._effects.values():
+                    for affected_pos in e.affected:
+                        if affected_pos != e.position:
+                            dx = affected_pos[0] - e.position[0]
+                            dy = affected_pos[1] - e.position[1]
+                            neighbor_offsets.append((dx, dy))
+                # Find most common offset pattern
+                from collections import Counter
+                offset_counts = Counter(neighbor_offsets)
+                top_offsets = offset_counts.most_common(8)
+                mechanic_data = _json.dumps({
+                    'multi_effect_positions': multi_effect_count,
+                    'common_offsets': [
+                        {'dx': o[0], 'dy': o[1], 'count': c}
+                        for o, c in top_offsets
+                    ],
+                })
+                self._upsert_mechanic(
+                    game_type, 'toggle_neighbors', mechanic_data,
+                    multi_effect_count, generation,
+                )
+                mechanics_saved += 1
+
+            # --- Walls -> 'wall_blocked' mechanic ---
+            if causal_map._walls:
+                mechanic_data = _json.dumps({
+                    'wall_count': len(causal_map._walls),
+                    'open_path_count': len(causal_map._open_paths),
+                })
+                self._upsert_mechanic(
+                    game_type, 'wall_blocked', mechanic_data,
+                    len(causal_map._walls), generation,
+                )
+                mechanics_saved += 1
+
+            # --- Context-dependent effects -> 'context_dependent' mechanic ---
+            if causal_map._context_effects:
+                mechanic_data = _json.dumps({
+                    'context_rule_count': len(causal_map._context_effects),
+                    'context_prefixes': [
+                        str(prefix)
+                        for prefix in list(causal_map._context_effects.keys())[:10]
+                    ],
+                })
+                self._upsert_mechanic(
+                    game_type, 'context_dependent', mechanic_data,
+                    len(causal_map._context_effects), generation,
+                )
+                mechanics_saved += 1
+
+            # --- Surprise rate -> 'unpredictable_effects' mechanic ---
+            if causal_map._surprise_log and causal_map.surprise_rate > 0.3:
+                mechanic_data = _json.dumps({
+                    'surprise_rate': round(causal_map.surprise_rate, 3),
+                    'surprise_count': len(causal_map._surprise_log),
+                })
+                self._upsert_mechanic(
+                    game_type, 'unpredictable_effects', mechanic_data,
+                    len(causal_map._surprise_log), generation,
+                )
+                mechanics_saved += 1
+
+            # --- Delayed effects -> 'delayed_effect' mechanic ---
+            if causal_map._delayed_observations:
+                mechanic_data = _json.dumps({
+                    'delayed_observation_count': len(causal_map._delayed_observations),
+                })
+                self._upsert_mechanic(
+                    game_type, 'delayed_effect', mechanic_data,
+                    len(causal_map._delayed_observations), generation,
+                )
+                mechanics_saved += 1
+
+            # --- Rules -> individual mechanic entries ---
+            for rule in causal_map._rules:
+                if rule.confidence > 0.4 and rule.evidence_count > 0:
+                    # Skip action_effectiveness rules (those are per-game, not mechanics)
+                    if rule.rule_type.startswith('action') or rule.rule_type.startswith('lesson_'):
+                        continue
+                    mechanic_data = _json.dumps({
+                        'description': rule.description,
+                        'parameters': rule.parameters,
+                    })
+                    self._upsert_mechanic(
+                        game_type, f'rule_{rule.rule_type}', mechanic_data,
+                        rule.evidence_count, generation,
+                    )
+                    mechanics_saved += 1
+
+            if self._verbose and mechanics_saved > 0:
+                print(f"    [MECHANICS] Persisted {mechanics_saved} mechanics for {game_type}")
+
+        except Exception as e:
+            logger.debug(f"[MECHANICS] Mechanic persistence failed: {e}")
+
+    def _upsert_mechanic(
+        self,
+        game_type: str,
+        mechanic_type: str,
+        mechanic_data: str,
+        observation_count: int,
+        generation: int,
+    ):
+        """Upsert a single mechanic into learned_game_mechanics."""
+        mechanic_id = f"{game_type}_{mechanic_type}"
+        self._gp.db.execute_query("""
+            INSERT INTO learned_game_mechanics
+                (mechanic_id, game_type, mechanic_type, mechanic_data,
+                 observation_count, confidence, first_discovered_gen,
+                 last_confirmed_gen, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(mechanic_id) DO UPDATE SET
+                mechanic_data = excluded.mechanic_data,
+                observation_count = observation_count + excluded.observation_count,
+                confidence = MIN(0.95, confidence + 0.05),
+                last_confirmed_gen = excluded.last_confirmed_gen,
+                updated_at = datetime('now')
+        """, (
+            mechanic_id, game_type, mechanic_type, mechanic_data,
+            observation_count,
+            min(0.8, 0.3 + observation_count * 0.05),
+            generation, generation,
+        ))
 
     # ═══════════════════════════════════════════════════════════════════
     # TIER 1 OBSERVATION LOGGING
