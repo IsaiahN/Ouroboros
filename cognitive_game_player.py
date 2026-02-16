@@ -42,6 +42,20 @@ try:
 except ImportError:
     _ITHREAD_AVAILABLE = False
 
+# Lazy SensationEngine import
+try:
+    from engines.consciousness.sensation_engine import SensationEngine
+    _SENSATION_AVAILABLE = True
+except ImportError:
+    _SENSATION_AVAILABLE = False
+
+# Lazy EpisodicMemorySystem import
+try:
+    from engines.memory.episodic_memory import EpisodicMemorySystem
+    _EPISODIC_AVAILABLE = True
+except ImportError:
+    _EPISODIC_AVAILABLE = False
+
 
 class CognitiveGamePlayer:
     """
@@ -165,6 +179,40 @@ class CognitiveGamePlayer:
                     )
             except Exception as e:
                 logger.debug(f"[I-THREAD] Failed to load state: {e}")
+
+        # ═══ SENSATION ENGINE: Emotional learning from action outcomes ═══
+        self._sensation_engine = None
+        if _SENSATION_AVAILABLE:
+            try:
+                self._sensation_engine = SensationEngine(self._gp.db)
+                if self._verbose:
+                    print("    [SENSATION] Engine initialized for emotional learning")
+            except Exception as e:
+                logger.debug(f"[SENSATION] Failed to initialize: {e}")
+
+        # ═══ EPISODIC MEMORY: Pre-game autobiography ═══
+        self._episodic_memory = None
+        if _EPISODIC_AVAILABLE:
+            try:
+                self._episodic_memory = EpisodicMemorySystem(
+                    self._gp.db, i_thread=self._i_thread
+                )
+                game_type_prefix = game_id[:4] if len(game_id) >= 4 else game_id
+                autobiography = self._episodic_memory.synthesize_pregame_autobiography(
+                    agent_id=agent.agent_id,
+                    agent_role=getattr(agent, 'role', 'pioneer'),
+                    game_type=game_type_prefix,
+                )
+                if self._verbose:
+                    game_hist = autobiography.get('game_history', {})
+                    total = game_hist.get('total_games', 0)
+                    wins = game_hist.get('wins', 0)
+                    print(
+                        f"    [EPISODIC] Autobiography: {total} prior games, "
+                        f"{wins} wins for {game_type_prefix}"
+                    )
+            except Exception as e:
+                logger.debug(f"[EPISODIC] Failed to synthesize autobiography: {e}")
 
         # Per-level action budget: starts at max_actions (150), extends
         # by actions_per_level on each level-up. Unused actions carry
@@ -405,6 +453,39 @@ class CognitiveGamePlayer:
                             )
                 except Exception as e:
                     logger.debug(f"[I-THREAD] learn_from_outcome failed: {e}")
+
+            # ═══ SENSATION ENGINE: Emotional learning from action outcomes ═══
+            # Builds object-sensation mappings so agents learn "how to feel"
+            # about game elements, biasing future navigation actions.
+            if self._sensation_engine is not None:
+                try:
+                    # Build outcome dict matching SensationEngine._calculate_reward_signal
+                    sensation_outcome = {
+                        'score_change': score_delta,
+                        'action_success': frame_changed,
+                        'game_won': (new_obs.state == GameState.WIN) if new_obs else False,
+                        'game_id': game_id,
+                        'generation': current_generation,
+                    }
+                    # Determine object type from cognitive frame or fallback
+                    object_type = 'grid_cell'
+                    if cf and hasattr(cf, 'target_description') and cf.target_description:
+                        object_type = cf.target_description
+                    elif action_data and action_data.get('x') is not None:
+                        object_type = f"cell_{action_data['x']}_{action_data['y']}"
+
+                    # Navigation state: use surprise as emotional arousal proxy
+                    nav_state = cf.surprise if cf else 0.0
+
+                    self._sensation_engine.learn_from_outcome(
+                        agent_id=agent.agent_id,
+                        object_type=object_type,
+                        action_taken=action_num,
+                        outcome=sensation_outcome,
+                        navigation_state=nav_state,
+                    )
+                except Exception as e:
+                    logger.debug(f"[SENSATION] learn_from_outcome failed: {e}")
 
             # ═══ TIER 1 OBSERVATION LOGGING (structured JSONL) ═══
             self._write_observation_record(

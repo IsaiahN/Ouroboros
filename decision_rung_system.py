@@ -1646,9 +1646,6 @@ class CoreGameplayAdapter:
             context['recent_actions'] = getattr(self.core, '_recent_actions', [])[-10:]
             context['game_type'] = context.get('game_id', '').split('-')[0] if context.get('game_id') else None
 
-            if hasattr(self.core, 'agent_self_model') and self.core.agent_self_model:
-                context['self_model'] = self.core.agent_self_model
-
             context['is_frontier'] = self.core._is_frontier_level(
                 context.get('game_id', ''), context.get('level', 1)
             ) if hasattr(self.core, '_is_frontier_level') else False
