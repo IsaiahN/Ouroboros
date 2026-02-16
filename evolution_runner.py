@@ -226,9 +226,10 @@ class EvolutionRunner:
         mode: str = "normal",
         db_path: str = "core_data.db",
         population_size: int = 100,
-        games_per_generation: int = 5,
+        agents_per_generation: int = 30,
+        games_per_generation: int = 3,
         max_generations: int = 10,
-        max_actions_per_game: int = 500,
+        max_actions_per_game: int = 150,
         target_game: Optional[str] = None,
         verbose: bool = False,
         rung_ordering: str = "comprehensive",
@@ -243,6 +244,7 @@ class EvolutionRunner:
         self.db = DatabaseInterface(db_path)
         self.pipe = PipelineAssertions(self.db)
         self.population_size = population_size
+        self.agents_per_generation = min(agents_per_generation, population_size)
         self.games_per_generation = games_per_generation
         self.max_generations = max_generations
         self.max_actions = max_actions_per_game
@@ -690,6 +692,122 @@ class EvolutionRunner:
         """Generate unique agent ID."""
         return f"agent_{uuid.uuid4().hex[:12]}"
 
+    def _select_agents_for_generation(self) -> List[AgentState]:
+        """Select a subset of agents for this generation via lottery.
+
+        Selection strategy (from Unified Network Theory):
+          60% by prestige (highest discovery_prestige weighted random)
+          20% youngest agents (lowest age = current_gen - generation_born)
+          20% random from remaining pool
+
+        This keeps the full population alive for breeding diversity while
+        only playing a subset each generation, dramatically increasing
+        generations-per-day throughput.
+
+        Returns:
+            List of AgentState objects selected to play this generation.
+        """
+        n = self.agents_per_generation
+        total = len(self.agents)
+
+        # If requesting all or more agents than available, skip lottery
+        if n >= total:
+            return list(self.agents)
+
+        # Build lookup: agent_id -> AgentState
+        agent_map = {a.agent_id: a for a in self.agents}
+        agent_ids = list(agent_map.keys())
+
+        # --- Query DB for prestige and birth generation ---
+        prestige_data: Dict[str, float] = {}
+        birth_data: Dict[str, int] = {}
+        try:
+            placeholders = ','.join(['?' for _ in agent_ids])
+            rows = self.db.execute_query(f"""
+                SELECT agent_id, discovery_prestige, generation
+                FROM agents
+                WHERE agent_id IN ({placeholders}) AND is_active = TRUE
+            """, agent_ids)
+            for row in rows:
+                aid = row['agent_id']
+                prestige_data[aid] = float(row.get('discovery_prestige', 0) or 0)
+                birth_data[aid] = int(row.get('generation', 0) or 0)
+        except Exception as e:
+            if self.verbose:
+                print(f"  [SELECT] DB query failed, falling back to random: {e}")
+            return random.sample(self.agents, n)
+
+        # Slot allocation
+        n_prestige = max(1, int(n * 0.60))  # 60% prestige
+        n_youth = max(1, int(n * 0.20))     # 20% youth
+        n_random = max(1, n - n_prestige - n_youth)  # 20% random
+
+        selected_ids: set = set()
+
+        # --- SLOT 1: Prestige-weighted selection (60%) ---
+        remaining = [aid for aid in agent_ids if aid not in selected_ids]
+        weights = []
+        for aid in remaining:
+            # Prestige + small floor so zero-prestige agents have a chance
+            w = prestige_data.get(aid, 0.0) + 0.01
+            weights.append(max(w, 0.01))
+
+        pick_count = min(n_prestige, len(remaining))
+        if pick_count > 0 and remaining:
+            # Weighted sampling without replacement
+            chosen = set()
+            pool = list(remaining)
+            pool_weights = list(weights)
+            for _ in range(pick_count):
+                if not pool:
+                    break
+                total_w = sum(pool_weights)
+                if total_w <= 0:
+                    idx = random.randrange(len(pool))
+                else:
+                    r = random.random() * total_w
+                    cumulative = 0.0
+                    idx = 0
+                    for i, w in enumerate(pool_weights):
+                        cumulative += w
+                        if cumulative >= r:
+                            idx = i
+                            break
+                chosen.add(pool[idx])
+                pool.pop(idx)
+                pool_weights.pop(idx)
+            selected_ids.update(chosen)
+
+        # --- SLOT 2: Youth selection (20%) ---
+        remaining = [aid for aid in agent_ids if aid not in selected_ids]
+        if remaining:
+            # Sort by age ascending (youngest first)
+            cur_gen = self.current_generation
+            remaining.sort(key=lambda aid: cur_gen - birth_data.get(aid, 0))
+            pick_count = min(n_youth, len(remaining))
+            selected_ids.update(remaining[:pick_count])
+
+        # --- SLOT 3: Random from remainder (20%) ---
+        remaining = [aid for aid in agent_ids if aid not in selected_ids]
+        if remaining:
+            pick_count = min(n_random, len(remaining))
+            selected_ids.update(random.sample(remaining, pick_count))
+
+        # Ensure we hit exactly n (rounding might leave us short)
+        remaining = [aid for aid in agent_ids if aid not in selected_ids]
+        while len(selected_ids) < n and remaining:
+            pick = random.choice(remaining)
+            selected_ids.add(pick)
+            remaining.remove(pick)
+
+        selected_agents = [agent_map[aid] for aid in selected_ids if aid in agent_map]
+
+        if self.verbose:
+            print(f"[SELECT] Lottery: {len(selected_agents)}/{total} agents "
+                  f"(prestige={n_prestige}, youth={n_youth}, random={n_random})")
+
+        return selected_agents
+
     def initialize_population(self) -> List[AgentState]:
         """Create initial agent population."""
         print(f"\n[INIT] Creating {self.population_size} agents...")
@@ -1005,7 +1123,10 @@ class EvolutionRunner:
         agents_played = 0
         agents_skipped = 0
 
-        for agent in self.agents:
+        # Selection lottery: pick subset of agents for this generation
+        selected_agents = self._select_agents_for_generation()
+
+        for agent in selected_agents:
             if not self.running:
                 break
 
@@ -1076,7 +1197,7 @@ class EvolutionRunner:
                 print(f"[ERROR] Agent {agent.agent_id[:12]}... failed: {type(e).__name__}: {e}")
 
         if agents_skipped > 0:
-            print(f"\n[WARN] {agents_skipped}/{len(self.agents)} agents skipped due to errors")
+            print(f"\n[WARN] {agents_skipped}/{len(selected_agents)} selected agents skipped due to errors")
 
         games_played = len(results)
         avg_score = total_score / max(1, games_played)
@@ -1468,7 +1589,9 @@ class EvolutionRunner:
         print("="*60)
         print(f"Mode: {self.mode.upper()}")
         print(f"Population: {self.population_size}")
-        print(f"Games/Gen: {self.games_per_generation}")
+        print(f"Agents/Gen: {self.agents_per_generation} (lottery: 60% prestige, 20% youth, 20% random)")
+        print(f"Games/Agent: {self.games_per_generation}")
+        print(f"Max Actions: {self.max_actions}")
         print(f"Max Generations: {self.max_generations}")
         if self.target_game:
             print(f"Target Game: {self.target_game}")
@@ -1512,8 +1635,10 @@ def main():
                        help='Operation mode')
     parser.add_argument('--population', type=int, default=100,
                        help='Population size (default: 100, recommended: 50-500)')
-    parser.add_argument('--games-per-gen', type=int, default=5,
-                       help='Games per generation per agent')
+    parser.add_argument('--agents-per-gen', type=int, default=30,
+                       help='Agents selected per generation via lottery (default: 30)')
+    parser.add_argument('--games-per-gen', type=int, default=3,
+                       help='Games per generation per agent (default: 3)')
     parser.add_argument('--max-generations', type=int, default=10,
                        help='Maximum generations')
     parser.add_argument('--max-actions', type=int, default=None,
@@ -1540,16 +1665,17 @@ def main():
     # Determine max_actions based on mode if not explicitly set
     if args.max_actions is None:
         if args.mode == 'offline':
-            args.max_actions = 7500
+            args.max_actions = 150
         else:
-            args.max_actions = 2500
+            args.max_actions = 150
 
     # Test mode overrides
     if args.test:
         args.population = 1
+        args.agents_per_gen = 1
         args.games_per_gen = 1
         args.max_generations = 1
-        args.max_actions = 300
+        args.max_actions = 150
 
     # Log file redirect - always write to log/ directory (Rule 2 exception for CLI debug)
     log_file_handle = None
@@ -1569,6 +1695,7 @@ def main():
     runner = EvolutionRunner(
         mode=args.mode,
         population_size=args.population,
+        agents_per_generation=args.agents_per_gen,
         games_per_generation=args.games_per_gen,
         max_generations=args.max_generations,
         max_actions_per_game=args.max_actions,
