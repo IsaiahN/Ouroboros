@@ -863,7 +863,12 @@ class CognitiveGamePlayer:
             for rule in causal_map._rules:
                 if rule.confidence > 0.4 and rule.evidence_count > 0:
                     # Skip action_effectiveness rules (those are per-game, not mechanics)
-                    if rule.rule_type.startswith('action') or rule.rule_type.startswith('lesson_'):
+                    # Skip transferred mechanics (rule_type starts with 'mechanic_')
+                    # to prevent cross-game contamination: a rule transferred
+                    # FROM ft09 should not be re-persisted AS an ls20 mechanic.
+                    if (rule.rule_type.startswith('action')
+                            or rule.rule_type.startswith('lesson_')
+                            or rule.rule_type.startswith('mechanic_')):
                         continue
                     mechanic_data = _json.dumps({
                         'description': rule.description,
