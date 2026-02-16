@@ -738,19 +738,15 @@ class CognitiveGamePlayer:
                 f.write(_json.dumps(record, separators=(',', ':')) + '\n')
 
             # Ring-buffer: truncate when file exceeds max lines.
-            # Check periodically (every 500 steps) to avoid stat overhead.
-            if step % 500 == 0:
+            # Check every 1000 actions to avoid I/O overhead.
+            if step % 1000 == 0:
                 try:
-                    import os as _os
-                    fsize = _os.path.getsize(self._observation_log_path)
-                    # ~200 bytes per line, so max ~2MB for 10k lines
-                    if fsize > self._observation_max_lines * 250:
-                        with open(self._observation_log_path, 'r', encoding='utf-8') as rf:
-                            lines = rf.readlines()
-                        if len(lines) > self._observation_max_lines:
-                            keep = lines[-self._observation_max_lines:]
-                            with open(self._observation_log_path, 'w', encoding='utf-8') as wf:
-                                wf.writelines(keep)
+                    with open(self._observation_log_path, 'r', encoding='utf-8') as rf:
+                        lines = rf.readlines()
+                    if len(lines) > self._observation_max_lines:
+                        keep = lines[-self._observation_max_lines:]
+                        with open(self._observation_log_path, 'w', encoding='utf-8') as wf:
+                            wf.writelines(keep)
                 except Exception:
                     pass
 
