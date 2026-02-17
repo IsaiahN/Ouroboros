@@ -221,17 +221,22 @@ class CognitiveGamePlayer:
         actions_per_level = self._gp.max_actions
         action_budget = actions_per_level
 
-        # ═══ FALLBACK: Load winning sequences (used only if cognitive loop stalls) ═══
-        fallback_sequence: List[str] = []
-        fallback_position = 0
-        fallback_active = False
-        fallback_threshold = min(150, self._gp.max_actions // 5)
-        # Only load sequences as a safety net -- cognitive loop is primary
         game_type = game_id[:4] if len(game_id) >= 4 else game_id
-        current_fallback_level = 1  # Track which level the loaded sequence is for
-        fallback_sequence = self._load_fallback_sequence(game_type, current_fallback_level)
-        if fallback_sequence and self._verbose:
-            print(f"    [FALLBACK] Sequence loaded for level {current_fallback_level} ({len(fallback_sequence)} actions) -- will use if stuck after {fallback_threshold} actions")
+
+        # ═══ REPLAY-MODE: Occasionally replay winning sequences from scratch ═══
+        # Every ~1-in-5 games, instead of cognitive loop, replay known winning
+        # sequences from a clean board.  This validates stored sequences and
+        # lets agents bank cheap level-ups to accumulate prestige.
+        if random.random() < 0.20:
+            replay_result = self._replay_winning_sequences(
+                agent=agent, env=env, game_id=game_id, game_type=game_type,
+                win_levels=win_levels, current_generation=current_generation,
+                is_running_fn=is_running_fn,
+            )
+            if replay_result is not None:
+                return replay_result
+            # If replay returned None (no sequences found), fall through
+            # to normal cognitive loop.
 
         # ========== COGNITIVE GAME LOOP ==========
         while actions_taken < action_budget:
@@ -241,76 +246,20 @@ class CognitiveGamePlayer:
             obs = last_obs if last_obs else initial_obs
             current_available = getattr(obs, 'available_actions', None) or available_actions
 
-            # ═══ FALLBACK CHECK: If stuck too long on current level, reset & replay ═══
-            actions_on_current_level = actions_taken - level_start_action_index
-            if (
-                not fallback_active
-                and fallback_sequence
-                and actions_on_current_level >= fallback_threshold
-            ):
-                # Reset the game to get a clean board state before replaying.
-                # Without reset, the board is mutated by prior wrong moves
-                # and the winning sequence (recorded from origin) won't work.
-                try:
-                    reset_obs = env.reset()
-                    if reset_obs is not None:
-                        last_obs = reset_obs
-                        initial_obs = reset_obs
-                        obs = reset_obs
-                        if self._verbose:
-                            print(f"    [FALLBACK-RESET] Game reset to clean state for level {prev_levels + 1}")
-                    else:
-                        if self._verbose:
-                            print(f"    [FALLBACK-RESET] Reset returned None, replaying on current state")
-                except Exception as e:
-                    if self._verbose:
-                        print(f"    [FALLBACK-RESET] Reset failed: {e}")
-
-                fallback_active = True
-                fallback_position = 0
-                if self._verbose:
-                    print(f"    [FALLBACK-ACTIVE] Stuck on level {prev_levels + 1} after {actions_on_current_level} actions, replaying winning sequence")
-
             # Get frame
             frame = getattr(obs, 'frame', None)
 
-            # ═══ ACTION SELECTION: Fallback replay OR cognitive cycle ═══
+            # ═══ ACTION SELECTION: Cognitive cycle ═══
             cf = None
-            if fallback_active and fallback_sequence and fallback_position < len(fallback_sequence):
-                # Replay from winning sequence
-                seq_entry = fallback_sequence[fallback_position]
-                fallback_position += 1
-                # Parse sequence entry: can be int, dict with 'action', or ACTION name
-                if isinstance(seq_entry, dict):
-                    action_num = seq_entry.get('action', seq_entry.get('action_num', 1))
-                    action_data = seq_entry.get('data', seq_entry.get('action_data', None))
-                elif isinstance(seq_entry, int):
-                    action_num = seq_entry
-                    action_data = None
-                elif isinstance(seq_entry, str) and seq_entry.startswith('ACTION'):
-                    action_num = int(seq_entry.replace('ACTION', ''))
-                    action_data = None
-                else:
-                    action_num = int(seq_entry) if seq_entry else 1
-                    action_data = None
-                if fallback_position >= len(fallback_sequence):
-                    fallback_active = False
-                    if self._verbose:
-                        print(f"    [FALLBACK-DONE] Sequence exhausted after {fallback_position} actions, returning to cognitive loop")
-            else:
-                # Normal cognitive cycle
-                if fallback_active:
-                    # Sequence ran out, back to cognitive
-                    fallback_active = False
-                action_num, action_data, cf = loop.cycle(
-                    frame=frame,
-                    obs=obs,
-                    agent_id=agent.agent_id,
-                    agent_role=getattr(agent, 'role', 'pioneer'),
-                    w_A=self._live_w_A,
-                    w_B=self._live_w_B,
-                    available_actions=current_available,
-                )
+            action_num, action_data, cf = loop.cycle(
+                frame=frame,
+                obs=obs,
+                agent_id=agent.agent_id,
+                agent_role=getattr(agent, 'role', 'pioneer'),
+                w_A=self._live_w_A,
+                w_B=self._live_w_B,
+                available_actions=current_available,
+            )
 
             # Validate action
             if action_num not in current_available:
@@ -339,7 +288,11 @@ class CognitiveGamePlayer:
                 break
 
             actions_taken += 1
-            action_sequence.append(action.name)
+            # Store action WITH coordinates so winning sequences can be replayed
+            seq_entry = {'action': action_num}
+            if action_data:
+                seq_entry['data'] = action_data
+            action_sequence.append(seq_entry)
 
             # Compute frame change
             obs_before = obs
@@ -601,15 +554,6 @@ class CognitiveGamePlayer:
 
                 level_start_action_index = len(action_sequence)
 
-                # ═══ FALLBACK: Reload sequence for the new level ═══
-                new_level_num = current_levels + 1
-                fallback_sequence = self._load_fallback_sequence(game_type, new_level_num)
-                fallback_active = False
-                fallback_position = 0
-                current_fallback_level = new_level_num
-                if fallback_sequence and self._verbose:
-                    print(f"    [FALLBACK] Reloaded sequence for level {new_level_num} ({len(fallback_sequence)} actions)")
-
             # Verbose output (cognitive-enriched)
             if self._verbose:
                 state_str = str(new_obs.state).replace('GameState.', '') if new_obs else '?'
@@ -617,7 +561,7 @@ class CognitiveGamePlayer:
                 coord_str = ''
                 if action.name == 'ACTION6' and action_data:
                     coord_str = f" @({action_data.get('x', '?')},{action_data.get('y', '?')})"
-                speed = cf.action_speed if cf else 'FALLBACK'
+                speed = cf.action_speed if cf else 'unknown'
                 print(
                     f"    [{actions_taken:3d}] {action.name}{coord_str} "
                     f"[{speed}] -> levels={current_levels}/{win_levels} "
@@ -1288,6 +1232,8 @@ class CognitiveGamePlayer:
         """Load the best winning sequence for a specific game type and level.
 
         Returns the parsed action sequence list, or empty list if none found.
+        Each entry is either a dict {'action': int, 'data': {...}} or a bare
+        action name string (legacy format).
         """
         try:
             result = self._gp.db.execute_query("""
@@ -1307,6 +1253,139 @@ class CognitiveGamePlayer:
         except Exception:
             pass
         return []
+
+    def _replay_winning_sequences(
+        self,
+        agent: Any,
+        env: Any,
+        game_id: str,
+        game_type: str,
+        win_levels: int,
+        current_generation: int,
+        is_running_fn: Callable[[], bool],
+    ) -> 'Optional[GameResult]':
+        """Play a game by replaying stored winning sequences from scratch.
+
+        Called randomly (~20% of games) to validate sequences and bank
+        cheap level-ups.  Runs on the already-clean initial board state
+        (no mid-game reset needed).
+
+        Returns GameResult on success, or None if no sequences exist
+        (caller falls through to normal cognitive loop).
+        """
+        import json as _json
+
+        # Collect sequences for consecutive levels starting at 1
+        all_sequences: List[List[dict]] = []
+        for level_num in range(1, win_levels + 1):
+            seq = self._load_fallback_sequence(game_type, level_num)
+            if not seq:
+                break
+            all_sequences.append(seq)
+
+        if not all_sequences:
+            return None  # No sequences at all -- fall through to cognitive
+
+        if self._verbose:
+            total_acts = sum(len(s) for s in all_sequences)
+            print(
+                f"    [REPLAY-MODE] Replaying {len(all_sequences)} level "
+                f"sequences ({total_acts} total actions) for {game_type}"
+            )
+
+        actions_taken = 0
+        last_obs = env.observation_space
+
+        for level_idx, sequence in enumerate(all_sequences):
+            if not is_running_fn():
+                break
+
+            for seq_entry in sequence:
+                if not is_running_fn():
+                    break
+
+                # Parse entry: new format {'action': int, 'data': {...}}
+                # or legacy format (bare string "ACTION6" / bare int)
+                if isinstance(seq_entry, dict):
+                    action_num = seq_entry.get('action', seq_entry.get('action_num', 1))
+                    action_data = seq_entry.get('data', seq_entry.get('action_data', None))
+                elif isinstance(seq_entry, int):
+                    action_num = seq_entry
+                    action_data = None
+                elif isinstance(seq_entry, str) and seq_entry.startswith('ACTION'):
+                    action_num = int(seq_entry.replace('ACTION', ''))
+                    action_data = None
+                else:
+                    action_num = int(seq_entry) if seq_entry else 1
+                    action_data = None
+
+                action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
+
+                # Execute with retry
+                new_obs = None
+                for attempt in range(3):
+                    try:
+                        new_obs = env.step(action, data=action_data)
+                        if new_obs is not None:
+                            break
+                        time.sleep(2.0 * (2 ** attempt))
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        if any(c in err_str for c in ['500', '502', '503', '504', '429']):
+                            time.sleep(2.0 * (2 ** attempt))
+                            continue
+                        break
+
+                if new_obs is None:
+                    if self._verbose:
+                        print(f"    [REPLAY-ABORT] API failure at action {actions_taken}")
+                    break
+
+                actions_taken += 1
+                last_obs = new_obs
+
+                if self._verbose and actions_taken % 10 == 0:
+                    state_str = str(new_obs.state).replace('GameState.', '')
+                    levels_now = getattr(new_obs, 'levels_completed', 0) or 0
+                    coord_str = ''
+                    if action_num == 6 and action_data:
+                        coord_str = f" @({action_data.get('x', '?')},{action_data.get('y', '?')})"
+                    print(
+                        f"    [{actions_taken:3d}] {action.name}{coord_str} "
+                        f"[REPLAY] -> levels={levels_now}/{win_levels} state={state_str}"
+                    )
+
+                # Stop early on win or game over
+                if new_obs.state == GameState.WIN:
+                    if self._verbose:
+                        print(f"    [REPLAY-WIN] Game won after {actions_taken} replayed actions!")
+                    break
+                if new_obs.state == GameState.GAME_OVER:
+                    if self._verbose:
+                        print(f"    [REPLAY-OVER] Game over after {actions_taken} replayed actions")
+                    break
+            else:
+                # Sequence finished without break -- continue to next level
+                continue
+            break  # An inner break propagates out
+
+        # Build result
+        levels_completed = 0
+        is_win = False
+        if last_obs:
+            levels_completed = getattr(last_obs, 'levels_completed', 0) or 0
+            is_win = last_obs.state == GameState.WIN
+        score = levels_completed / win_levels if win_levels > 0 else 0.0
+
+        if self._verbose:
+            status = "WIN" if is_win else f"{levels_completed}/{win_levels}"
+            print(f"    [REPLAY-DONE] {status} score={score:.2f} actions={actions_taken}")
+
+        return GameResult(
+            game_id=game_id, agent_id=agent.agent_id, score=score,
+            levels_completed=levels_completed, total_levels=win_levels,
+            is_win=is_win, actions_taken=actions_taken,
+        )
 
     @staticmethod
     def _compute_frame_hash(obs: Any) -> str:
