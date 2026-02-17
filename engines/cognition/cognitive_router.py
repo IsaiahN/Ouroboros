@@ -749,8 +749,9 @@ class CognitiveRouter:
 
         # Reset tracking components
         self.epistemic_tracker.reset()
-        if self.hysteresis:
-            self.hysteresis.reset()
+        # NOTE: hysteresis is NOT reset per-decision -- signals accumulate
+        # across decisions within a game. Game-level reset happens in
+        # initialize(). This allows transition momentum to build.
         if self.fallback:
             self.fallback.reset(self._game_id, self._decision_id)
 
@@ -767,6 +768,9 @@ class CognitiveRouter:
         # Bridge initial quadrant to blackboard for phenomenology/eisenhower
         self.blackboard.slot('epistemic_quadrant', quadrant.name)
         self._switch_algorithm(quadrant.name, context)
+        # Pre-satisfy cooldown so the initial algorithm can be switched
+        # immediately if a transition fires in the first iteration.
+        self._state.iterations_since_switch = self.config.algorithm_switch_cooldown
 
         try:
             # Run main loop
