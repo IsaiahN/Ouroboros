@@ -175,6 +175,23 @@ class CausalMap:
         self._hud_change_positions: Dict[Tuple[int, int], int] = {}
         # {(x,y): count} -- positions whose actions caused HUD changes
 
+        # ─── Tile Abstraction Layer ───────────────────────────────────
+        # Maps raw pixel regions to logical tile coordinates.
+        # When populated, update_from_action() aggregates pixel-level
+        # diffs into tile-level effects -- fixing the pixel-vs-tile
+        # granularity problem that produced "38 cells affected" artifacts.
+        self._tile_map: Optional[Dict[str, Any]] = None
+        # Structure: {
+        #   'bounds': (y_min, x_min, y_max, x_max),  # panel bounds
+        #   'rows': int, 'cols': int,
+        #   'tile_w': int, 'tile_h': int,
+        #   'sep_w': int,  # separator width between tiles
+        # }
+
+        # Object collision tracking (LS20 -- movement game interactions)
+        self._collision_effects: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+        # {object_color: [{hud_before, hud_after, position, ...}]}
+
         # ─── Prediction-Surprise-Context System ───────────────────────
         # Enables discovery of context-dependent mechanics (camera pans,
         # mode switches, state-dependent effects) through prediction
@@ -260,6 +277,9 @@ class CausalMap:
         - _effects: position->effect mappings (mechanics don't change)
         - _rules: generalized causal rules
         - _color_cycles: tile color cycling patterns
+        - _tile_map: tile grid structure (layout may change per level but
+          the tile SIZE usually stays the same -- re-detected from perception)
+        - _collision_effects: object collision knowledge (LS20)
         - _walls: known wall positions (LS20 maze layout may change, but
           the CONCEPT of walls persists)
         - _open_paths: known open paths
@@ -275,6 +295,7 @@ class CausalMap:
         - _visited_positions: start fresh exploration
         - _delayed_observations: stale temporal data
         - _hud_change_positions: HUD layout may change
+        - _tile_map: cleared so perception re-detects for new level
         """
         # Level-specific layout resets
         self._goal_cells = {}
@@ -288,6 +309,8 @@ class CausalMap:
         self._visited_positions = set()
         self._delayed_observations = []
         self._hud_change_positions = {}
+        # Tile map is re-detected per level since layout may change
+        self._tile_map = None
 
         # For movement games: walls from prior level may not apply to
         # new layout, but we keep them as weak priors. The agent will
@@ -296,7 +319,7 @@ class CausalMap:
 
         logger.info(
             "[CAUSAL-MAP] Level reset: preserved %d effects, %d rules, "
-            "%d color cycles, %d walls. Cleared goal/plan/explored.",
+            "%d color cycles, %d walls. Cleared goal/plan/explored/tile_map.",
             len(self._effects), len(self._rules),
             len(self._color_cycles), len(self._walls),
         )
@@ -645,6 +668,138 @@ class CausalMap:
         self._all_positions.update(positions)
         self._interactive_positions.update(positions)
 
+    def set_tile_map(
+        self,
+        bounds: Tuple[int, int, int, int],
+        rows: int,
+        cols: int,
+        tile_w: int,
+        tile_h: int,
+        sep_w: int = 0,
+    ):
+        """Set the tile abstraction map from visual perception.
+
+        Once set, update_from_action() will aggregate pixel-level
+        diffs into tile-level effects. This fixes the core granularity
+        problem: a click that changes one tile (16-38 pixels) is
+        recorded as affecting 1 tile, not 38 positions.
+
+        Args:
+            bounds: (y_min, x_min, y_max, x_max) of the tiled panel
+            rows: Number of tile rows
+            cols: Number of tile columns
+            tile_w: Width of each tile in pixels
+            tile_h: Height of each tile in pixels
+            sep_w: Width of separator lines between tiles
+        """
+        if rows <= 0 or cols <= 0 or tile_w <= 0 or tile_h <= 0:
+            return
+        self._tile_map = {
+            'bounds': bounds,
+            'rows': rows,
+            'cols': cols,
+            'tile_w': tile_w,
+            'tile_h': tile_h,
+            'sep_w': sep_w,
+        }
+        logger.debug(
+            f"[CAUSAL-MAP] Tile map set: {rows}x{cols} tiles, "
+            f"{tile_w}x{tile_h}px each, sep={sep_w}"
+        )
+
+    def _pixel_to_tile(self, px: int, py: int) -> Optional[Tuple[int, int]]:
+        """Convert pixel coordinates to tile coordinates.
+
+        Returns the tile center (pixel coords) that this pixel belongs
+        to, or None if the pixel is outside the tiled region or on a
+        separator line.
+        """
+        if self._tile_map is None:
+            return None
+
+        tm = self._tile_map
+        y_min, x_min, y_max, x_max = tm['bounds']
+
+        # Check if pixel is within tiled panel
+        if not (x_min <= px < x_max and y_min <= py < y_max):
+            return None
+
+        # Compute relative position within the panel
+        rel_x = px - x_min
+        rel_y = py - y_min
+
+        # Compute tile column and row, accounting for separators
+        tw = tm['tile_w']
+        th = tm['tile_h']
+        sep = tm['sep_w']
+        cell_w = tw + sep
+        cell_h = th + sep
+
+        if cell_w <= 0 or cell_h <= 0:
+            return None
+
+        col = rel_x // cell_w
+        row = rel_y // cell_h
+
+        # Check bounds
+        if col >= tm['cols'] or row >= tm['rows']:
+            return None
+
+        # Check if on a separator line
+        x_in_cell = rel_x % cell_w
+        y_in_cell = rel_y % cell_h
+        if sep > 0 and (x_in_cell >= tw or y_in_cell >= th):
+            return None  # On separator
+
+        # Return tile center in pixel coordinates (for click targeting)
+        tile_center_x = x_min + col * cell_w + tw // 2
+        tile_center_y = y_min + row * cell_h + th // 2
+        return (tile_center_x, tile_center_y)
+
+    def _aggregate_pixel_diffs_to_tiles(
+        self,
+        pixel_positions: List[Tuple[int, int]],
+        pre_frame: np.ndarray,
+        post_frame: np.ndarray,
+    ) -> Tuple[List[Tuple[int, int]], Dict[Tuple[int, int], List[Tuple[int, int]]]]:
+        """Aggregate pixel-level diffs into tile-level diffs.
+
+        Groups changed pixels by which tile they belong to. For each
+        tile, picks the dominant color transition (the most common
+        old_color -> new_color pair among its pixels).
+
+        Returns:
+            (affected_tiles, tile_color_transitions)
+            - affected_tiles: list of tile center positions (deduplicated)
+            - tile_color_transitions: {tile_center: [(old_color, new_color)]}
+        """
+        # Group changed pixels by their tile
+        tile_pixels: Dict[Tuple[int, int], List[Tuple[int, int]]] = defaultdict(list)
+
+        for px, py in pixel_positions:
+            tile_center = self._pixel_to_tile(px, py)
+            if tile_center is not None:
+                tile_pixels[tile_center].append((px, py))
+
+        affected_tiles = sorted(tile_pixels.keys())
+        tile_transitions: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
+
+        for tile_center, pixels in tile_pixels.items():
+            # Find the dominant color transition for this tile
+            transition_counts: Dict[Tuple[int, int], int] = {}
+            for px, py in pixels:
+                old_c = int(pre_frame[py, px])
+                new_c = int(post_frame[py, px])
+                key = (old_c, new_c)
+                transition_counts[key] = transition_counts.get(key, 0) + 1
+
+            # Take the most common transition
+            if transition_counts:
+                best = max(transition_counts.items(), key=lambda x: x[1])
+                tile_transitions[tile_center] = [best[0]]
+
+        return affected_tiles, tile_transitions
+
     def set_goal(self, goal_cells: Dict[Tuple[int, int], int]):
         """Set the target state we're trying to reach."""
         self._goal_cells = goal_cells
@@ -723,8 +878,32 @@ class CausalMap:
                 affected.append(pos)
                 color_transitions[pos].append((old_c, new_c))
 
-            # Deduplicate affected positions
-            affected_unique = sorted(set(affected))
+            # ─── TILE ABSTRACTION: Aggregate pixels to tiles ──────────
+            # When tile map is available, convert pixel-level diffs to
+            # tile-level diffs. This is the key fix: a click that changes
+            # one 7x7 tile is recorded as "1 tile affected" not "49 pixels."
+            if self._tile_map is not None:
+                raw_pixel_positions = sorted(set(affected))
+                tile_affected, tile_transitions = self._aggregate_pixel_diffs_to_tiles(
+                    raw_pixel_positions, pre_frame, post_frame,
+                )
+                if tile_affected:
+                    # Use tile-level data instead of pixel-level
+                    affected_unique = tile_affected
+                    color_transitions = defaultdict(list)
+                    for tile_pos, transitions in tile_transitions.items():
+                        color_transitions[tile_pos] = transitions
+                    # Also snap click_pos to tile center
+                    snapped = self._pixel_to_tile(click_pos[0], click_pos[1])
+                    if snapped is not None:
+                        click_pos = snapped
+                else:
+                    # Tile aggregation found nothing (pixels on separators?)
+                    # Fall through to pixel-level
+                    affected_unique = sorted(set(affected))
+            else:
+                # No tile map -- use raw pixel positions (legacy behavior)
+                affected_unique = sorted(set(affected))
 
             # ─── Step 2: Check surprise ───────────────────────────────
             self.check_surprise(
@@ -1231,6 +1410,81 @@ class CausalMap:
             self._hud_change_positions.get(action_pos, 0) + 1
         )
 
+    # ─── Object Collision Tracking (LS20 movement games) ──────────────
+
+    def record_collision(
+        self,
+        agent_pos: Tuple[int, int],
+        object_color: int,
+        hud_snapshot_before: Optional[Dict[str, Any]],
+        hud_snapshot_after: Optional[Dict[str, Any]],
+        _frame_before: Optional[np.ndarray] = None,
+        _frame_after: Optional[np.ndarray] = None,
+    ):
+        """Record what happens when the agent collides with an object.
+
+        For LS20-style movement games: the agent moves into a colored
+        object and something changes (key symbol, lifespan, score).
+        Track the association: object_color -> state change.
+
+        This lets agents learn: "blue objects change my key symbol"
+        or "orange objects extend my lifespan."
+        """
+        collision_record: Dict[str, Any] = {
+            'position': agent_pos,
+            'object_color': object_color,
+        }
+
+        # Compare HUD snapshots to detect what changed
+        if hud_snapshot_before is not None and hud_snapshot_after is not None:
+            changes: Dict[str, Any] = {}
+            all_keys = set(hud_snapshot_before.keys()) | set(hud_snapshot_after.keys())
+            for key in all_keys:
+                before_val = hud_snapshot_before.get(key)
+                after_val = hud_snapshot_after.get(key)
+                if before_val != after_val:
+                    changes[key] = {'before': before_val, 'after': after_val}
+            if changes:
+                collision_record['state_changes'] = changes
+                collision_record['is_meaningful'] = True
+            else:
+                collision_record['is_meaningful'] = False
+        else:
+            collision_record['is_meaningful'] = None  # Unknown
+
+        self._collision_effects[object_color].append(collision_record)
+
+        # Log the discovery
+        meaningful = collision_record.get('is_meaningful')
+        if meaningful:
+            logger.debug(
+                f"[CAUSAL-MAP] Collision with color {object_color} at "
+                f"{agent_pos}: state changed: "
+                f"{collision_record.get('state_changes', {})}"
+            )
+
+    def get_collision_knowledge(self) -> Dict[int, Dict[str, Any]]:
+        """Get summarized collision knowledge per object color.
+
+        Returns {color: {count, meaningful_count, common_changes}}.
+        """
+        knowledge: Dict[int, Dict[str, Any]] = {}
+        for color, records in self._collision_effects.items():
+            meaningful = [r for r in records if r.get('is_meaningful')]
+            knowledge[color] = {
+                'collision_count': len(records),
+                'meaningful_count': len(meaningful),
+                'last_position': records[-1]['position'] if records else None,
+            }
+            # Aggregate common state changes
+            if meaningful:
+                change_keys: Dict[str, int] = {}
+                for r in meaningful:
+                    for key in r.get('state_changes', {}).keys():
+                        change_keys[key] = change_keys.get(key, 0) + 1
+                knowledge[color]['common_changes'] = change_keys
+        return knowledge
+
     # ─── Temporal Causal Learning (VC33 delayed effects) ──────────────
 
     def start_delayed_observation(
@@ -1438,6 +1692,9 @@ class CausalMap:
             'surprise_rate': self.surprise_rate,
             'context_rules': self.context_rule_count,
             'surprise_count': len(self._surprise_log),
+            'has_tile_map': self._tile_map is not None,
+            'tile_map': self._tile_map,
+            'collision_colors': list(self._collision_effects.keys()),
         }
 
     def summary(self) -> str:
@@ -1454,8 +1711,16 @@ class CausalMap:
         ctx_str = ""
         if self._context_effects:
             ctx_str = f" ctx_rules:{self.context_rule_count}"
+        tile_str = ""
+        if self._tile_map:
+            tm = self._tile_map
+            tile_str = f" tiles:{tm['rows']}x{tm['cols']}"
+        collision_str = ""
+        if self._collision_effects:
+            total = sum(len(v) for v in self._collision_effects.values())
+            collision_str = f" collisions:{total}"
         return (
             f"[MAP] effects:{len(self._effects)} explored:{len(self._explored)}/{len(self._all_positions)} "
             f"rules:[{rules_str}] complete:{self.completeness:.0%} plan:{'yes' if self.has_plan else 'no'}"
-            f"{wall_str}{prod_str}{surprise_str}{ctx_str}"
+            f"{wall_str}{prod_str}{surprise_str}{ctx_str}{tile_str}{collision_str}"
         )

@@ -916,6 +916,20 @@ class CognitiveGamePlayer:
                 )
             """)
 
+            # One-time cleanup: remove old pixel-level toggle_neighbors
+            # entries that are measurement artifacts (not tile-level data).
+            # These poisoned cross-game transfer with "38 cells affected."
+            if not getattr(self, '_mechanics_cleaned', False):
+                try:
+                    self._gp.db.execute_query("""
+                        DELETE FROM learned_game_mechanics
+                        WHERE mechanic_type = 'toggle_neighbors'
+                        AND mechanic_data NOT LIKE '%"tile_level": true%'
+                    """)
+                    self._mechanics_cleaned = True
+                except Exception:
+                    self._mechanics_cleaned = True
+
             mechanics_saved = 0
 
             # --- Color cycles -> 'color_cycle' mechanic ---
@@ -939,35 +953,75 @@ class CognitiveGamePlayer:
                     )
                     mechanics_saved += 1
 
-            # --- Neighbor effects -> 'toggle_neighbors' mechanic ---
-            # If clicking a position affects OTHER positions too
-            multi_effect_count = sum(
+            # --- Self-toggle detection -> 'self_toggle' mechanic ---
+            # When tile abstraction is active, most effects should be
+            # self-only (clicking tile X changes only tile X). This is
+            # the CORRECT mechanic for FT09-style games.
+            self_toggle_count = sum(
                 1 for e in causal_map._effects.values()
-                if len(e.affected) > 1
+                if len(e.affected) == 1 and e.last_frame_changed
             )
-            if multi_effect_count > 0:
-                # Analyze the neighbor pattern
-                neighbor_offsets = []
-                for e in causal_map._effects.values():
-                    for affected_pos in e.affected:
-                        if affected_pos != e.position:
-                            dx = affected_pos[0] - e.position[0]
-                            dy = affected_pos[1] - e.position[1]
-                            neighbor_offsets.append((dx, dy))
-                # Find most common offset pattern
-                from collections import Counter
-                offset_counts = Counter(neighbor_offsets)
-                top_offsets = offset_counts.most_common(8)
+            if self_toggle_count > 0:
                 mechanic_data = _json.dumps({
-                    'multi_effect_positions': multi_effect_count,
-                    'common_offsets': [
-                        {'dx': o[0], 'dy': o[1], 'count': c}
-                        for o, c in top_offsets
-                    ],
+                    'self_toggle_positions': self_toggle_count,
+                    'tile_abstraction_active': causal_map._tile_map is not None,
                 })
                 self._upsert_mechanic(
-                    game_type, 'toggle_neighbors', mechanic_data,
-                    multi_effect_count, generation,
+                    game_type, 'self_toggle', mechanic_data,
+                    self_toggle_count, generation,
+                )
+                mechanics_saved += 1
+
+            # --- Neighbor effects -> 'toggle_neighbors' mechanic ---
+            # ONLY persist this when tile abstraction IS active and
+            # multiple TILES are still affected (genuine neighbor toggle).
+            # Without tile abstraction, pixel-level "multi-cell" counts
+            # are measurement artifacts (one tile = 16-38 pixels).
+            if causal_map._tile_map is not None:
+                multi_effect_count = sum(
+                    1 for e in causal_map._effects.values()
+                    if len(e.affected) > 1 and e.last_frame_changed
+                )
+                if multi_effect_count > 0:
+                    neighbor_offsets = []
+                    for e in causal_map._effects.values():
+                        for affected_pos in e.affected:
+                            if affected_pos != e.position:
+                                dx = affected_pos[0] - e.position[0]
+                                dy = affected_pos[1] - e.position[1]
+                                neighbor_offsets.append((dx, dy))
+                    from collections import Counter
+                    offset_counts = Counter(neighbor_offsets)
+                    top_offsets = offset_counts.most_common(8)
+                    mechanic_data = _json.dumps({
+                        'multi_effect_positions': multi_effect_count,
+                        'tile_level': True,
+                        'common_offsets': [
+                            {'dx': o[0], 'dy': o[1], 'count': c}
+                            for o, c in top_offsets
+                        ],
+                    })
+                    self._upsert_mechanic(
+                        game_type, 'toggle_neighbors', mechanic_data,
+                        multi_effect_count, generation,
+                    )
+                    mechanics_saved += 1
+
+            # --- Object collision effects -> 'object_interaction' mechanic ---
+            if causal_map._collision_effects:
+                collision_knowledge = causal_map.get_collision_knowledge()
+                mechanic_data = _json.dumps({
+                    'interactable_colors': list(collision_knowledge.keys()),
+                    'total_collisions': sum(
+                        v['collision_count'] for v in collision_knowledge.values()
+                    ),
+                    'meaningful_collisions': sum(
+                        v['meaningful_count'] for v in collision_knowledge.values()
+                    ),
+                })
+                self._upsert_mechanic(
+                    game_type, 'object_interaction', mechanic_data,
+                    len(causal_map._collision_effects), generation,
                 )
                 mechanics_saved += 1
 

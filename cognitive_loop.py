@@ -1084,6 +1084,40 @@ class CognitiveLoop:
                         )
                         if self._agent_position != new_agent_pos:
                             cf.map_update = f"Moved to ({new_agent_pos[0]},{new_agent_pos[1]})"
+
+                            # ═══ Object Collision Detection (LS20) ═══
+                            # If the agent moved AND extra frame changes
+                            # occurred beyond agent movement, the agent
+                            # may have collided with an interactive object.
+                            if (self._prev_frame is not None
+                                    and post_array is not None
+                                    and frame_changed):
+                                try:
+                                    diff_mask = self._prev_frame != post_array
+                                    changed_px = int(diff_mask.sum())
+                                    # Agent movement alone changes ~10-30 pixels.
+                                    # If >50 pixels changed, something else happened.
+                                    if changed_px > 50:
+                                        # Check what color was at the new position
+                                        # in the PREVIOUS frame (before collision)
+                                        nx, ny = new_agent_pos
+                                        if (0 <= ny < self._prev_frame.shape[0]
+                                                and 0 <= nx < self._prev_frame.shape[1]):
+                                            object_color = int(self._prev_frame[ny, nx])
+                                            bg_color = 0  # Background is usually black
+                                            if object_color != bg_color:
+                                                self._causal_map.record_collision(
+                                                    agent_pos=new_agent_pos,
+                                                    object_color=object_color,
+                                                    hud_snapshot_before=None,
+                                                    hud_snapshot_after=None,
+                                                )
+                                                cf.map_update += (
+                                                    f" [COLLISION color={object_color}"
+                                                    f" extra_px={changed_px}]"
+                                                )
+                                except Exception:
+                                    pass
                         else:
                             cf.map_update = f"Wall at ({self._agent_position[0] if self._agent_position else '?'},{self._agent_position[1] if self._agent_position else '?'}) dir={action_type}"
                         self._agent_position = new_agent_pos
@@ -1833,6 +1867,49 @@ class CognitiveLoop:
 
             if positions_to_register:
                 self._causal_map.register_positions(positions_to_register)
+
+            # ── Bridge: Feed tile grid structure into CausalMap ────────
+            # When VisualCortex detects a tile grid, pass the grid geometry
+            # to CausalMap so it can aggregate pixel-level diffs into
+            # tile-level effects. This is the key fix for the pixel-vs-tile
+            # granularity problem.
+            if (percept.tile_count > 0
+                    and percept.interactive_bounds
+                    and self._causal_map._tile_map is None):
+                y_min, x_min, y_max, x_max = percept.interactive_bounds
+                rows = max(1, percept.grid_rows)
+                cols = max(1, percept.grid_cols)
+                tile_h = (y_max - y_min) // rows if rows > 0 else 0
+                tile_w = (x_max - x_min) // cols if cols > 0 else 0
+
+                # Also try to get separator width from visual scene
+                sep_w = 0
+                if percept.visual_scene_dict:
+                    tg_list = percept.visual_scene_dict.get('tile_grids', [])
+                    if tg_list:
+                        sep_w = tg_list[0].get('separator_width', 0)
+                        # Use more precise tile dimensions if available
+                        precise_tw = tg_list[0].get('tile_width', 0)
+                        precise_th = tg_list[0].get('tile_height', 0)
+                        precise_rows = tg_list[0].get('tile_rows', 0)
+                        precise_cols = tg_list[0].get('tile_cols', 0)
+                        if precise_tw > 0 and precise_th > 0:
+                            tile_w = precise_tw
+                            tile_h = precise_th
+                        if precise_rows > 0:
+                            rows = precise_rows
+                        if precise_cols > 0:
+                            cols = precise_cols
+
+                if tile_w > 0 and tile_h > 0:
+                    self._causal_map.set_tile_map(
+                        bounds=(y_min, x_min, y_max, x_max),
+                        rows=rows,
+                        cols=cols,
+                        tile_w=tile_w,
+                        tile_h=tile_h,
+                        sep_w=sep_w,
+                    )
 
             # Forward goal cells to causal map so plan_to_goal() can work
             if percept.has_goal and percept.goal_cells:

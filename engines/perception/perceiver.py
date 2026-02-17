@@ -294,6 +294,11 @@ class Perceiver:
         Uses the stored VisualScene object to access actual panel pixel data.
         For each tile position, samples the center pixel from both the reference
         panel and workspace panel to build goal_cells, current_cells, and delta.
+
+        Enhanced with key-sprite decoding: when the reference panel is much
+        smaller than the workspace, its internal color structure IS the target
+        pattern. Each distinct color region in the key maps to a target color
+        for the corresponding workspace tile.
         """
         scene = self._last_scene_obj
         if scene is None or not hasattr(scene, 'panels'):
@@ -320,15 +325,14 @@ class Perceiver:
         if work_panel is None:
             return
 
-        # Both panels should have similar structure
-        # Try to detect tile grid within each panel and compare cell-by-cell
         ref_region = ref_panel.region
         work_region = work_panel.region
 
         if ref_region is None or work_region is None:
             return
 
-        # Use tile_grids if available for cell boundaries
+        # ── Strategy 1: Tile-grid aligned comparison ──────────────────
+        # When we have tile grids for both panels, compare cell-by-cell.
         tile_grids = getattr(scene, 'tile_grids', [])
         if tile_grids:
             tg = tile_grids[0]
@@ -369,7 +373,103 @@ class Perceiver:
                 pf.goal_progress = pf.cells_matching_goal / max(pf.cells_total, 1)
                 return
 
-        # Fallback: compare panels directly if same shape
+        # ── Strategy 2: Key-sprite pattern decoding ───────────────────
+        # When the reference panel is much smaller than the workspace,
+        # its internal color structure IS the target pattern. Divide
+        # the key sprite into a grid matching the workspace tile count
+        # and extract the target color for each cell.
+        ref_area = ref_panel.area()
+        work_area = work_panel.area()
+        if ref_area > 0 and work_area > 0 and ref_area < work_area * 0.5:
+            # Reference is significantly smaller -- likely a key sprite.
+            # Infer tile grid dimensions from workspace panel.
+            work_h, work_w = work_region.shape[:2]
+            ref_h, ref_w = ref_region.shape[:2]
+
+            # Estimate grid dimensions: try to find how many logical cells
+            # the workspace has by looking at color uniformity blocks.
+            # Heuristic: try small grid sizes (2x2 through 6x6) and score
+            # by how uniform the colors are within each cell.
+            best_grid = None
+            best_score = -1.0
+
+            for grid_dim in range(2, min(7, ref_w, ref_h) + 1):
+                cell_h = ref_h // grid_dim
+                cell_w = ref_w // grid_dim
+                if cell_h < 1 or cell_w < 1:
+                    continue
+
+                # Score: how uniform is each cell?
+                score = 0.0
+                for r in range(grid_dim):
+                    for c in range(grid_dim):
+                        y1 = r * cell_h
+                        y2 = min((r + 1) * cell_h, ref_h)
+                        x1 = c * cell_w
+                        x2 = min((c + 1) * cell_w, ref_w)
+                        cell = ref_region[y1:y2, x1:x2]
+                        if cell.size > 0:
+                            unique = len(np.unique(cell))
+                            # Prefer cells with 1-2 colors (uniform)
+                            if unique <= 2:
+                                score += 1.0
+                            else:
+                                score += 1.0 / unique
+
+                normalized_score = score / (grid_dim * grid_dim)
+                if normalized_score > best_score:
+                    best_score = normalized_score
+                    best_grid = grid_dim
+
+            if best_grid is not None and best_score > 0.5:
+                grid_dim = best_grid
+                ref_cell_h = ref_h // grid_dim
+                ref_cell_w = ref_w // grid_dim
+                work_cell_h = work_h // grid_dim
+                work_cell_w = work_w // grid_dim
+
+                wy_min, wx_min = work_panel.bounds[0], work_panel.bounds[1]
+
+                for r in range(grid_dim):
+                    for c in range(grid_dim):
+                        # Sample center of the reference cell for goal color
+                        ref_cy = r * ref_cell_h + ref_cell_h // 2
+                        ref_cx = c * ref_cell_w + ref_cell_w // 2
+
+                        if ref_cy < ref_h and ref_cx < ref_w:
+                            goal_color = int(ref_region[ref_cy, ref_cx])
+                        else:
+                            continue
+
+                        # Map to workspace cell center
+                        work_cy = r * work_cell_h + work_cell_h // 2
+                        work_cx = c * work_cell_w + work_cell_w // 2
+
+                        if work_cy < work_h and work_cx < work_w:
+                            curr_color = int(work_region[work_cy, work_cx])
+                        else:
+                            continue
+
+                        abs_x = wx_min + work_cx
+                        abs_y = wy_min + work_cy
+
+                        pf.goal_cells[(abs_x, abs_y)] = goal_color
+                        pf.current_cells[(abs_x, abs_y)] = curr_color
+
+                        if goal_color != curr_color:
+                            pf.delta.append(CellDiff(
+                                x=abs_x, y=abs_y,
+                                current_color=curr_color,
+                                goal_color=goal_color,
+                            ))
+
+                if pf.goal_cells:
+                    pf.cells_total = len(pf.goal_cells)
+                    pf.cells_matching_goal = pf.cells_total - len(pf.delta)
+                    pf.goal_progress = pf.cells_matching_goal / max(pf.cells_total, 1)
+                    return
+
+        # ── Strategy 3: Direct panel comparison fallback ──────────────
         if ref_region.shape == work_region.shape:
             h, w = ref_region.shape[:2]
             wy_min, wx_min = work_panel.bounds[0], work_panel.bounds[1]
