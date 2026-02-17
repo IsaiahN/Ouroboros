@@ -136,7 +136,7 @@ These are deterministic, codebase-agnostic, and fast. They discover what exists 
 | `lab/comparative_analyst.py` | `checklists/comparative_analyst.md` | Compares success vs. failure cohorts, ranks features by effect size |
 | `lab/trend_tracker.py` | `checklists/trend_tracker.md` | Records experiments, detects convergence, enforces trial minimums |
 | `lab/branch_breeder.py` | `checklists/branch_breeder.md` | Merges successful branches, tests combinations |
-| `lab/evolution_runner.py` | `checklists/evolution_runner.md` | Runs evolution trials on any branch |
+| `lab/evolution_runner_wrapper.py` | `checklists/evolution_runner.md` | Wraps evolution_runner.py, switches branches, collects before/after metrics |
 
 ---
 

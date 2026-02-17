@@ -418,7 +418,7 @@ The scripts don't need to know WHAT subsystems exist. They discover them from wh
 | `lab/comparative_analyst.py` | Takes Code Tracer output + metrics. Discovers all available features (every subsystem's engagement rate, every trace field that varies between agents) | For every discovered feature: compute statistical difference between success cohort and failure cohort. Rank all features by effect size. No hardcoded feature list — if a new subsystem appears, it gets measured automatically. |
 | `lab/trend_tracker.py` | Reads its own ledger (experiment results DB). Schema is lab-internal and stable. | Statistical significance, convergence detection, plateau detection, cross-game patterns. Codebase-agnostic by nature — it tracks experiment outcomes, not code structure. |
 | `lab/branch_breeder.py` | Reads Trend Tracker's successful experiment list. Uses git for all branch operations. | Merge combinations, run trials, classify results. Entirely codebase-agnostic — it doesn't read code, just manages branches. |
-| `lab/evolution_runner.py` | Discovers how to run evolution from a standard entrypoint (e.g., `python run_evolution.py --agents N --games G --generations K`) | Runs trials, waits for completion, returns metrics. The entrypoint contract is stable even if internals change. |
+| `lab/evolution_runner_wrapper.py` | Wraps the existing `evolution_runner.py` entrypoint. Switches branches, collects before/after metrics. | Runs trials, waits for completion, returns structured results with metrics delta. The entrypoint contract is stable even if internals change. |
 
 #### How Discovery Works in Practice
 

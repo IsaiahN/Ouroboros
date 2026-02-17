@@ -148,27 +148,38 @@ def scan_routing_traces(generation=None, db_path=None):
         row[1] for row in conn.execute("PRAGMA table_info(cognitive_routing_traces)")
     }
 
-    # Build query
-    query = "SELECT * FROM cognitive_routing_traces"
-    params = []
+    # Build query -- table can be very large (4M+ rows), so always filter tightly.
+    # Best strategy: use game_results timestamps to scope routing traces via the
+    # indexed timestamp column, since game_id is shared across all generations.
+    has_timestamp = "timestamp" in columns
 
-    if generation is not None and "agent_id" in columns:
-        # Find agent_ids from this generation via game_results
-        query += (
-            " WHERE agent_id IN "
-            "(SELECT DISTINCT agent_id FROM cognitive_routing_traces "
+    if generation is not None and has_timestamp and _table_exists(conn, "game_results"):
+        # Get time window for this generation from game_results
+        time_range = conn.execute(
+            "SELECT MIN(start_time), MAX(end_time) FROM game_results WHERE generation = ?",
+            (generation,),
+        ).fetchone()
+        if time_range and time_range[0]:
+            query = (
+                "SELECT * FROM cognitive_routing_traces "
+                "WHERE timestamp BETWEEN ? AND ?"
+            )
+            params = [time_range[0], time_range[1]]
+        else:
+            query = "SELECT * FROM cognitive_routing_traces WHERE 1=0"
+            params = []
+    elif has_timestamp:
+        # No generation filter -- get only the most recent traces
+        query = (
+            "SELECT * FROM cognitive_routing_traces "
+            "WHERE timestamp >= datetime("
+            "(SELECT MAX(timestamp) FROM cognitive_routing_traces), '-1 hour') "
+            "LIMIT 5000"
         )
-        # Filter by game_id matching generation's sessions
-        if _table_exists(conn, "game_results"):
-            sessions = conn.execute(
-                "SELECT DISTINCT session_id FROM game_results WHERE generation = ?",
-                (generation,),
-            ).fetchall()
-            if sessions:
-                # Try to match via game_id
-                pass
-        # Simpler: just get all recent traces
-        query = "SELECT * FROM cognitive_routing_traces ORDER BY timestamp DESC LIMIT 5000"
+        params = []
+    else:
+        # Absolute fallback: just the last 2000 rows by rowid
+        query = "SELECT * FROM cognitive_routing_traces ORDER BY rowid DESC LIMIT 2000"
         params = []
 
     rows = conn.execute(query, params).fetchall()
