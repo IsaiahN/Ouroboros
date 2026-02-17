@@ -227,21 +227,10 @@ class CognitiveGamePlayer:
         fallback_threshold = min(150, self._gp.max_actions // 5)
         # Only load sequences as a safety net -- cognitive loop is primary
         game_type = game_id[:4] if len(game_id) >= 4 else game_id
-        try:
-            result = self._gp.db.execute_query("""
-                SELECT action_sequence FROM winning_sequences
-                WHERE game_type = ? AND level_number = 1 AND is_active = 1
-                ORDER BY efficiency_score DESC LIMIT 1
-            """, (game_type,))
-            if result:
-                import json
-                seq_data = result[0].get('action_sequence') if isinstance(result[0], dict) else result[0][0]
-                if seq_data:
-                    fallback_sequence = json.loads(seq_data) if isinstance(seq_data, str) else list(seq_data)
-                    if self._verbose:
-                        print(f"    [FALLBACK] Sequence loaded ({len(fallback_sequence)} actions) -- will use if stuck after {fallback_threshold} actions")
-        except Exception:
-            pass
+        current_fallback_level = 1  # Track which level the loaded sequence is for
+        fallback_sequence = self._load_fallback_sequence(game_type, current_fallback_level)
+        if fallback_sequence and self._verbose:
+            print(f"    [FALLBACK] Sequence loaded for level {current_fallback_level} ({len(fallback_sequence)} actions) -- will use if stuck after {fallback_threshold} actions")
 
         # ========== COGNITIVE GAME LOOP ==========
         while actions_taken < action_budget:
@@ -251,17 +240,35 @@ class CognitiveGamePlayer:
             obs = last_obs if last_obs else initial_obs
             current_available = getattr(obs, 'available_actions', None) or available_actions
 
-            # ═══ FALLBACK CHECK: If stuck too long with no progress, switch to replay ═══
+            # ═══ FALLBACK CHECK: If stuck too long on current level, reset & replay ═══
+            actions_on_current_level = actions_taken - level_start_action_index
             if (
                 not fallback_active
                 and fallback_sequence
-                and actions_taken >= fallback_threshold
-                and prev_levels == 0
+                and actions_on_current_level >= fallback_threshold
             ):
+                # Reset the game to get a clean board state before replaying.
+                # Without reset, the board is mutated by prior wrong moves
+                # and the winning sequence (recorded from origin) won't work.
+                try:
+                    reset_obs = env.reset()
+                    if reset_obs is not None:
+                        last_obs = reset_obs
+                        initial_obs = reset_obs
+                        obs = reset_obs
+                        if self._verbose:
+                            print(f"    [FALLBACK-RESET] Game reset to clean state for level {prev_levels + 1}")
+                    else:
+                        if self._verbose:
+                            print(f"    [FALLBACK-RESET] Reset returned None, replaying on current state")
+                except Exception as e:
+                    if self._verbose:
+                        print(f"    [FALLBACK-RESET] Reset failed: {e}")
+
                 fallback_active = True
                 fallback_position = 0
                 if self._verbose:
-                    print(f"    [FALLBACK-ACTIVE] No progress after {actions_taken} actions, replaying winning sequence")
+                    print(f"    [FALLBACK-ACTIVE] Stuck on level {prev_levels + 1} after {actions_on_current_level} actions, replaying winning sequence")
 
             # Get frame
             frame = getattr(obs, 'frame', None)
@@ -593,6 +600,15 @@ class CognitiveGamePlayer:
                     pass
 
                 level_start_action_index = len(action_sequence)
+
+                # ═══ FALLBACK: Reload sequence for the new level ═══
+                new_level_num = current_levels + 1
+                fallback_sequence = self._load_fallback_sequence(game_type, new_level_num)
+                fallback_active = False
+                fallback_position = 0
+                current_fallback_level = new_level_num
+                if fallback_sequence and self._verbose:
+                    print(f"    [FALLBACK] Reloaded sequence for level {new_level_num} ({len(fallback_sequence)} actions)")
 
             # Verbose output (cognitive-enriched)
             if self._verbose:
@@ -1267,6 +1283,30 @@ class CognitiveGamePlayer:
 
         except Exception:
             pass  # Never let snapshots crash the game loop
+
+    def _load_fallback_sequence(self, game_type: str, level_number: int) -> List:
+        """Load the best winning sequence for a specific game type and level.
+
+        Returns the parsed action sequence list, or empty list if none found.
+        """
+        try:
+            result = self._gp.db.execute_query("""
+                SELECT action_sequence FROM winning_sequences
+                WHERE game_type = ? AND level_number = ? AND is_active = 1
+                ORDER BY efficiency_score DESC LIMIT 1
+            """, (game_type, level_number))
+            if result:
+                import json
+                seq_data = (
+                    result[0].get('action_sequence')
+                    if isinstance(result[0], dict)
+                    else result[0][0]
+                )
+                if seq_data:
+                    return json.loads(seq_data) if isinstance(seq_data, str) else list(seq_data)
+        except Exception:
+            pass
+        return []
 
     @staticmethod
     def _compute_frame_hash(obs: Any) -> str:
