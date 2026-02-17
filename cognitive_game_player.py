@@ -21,6 +21,7 @@ Usage in evolution_runner.py:
 
 import json as _json
 import logging
+import random
 import time
 import uuid
 from datetime import datetime
@@ -313,7 +314,6 @@ class CognitiveGamePlayer:
 
             # Validate action
             if action_num not in current_available:
-                import random
                 action_num = random.choice(current_available)
 
             action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
