@@ -334,12 +334,15 @@ class PerformanceAnalyzer:
             total_games = len(diversity_data)
 
             # 1. Novel Game Performance (50% weight)
-            # Average score on first-time games
-            novel_games = [g for g in diversity_data if g['is_novel_game'] or g['attempts'] == 1]
+            # Average first-attempt score across games.
+            # Treat games with <= 3 attempts as "novel" so this metric
+            # stays alive after the first play instead of going permanently
+            # to zero once is_novel_game=0 and attempts>1.
+            novel_games = [g for g in diversity_data if g['is_novel_game'] or g['attempts'] <= 3]
             novel_game_performance = 0.0
             if novel_games:
-                # Normalize scores (assume max score ~10.0 for ARC games)
-                novel_scores = [min(g['first_attempt_score'] / 10.0, 1.0) for g in novel_games]
+                # ARC game scores are fractions in [0.0, 1.0] (levels_completed / total_levels)
+                novel_scores = [min(g['first_attempt_score'], 1.0) for g in novel_games]
                 novel_game_performance = sum(novel_scores) / len(novel_scores)
 
             # 2. Few-Shot Learning (30% weight)
