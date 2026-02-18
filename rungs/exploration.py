@@ -265,7 +265,17 @@ class Action6ObjectExplorationRung(DecisionRung):
                     eval_count = 0
             self._last_game_level = game_key
 
-            eval_decay = eval_count * 0.02
+            # Cold-start protection for ACTION6-only games: suppress eval
+            # decay during first 20 evaluations. For click-only games there
+            # is no alternative to clicking, so decaying click confidence to
+            # let non-click rungs win is counterproductive.
+            available = context.get('available_actions', [])
+            is_click_only = (list(available) == [6]) if available else False
+            cold_start_window = 20
+            if is_click_only and eval_count < cold_start_window:
+                eval_decay = 0.0
+            else:
+                eval_decay = eval_count * 0.02
 
             # First try: Get objects matching known selectable shapes for this game
             if hasattr(a6e, 'get_untried_objects_for_frontier'):
