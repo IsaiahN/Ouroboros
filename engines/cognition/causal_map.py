@@ -1658,10 +1658,12 @@ class CausalMap:
                 except Exception:
                     continue
 
-            # Import goal state
-            goal = world_model.get('goal_state', {})
-            if goal:
+            # Import goal state (constraint_goal_state takes priority
+            # over goal_state -- written by ConstraintDecoderRung)
+            goal = world_model.get('constraint_goal_state') or world_model.get('goal_state', {})
+            if isinstance(goal, dict) and goal:
                 self._goal_cells = goal
+                self._invalidate_plan()
 
             # Import current state
             cells = world_model.get('cell_states', {})
