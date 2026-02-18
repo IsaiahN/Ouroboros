@@ -318,6 +318,25 @@ class EvolutionaryEngine:
         if games_played >= 10:
             fitness *= 1.1  # 10% bonus for proven agents
 
+        # COLD-START BOOTSTRAP (H4): When standard fitness is 0 and the agent
+        # has played games, use action efficiency as a proxy signal.
+        # Agents that explore more game states (higher frame_changes) get
+        # a small fitness advantage. Capped at 0.3 so real scoring dominates.
+        if fitness == 0.0 and games_played > 0:
+            try:
+                fc_data = self.db.execute_query("""
+                    SELECT AVG(gr.frame_changes) as avg_fc
+                    FROM game_results gr
+                    INNER JOIN agent_arc_performance ap
+                        ON gr.session_id = ap.session_id
+                    WHERE ap.agent_id = ?
+                      AND gr.frame_changes IS NOT NULL
+                """, (agent_id,))
+                if fc_data and fc_data[0]['avg_fc'] is not None:
+                    fitness = min(fc_data[0]['avg_fc'] / 150.0, 0.3)
+            except Exception:
+                pass
+
         return fitness
 
     def _calculate_specialist_fitness(self, agent_id: str, agent_data: Dict[str, Any]) -> float:

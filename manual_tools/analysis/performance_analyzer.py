@@ -378,6 +378,41 @@ class PerformanceAnalyzer:
             )
             diversity_fitness_score = max(0.0, diversity_fitness_score)  # Ensure non-negative
 
+            # COLD-START BOOTSTRAP (H4): When all scores are 0, use behavioral
+            # exploration signals to break the zero-gradient deadlock.
+            # Auto-disengages once any agent scores (diversity_fitness_score > 0).
+            exploration_proxy = 0.0
+            cold_start_active = False
+            if diversity_fitness_score == 0.0 and total_games > 0:
+                all_scores_zero = all(
+                    g['best_score'] == 0 and g['first_attempt_score'] == 0
+                    for g in diversity_data
+                )
+                if all_scores_zero:
+                    exploration_data = self.db.execute_query("""
+                        SELECT AVG(gr.frame_changes) as avg_fc,
+                               COUNT(DISTINCT gr.game_id) as games_tried
+                        FROM game_results gr
+                        INNER JOIN agent_arc_performance ap
+                            ON gr.session_id = ap.session_id
+                        WHERE ap.agent_id = ?
+                          AND gr.frame_changes IS NOT NULL
+                    """, (agent_id,))
+
+                    if exploration_data and exploration_data[0]['avg_fc'] is not None:
+                        avg_fc = exploration_data[0]['avg_fc']
+                        games_tried = exploration_data[0]['games_tried']
+                        # Normalize frame_changes (typical max ~150 actions)
+                        frame_exploration = min(avg_fc / 100.0, 1.0)
+                        # Game breadth (3 available games)
+                        game_breadth = min(games_tried / 3.0, 1.0)
+                        exploration_proxy = (
+                            0.6 * frame_exploration + 0.4 * game_breadth
+                        )
+                        # Cap at 0.5 so real scoring always dominates
+                        diversity_fitness_score = min(exploration_proxy, 0.5)
+                        cold_start_active = True
+
             return {
                 'diversity_fitness_score': diversity_fitness_score,
                 'novel_game_performance': novel_game_performance,
@@ -386,7 +421,9 @@ class PerformanceAnalyzer:
                 'unique_games_played': unique_games_played,
                 'unique_games_scored': unique_games_scored,
                 'overfitting_penalty': overfitting_penalty,
-                'max_repeats_on_game': max_attempts_on_single_game
+                'max_repeats_on_game': max_attempts_on_single_game,
+                'exploration_proxy': exploration_proxy,
+                'cold_start_bootstrap': cold_start_active,
             }
 
         except Exception as e:
