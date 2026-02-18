@@ -962,7 +962,10 @@ class EvolutionRunner:
         for aid in agent_ids:
             best = self._get_agent_best_action_for_game(aid, game_id)
             if best is None:
-                best = {'action': 1, 'coordinates': None, 'score_change': 0.0}
+                # Click games (ft09, vc33) use ACTION6; movement games use ACTION1
+                game_prefix = game_id.split('-')[0].lower() if game_id else ''
+                default_action = 6 if game_prefix in ('ft09', 'vc33') else 1
+                best = {'action': default_action, 'coordinates': None, 'score_change': 0.0}
 
             confidence = min(1.0, 0.3 + best.get('score_change', 0.0) * 2.0)
             reasoning = (

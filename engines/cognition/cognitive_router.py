@@ -1035,6 +1035,15 @@ class CognitiveRouter:
                 # Handle transitions (algorithm switching, etc.)
                 for transition in transitions:
                     self._state.transitions.append(transition)
+                    # Save checkpoint at every transition boundary so
+                    # backtracking has a restore point. Without this,
+                    # self._state.checkpoints is always empty and the
+                    # backtrack path at KK->KU never fires.
+                    self._state.checkpoints.append({
+                        "path": self._state.path.copy(),
+                        "visited": self._state.visited_rungs.copy(),
+                        "confidence": self._state.max_confidence,
+                    })
                     if self.hysteresis:
                         should_switch = self.hysteresis.record_signal(
                             transition.from_quadrant,
