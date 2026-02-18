@@ -275,6 +275,32 @@ class GamePlayer:
             return "hash_error"
 
     @staticmethod
+    def _is_meaningful_frame_change(
+        obs_before: Any, obs_after: Any, threshold: float = 0.05
+    ) -> bool:
+        """Detect meaningful frame changes by pixel count threshold.
+
+        Games with timers/animations change a few pixels every frame even
+        when the player doesn't move. This method counts the fraction of
+        changed pixels and requires it to exceed *threshold* (default 5%)
+        to qualify as real movement. H6: fixes animation blindness.
+        """
+        try:
+            arr_before = GamePlayer._get_frame_array(obs_before)
+            arr_after = GamePlayer._get_frame_array(obs_after)
+            if arr_before is None or arr_after is None:
+                return True  # Can't compare -> assume changed
+            if arr_before.shape != arr_after.shape:
+                return True  # Shape changed -> definitely different
+            total_pixels = arr_before.size
+            if total_pixels == 0:
+                return False
+            changed_pixels = int(np.sum(arr_before != arr_after))
+            return (changed_pixels / total_pixels) > threshold
+        except Exception:
+            return True  # On error, assume changed (safe default)
+
+    @staticmethod
     def _get_frame_array(obs: Any) -> Optional[np.ndarray]:
         """Extract frame as numpy array from observation.
 
@@ -1013,9 +1039,16 @@ class GamePlayer:
                 except Exception:
                     pass
 
+            # H6: Use meaningful frame change for stuck detection.
+            # Games with timers/animations change pixels every frame, so
+            # raw frame_changed is always True. Use pixel-count threshold
+            # to distinguish real movement from cosmetic animation.
+            meaningful_change = self._is_meaningful_frame_change(obs_before, obs)
+            context['meaningful_frame_changed'] = meaningful_change
+
             # Track failed actions and stuck state
             is_action6_only = list(current_available) == [6]
-            if not last_frame_changed and action.name.startswith('ACTION'):
+            if not meaningful_change and action.name.startswith('ACTION'):
                 failed_actions.add(action.name)
                 if not is_action6_only:
                     stuck_count += 1
