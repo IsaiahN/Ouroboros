@@ -1123,22 +1123,28 @@ class GamePlayer:
                 except Exception:
                     pass
 
-            self.context_builder.update_runner_outcome(action.name, last_outcome_type, last_frame_changed)
+            # H7: Use meaningful_change for runner outcome feedback too
+            self.context_builder.update_runner_outcome(action.name, last_outcome_type, meaningful_change)
 
             # Feed action outcome to epistemic tracker (Phase 0.2)
+            # H7: Use meaningful_change (pixel threshold) instead of
+            # last_frame_changed (raw hash). Raw hash is always True for
+            # games with timers/animations, creating a false confirmation
+            # loop that locks agents in KK with 0 wins.
             try:
                 if self._use_cognitive_router and hasattr(self.decision_system, '_cognitive_router'):
                     router = self.decision_system._cognitive_router
                     if router is not None and hasattr(router, 'epistemic_tracker'):
                         router.epistemic_tracker.update_from_action_feedback(
                             action_name=action.name,
-                            frame_changed=last_frame_changed,
+                            frame_changed=meaningful_change,
                             score_changed=(last_score_delta != 0),
                         )
             except Exception:
                 pass
 
             # Update world model causal map from action feedback (Part 7.1)
+            # H7: Use meaningful_change for causal map too
             try:
                 click_x = action_data.get('x', 32) if action_data else 32
                 click_y = action_data.get('y', 32) if action_data else 32
@@ -1146,7 +1152,7 @@ class GamePlayer:
                 fb_after = self._get_frame_array(obs)
                 self.context_builder.update_world_model_from_action(
                     action=action.name, x=click_x, y=click_y,
-                    frame_changed=last_frame_changed,
+                    frame_changed=meaningful_change,
                     pre_frame=fb_before, post_frame=fb_after,
                 )
             except Exception:
@@ -1181,6 +1187,28 @@ class GamePlayer:
                             self.context_builder._world_model['symbolic_state'] = sym_data
                 except Exception:
                     pass
+
+            # H8: Report outcome to decision system (enables rung learning
+            # + temporal integrator). This was only called in the deprecated
+            # game_loop.py path -- the production GamePlayer path skipped it.
+            if hasattr(self.decision_system, 'report_outcome'):
+                try:
+                    self.decision_system.report_outcome(
+                        action=action.name,
+                        success=(last_outcome_type == 'positive'),
+                        is_death=is_death,
+                        score_delta=last_score_delta,
+                        context=context,
+                    )
+                except Exception:
+                    pass
+
+            # H8: Inject GAP 4D outcome flags into context so
+            # notify_action_complete() can adjust rung confidence thresholds.
+            # These were only set by cognitive_loop.py (unused path).
+            context['was_productive'] = meaningful_change and last_score_delta > 0
+            context['was_destructive'] = is_death or last_score_delta < 0
+            context['was_wasted'] = not meaningful_change
 
             # Record action trace
             self._record_action_trace(

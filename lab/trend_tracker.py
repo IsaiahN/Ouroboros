@@ -222,27 +222,32 @@ def check_readiness(db_path=None):
     ensure_schema(db_path)
     conn = _get_connection(db_path)
 
+    # Detect actual column name (legacy: 'outcome', current: 'verdict')
+    col_info = conn.execute("PRAGMA table_info(lab_experiments)").fetchall()
+    col_names = [c[1] for c in col_info]
+    verdict_col = "verdict" if "verdict" in col_names else "outcome"
+
     # Check pending experiments
     pending = conn.execute(
-        "SELECT COUNT(*) FROM lab_experiments WHERE outcome = 'pending'"
+        f"SELECT COUNT(*) FROM lab_experiments WHERE {verdict_col} = 'pending'"
     ).fetchone()[0]
 
-    # Check recent outcomes
+    # Check recent verdicts
     recent = conn.execute(
-        "SELECT outcome, COUNT(*) FROM lab_experiments "
-        "GROUP BY outcome ORDER BY outcome"
+        f"SELECT {verdict_col}, COUNT(*) FROM lab_experiments "
+        f"GROUP BY {verdict_col} ORDER BY {verdict_col}"
     ).fetchall()
 
     # Check consecutive failures
     last_5 = conn.execute(
-        "SELECT outcome FROM lab_experiments ORDER BY experiment_id DESC LIMIT 5"
+        f"SELECT {verdict_col} FROM lab_experiments ORDER BY experiment_id DESC LIMIT 5"
     ).fetchall()
 
     conn.close()
 
     consecutive_failures = 0
     for row in last_5:
-        if row["outcome"] == "refuted":
+        if row[0] == "refuted":
             consecutive_failures += 1
         else:
             break
@@ -266,7 +271,7 @@ def check_readiness(db_path=None):
         "ready": ready,
         "pending_experiments": pending,
         "consecutive_failures": consecutive_failures,
-        "outcome_summary": {r["outcome"]: r[1] for r in recent} if recent else {},
+        "verdict_summary": {r[0]: r[1] for r in recent} if recent else {},
         "reasons": reasons,
     }
 
@@ -341,8 +346,11 @@ def get_successful_experiments(db_path=None):
     """Get confirmed experiments for the Branch Breeder."""
     ensure_schema(db_path)
     conn = _get_connection(db_path)
+    col_info = conn.execute("PRAGMA table_info(lab_experiments)").fetchall()
+    col_names = [c[1] for c in col_info]
+    verdict_col = "verdict" if "verdict" in col_names else "outcome"
     rows = conn.execute(
-        "SELECT * FROM lab_experiments WHERE outcome = 'confirmed' "
+        f"SELECT * FROM lab_experiments WHERE {verdict_col} = 'confirmed' "
         "ORDER BY experiment_id DESC"
     ).fetchall()
     conn.close()

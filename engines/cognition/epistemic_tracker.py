@@ -15,7 +15,7 @@ Key responsibilities:
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, List, Optional, Set
 
 from engines.cognition.blackboard import KnownFact, Question, RumsfeldQuadrant
 from engines.cognition.epistemic_state import (
@@ -156,12 +156,22 @@ class EpistemicTracker:
         preserved_uu = self.current_state.uu_estimate
         preserved_ku = self.current_state.known_unknowns
         preserved_ku_urgency = self.current_state.ku_urgency
+        # H9: Preserve no_change_streak across decisions so the
+        # agent accumulates evidence of unproductive actions over
+        # its entire game, not just within a single decision cycle.
+        preserved_streak = self._no_change_streak
 
         self.current_state = EpistemicState()
 
         # Restore accumulated knowledge
         self.current_state.known_knowns = preserved_kk
-        self.current_state.kk_confidence = preserved_kk_conf
+        # H9: Apply per-decision kk_confidence decay when no score
+        # has changed. This prevents the KK one-way trap where
+        # confidence only goes up (via animation noise) and never
+        # erodes. Decay factor 0.95 means after 14 unproductive
+        # decisions, kk_confidence drops from 0.6 to ~0.30 (below
+        # the 0.5 KK threshold), forcing a quadrant transition.
+        self.current_state.kk_confidence = preserved_kk_conf * 0.95
         self.current_state.uu_estimate = preserved_uu
         self.current_state.known_unknowns = preserved_ku
         self.current_state.ku_urgency = preserved_ku_urgency
@@ -175,7 +185,7 @@ class EpistemicTracker:
         self.transitions.clear()
         self._last_quadrant = self.current_state.primary_quadrant
         self._tick = 0
-        self._no_change_streak = 0
+        self._no_change_streak = preserved_streak  # H9: carry across decisions
 
     def hard_reset(self) -> None:
         """Full reset for a completely new game (no knowledge preserved)."""
