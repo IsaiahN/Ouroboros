@@ -1228,6 +1228,21 @@ class CognitiveGamePlayer:
         except Exception:
             pass  # Never let snapshots crash the game loop
 
+    def _create_hybrid_scaffold(self, game_type, source_level, target_level):
+        """Create a hybrid scaffold for a target level using source level template.
+
+        Returns (scaffold_sequence, explore_indices, mutation_id) or None.
+        """
+        try:
+            from engines.planning.sequence_abstraction import SequenceAbstraction
+            db_path = getattr(self._gp.db, 'db_path', 'core_data.db')
+            sa = SequenceAbstraction(db_path)
+            return sa.generate_hybrid_scaffold(game_type, source_level, target_level)
+        except Exception as e:
+            if self._verbose:
+                print(f"    [H10-SCAFFOLD] Failed to create scaffold: {e}")
+            return None
+
     def _load_fallback_sequence(self, game_type: str, level_number: int) -> List:
         """Load the best winning sequence for a specific game type and level.
 
@@ -1277,10 +1292,30 @@ class CognitiveGamePlayer:
 
         # Collect sequences for consecutive levels starting at 1
         all_sequences: List[List[dict]] = []
+        scaffold_info = {}  # level_idx -> (explore_indices, mutation_id)
         for level_num in range(1, win_levels + 1):
             seq = self._load_fallback_sequence(game_type, level_num)
             if not seq:
-                break
+                # H10: Try hybrid scaffold from previous level's template
+                if level_num > 1:
+                    scaffold_result = self._create_hybrid_scaffold(
+                        game_type, level_num - 1, level_num
+                    )
+                    if scaffold_result:
+                        scaffold_seq, explore_indices, mutation_id = scaffold_result
+                        all_sequences.append(scaffold_seq)
+                        scaffold_info[len(all_sequences) - 1] = (
+                            explore_indices, mutation_id
+                        )
+                        if self._verbose:
+                            n_follow = len(scaffold_seq) - len(explore_indices)
+                            print(
+                                f"    [H10-SCAFFOLD] L{level_num}: "
+                                f"{len(scaffold_seq)} actions "
+                                f"({n_follow} follow, "
+                                f"{len(explore_indices)} explore)"
+                            )
+                break  # Only one scaffold level at a time
             all_sequences.append(seq)
 
         if not all_sequences:
@@ -1300,24 +1335,35 @@ class CognitiveGamePlayer:
             if not is_running_fn():
                 break
 
-            for seq_entry in sequence:
+            is_scaffold_level = level_idx in scaffold_info
+            scaffold_explore = scaffold_info[level_idx][0] if is_scaffold_level else set()
+
+            for seq_pos, seq_entry in enumerate(sequence):
                 if not is_running_fn():
                     break
 
-                # Parse entry: new format {'action': int, 'data': {...}}
-                # or legacy format (bare string "ACTION6" / bare int)
-                if isinstance(seq_entry, dict):
-                    action_num = seq_entry.get('action', seq_entry.get('action_num', 1))
-                    action_data = seq_entry.get('data', seq_entry.get('action_data', None))
-                elif isinstance(seq_entry, int):
-                    action_num = seq_entry
+                # H10: At scaffold explore positions, choose randomly
+                if is_scaffold_level and seq_pos in scaffold_explore:
+                    available = getattr(last_obs, 'available_actions', None) or [1, 2, 3, 4, 5, 6]
+                    action_num = random.choice(available)
                     action_data = None
-                elif isinstance(seq_entry, str) and seq_entry.startswith('ACTION'):
-                    action_num = int(seq_entry.replace('ACTION', ''))
-                    action_data = None
+                    if action_num == 6:
+                        action_data = {'x': random.randint(0, 63), 'y': random.randint(0, 63)}
                 else:
-                    action_num = int(seq_entry) if seq_entry else 1
-                    action_data = None
+                    # Parse entry: new format {'action': int, 'data': {...}}
+                    # or legacy format (bare string "ACTION6" / bare int)
+                    if isinstance(seq_entry, dict):
+                        action_num = seq_entry.get('action', seq_entry.get('action_num', 1))
+                        action_data = seq_entry.get('data', seq_entry.get('action_data', None))
+                    elif isinstance(seq_entry, int):
+                        action_num = seq_entry
+                        action_data = None
+                    elif isinstance(seq_entry, str) and seq_entry.startswith('ACTION'):
+                        action_num = int(seq_entry.replace('ACTION', ''))
+                        action_data = None
+                    else:
+                        action_num = int(seq_entry) if seq_entry else 1
+                        action_data = None
 
                 action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
 
@@ -1380,6 +1426,25 @@ class CognitiveGamePlayer:
         if self._verbose:
             status = "WIN" if is_win else f"{levels_completed}/{win_levels}"
             print(f"    [REPLAY-DONE] {status} score={score:.2f} actions={actions_taken}")
+
+        # H10: Record scaffold outcomes
+        for level_idx, (explore_idx, mut_id) in scaffold_info.items():
+            scaffold_level = level_idx + 1  # 0-indexed → 1-indexed
+            scaffold_seq = all_sequences[level_idx]
+            n_follow = len(scaffold_seq) - len(explore_idx)
+            outcome = 'success' if levels_completed >= scaffold_level else 'failure'
+            try:
+                self._gp.db.execute_query("""
+                    INSERT OR IGNORE INTO template_mutation_attempts
+                    (mutation_id, game_type, source_level, target_level,
+                     scaffold_length, n_follow_positions, n_explore_positions,
+                     outcome, agent_id, generation)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (mut_id, game_type, scaffold_level - 1, scaffold_level,
+                      len(scaffold_seq), n_follow, len(explore_idx),
+                      outcome, agent.agent_id, current_generation))
+            except Exception:
+                pass
 
         return GameResult(
             game_id=game_id, agent_id=agent.agent_id, score=score,

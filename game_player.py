@@ -367,6 +367,42 @@ class GamePlayer:
             return None
 
     # ------------------------------------------------------------------
+    # H10: Hybrid scaffold for level transitions
+    # ------------------------------------------------------------------
+
+    def _create_hybrid_scaffold(self, game_type, source_level, target_level):
+        """Create a hybrid scaffold sequence for a target level using source level template.
+
+        Returns (scaffold_sequence, explore_indices, mutation_id) or None.
+        """
+        try:
+            from engines.planning.sequence_abstraction import SequenceAbstraction
+            db_path = getattr(self.db, 'db_path', 'core_data.db')
+            sa = SequenceAbstraction(db_path)
+            return sa.generate_hybrid_scaffold(game_type, source_level, target_level)
+        except Exception as e:
+            if self.verbose:
+                print(f"    [H10-SCAFFOLD] Failed to create scaffold: {e}")
+            return None
+
+    def _record_scaffold_outcome(self, mutation_id, game_type, source_level,
+                                 target_level, scaffold_length, n_follow,
+                                 n_explore, outcome, agent_id, generation):
+        """Record the outcome of a scaffold attempt for analysis."""
+        try:
+            self.db.execute_query("""
+                INSERT OR IGNORE INTO template_mutation_attempts
+                (mutation_id, game_type, source_level, target_level,
+                 scaffold_length, n_follow_positions, n_explore_positions,
+                 outcome, agent_id, generation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (mutation_id, game_type, source_level, target_level,
+                  scaffold_length, n_follow, n_explore, outcome,
+                  agent_id, generation))
+        except Exception:
+            pass  # Outcome recording is non-critical
+
+    # ------------------------------------------------------------------
     # Trace / symbolic recording (per-action data capture)
     # ------------------------------------------------------------------
 
@@ -738,6 +774,9 @@ class GamePlayer:
         level_start_action_index = 0
         current_frame_hash = ''
         has_level_sequence = False
+        scaffold_active = False
+        scaffold_explore_indices: set = set()
+        scaffold_mutation_id = ''
 
         # Check for existing winning sequence (replay path)
         try:
@@ -922,6 +961,12 @@ class GamePlayer:
             obs = last_obs if last_obs else initial_obs
             current_available = getattr(obs, 'available_actions', None) or available_actions
 
+            # H10: At scaffold explore positions, suppress replay fast-path
+            # so cognitive rungs decide freely instead of template replay
+            is_replay_for_context = is_replay_mode
+            if scaffold_active and sequence_position in scaffold_explore_indices:
+                is_replay_for_context = False
+
             # Build context via unified ContextBuilder
             context = self.context_builder.build_from_runner_state(
                 game_id=game_id, obs=obs, agent_id=agent.agent_id,
@@ -932,7 +977,7 @@ class GamePlayer:
                 score=getattr(obs, 'score', 0.0), score_delta=last_score_delta,
                 last_outcome=last_outcome_type, has_full_win=has_full_win,
                 active_sequence=active_sequence, sequence_position=sequence_position,
-                is_replay_mode=is_replay_mode, has_level_sequence=has_level_sequence,
+                is_replay_mode=is_replay_for_context, has_level_sequence=has_level_sequence,
                 stuck_count=stuck_count, tried_colors=tried_colors,
                 frame_hash=current_frame_hash,
                 level_start_action_index=level_start_action_index,
@@ -1149,6 +1194,8 @@ class GamePlayer:
             if is_replay_mode and active_sequence and sequence_position < len(active_sequence):
                 if ablation_active and sequence_position in ablation_skip_indices:
                     sequence_position += 1
+                elif scaffold_active and sequence_position in scaffold_explore_indices:
+                    sequence_position += 1  # H10: explore position, advance regardless
                 else:
                     expected_action = active_sequence[sequence_position]
                     if action.name == expected_action or action.name == f'ACTION{expected_action}':
@@ -1435,6 +1482,19 @@ class GamePlayer:
                 except Exception:
                     pass
 
+                # H10: Record scaffold success on level completion
+                if scaffold_active and scaffold_mutation_id:
+                    n_follow = len(active_sequence) - len(scaffold_explore_indices)
+                    self._record_scaffold_outcome(
+                        scaffold_mutation_id, game_type, current_levels - 1,
+                        current_levels, len(active_sequence), n_follow,
+                        len(scaffold_explore_indices), 'success',
+                        agent.agent_id, current_generation,
+                    )
+                    scaffold_active = False
+                    scaffold_explore_indices = set()
+                    scaffold_mutation_id = ''
+
                 # Load per-level winning sequence for next level
                 next_level = current_levels + 1
                 try:
@@ -1494,10 +1554,27 @@ class GamePlayer:
                         if self.verbose and is_replay_mode:
                             print(f"    [SEQ-LOAD] Level {next_level} sequence loaded ({len(active_sequence)} actions)")
                     else:
-                        active_sequence = []
-                        sequence_position = 0
-                        is_replay_mode = False
-                        has_level_sequence = False
+                        # H10: Try hybrid scaffold from source level template
+                        scaffold_result = self._create_hybrid_scaffold(
+                            game_type, current_levels, next_level
+                        )
+                        if scaffold_result:
+                            active_sequence, scaffold_explore_indices, scaffold_mutation_id = scaffold_result
+                            sequence_position = 0
+                            is_replay_mode = True
+                            has_level_sequence = True
+                            scaffold_active = True
+                            if self.verbose:
+                                n_follow = len(active_sequence) - len(scaffold_explore_indices)
+                                print(
+                                    f"    [H10-SCAFFOLD] L{next_level}: {len(active_sequence)} actions "
+                                    f"({n_follow} follow, {len(scaffold_explore_indices)} explore)"
+                                )
+                        else:
+                            active_sequence = []
+                            sequence_position = 0
+                            is_replay_mode = False
+                            has_level_sequence = False
                 except Exception:
                     active_sequence = []
                     sequence_position = 0
@@ -1544,6 +1621,16 @@ class GamePlayer:
                     generation=current_generation,
                 ))
                 break
+
+        # H10: Record scaffold failure if scaffold was active at game end
+        if scaffold_active and scaffold_mutation_id:
+            n_follow = len(active_sequence) - len(scaffold_explore_indices)
+            self._record_scaffold_outcome(
+                scaffold_mutation_id, game_type, 0, 0,
+                len(active_sequence), n_follow,
+                len(scaffold_explore_indices), 'failure',
+                agent.agent_id, current_generation,
+            )
 
         # ========== EXTRACT RESULTS ==========
         levels_completed = 0

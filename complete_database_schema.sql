@@ -6570,3 +6570,26 @@ CREATE INDEX IF NOT EXISTS idx_fa_game ON feel_anomalies(game_id);
 CREATE INDEX IF NOT EXISTS idx_fa_agent ON feel_anomalies(agent_id);
 CREATE INDEX IF NOT EXISTS idx_fa_severity ON feel_anomalies(severity DESC);
 CREATE INDEX IF NOT EXISTS idx_fa_recent ON feel_anomalies(detected_at DESC);
+
+-- ============================================================
+-- H10: Template Mutation Attempts (Hybrid Scaffold Tracking)
+-- ============================================================
+-- Tracks outcomes of hybrid scaffold attempts during level transitions.
+-- Used to measure scaffold success rate and tune follow/explore ratios.
+
+CREATE TABLE IF NOT EXISTS template_mutation_attempts (
+    mutation_id TEXT PRIMARY KEY,
+    game_type TEXT NOT NULL,
+    source_level INTEGER NOT NULL,
+    target_level INTEGER NOT NULL,
+    scaffold_length INTEGER,
+    n_follow_positions INTEGER,
+    n_explore_positions INTEGER,
+    outcome TEXT,  -- 'success' or 'failure'
+    agent_id TEXT,
+    generation INTEGER,
+    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_tma_outcome
+    ON template_mutation_attempts(game_type, target_level, outcome);

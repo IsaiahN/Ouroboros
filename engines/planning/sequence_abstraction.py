@@ -31,8 +31,10 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import json
+import random
+import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from database_interface import DatabaseInterface
 from engines.engine_logger import get_engine_logger
@@ -861,6 +863,140 @@ class SequenceAbstraction:
 
         logger.info(f"[REPLAY] Template ready: {len(executable)} actions for {game_type}@L{level_number}")
         return executable
+
+    def generate_hybrid_scaffold(
+        self,
+        game_type: str,
+        source_level: int,
+        target_level: int,
+    ) -> Optional[Tuple[List, Set[int], str]]:
+        """
+        Generate a hybrid scaffold for a target level using a source level template.
+
+        Invariant positions from the source template become "follow" points
+        (replay fast-path fires). Variant positions become "explore" points
+        (cognitive rungs decide freely). Appended positions are pure exploration.
+
+        Args:
+            game_type: Game type prefix (e.g., 'ls20', 'ft09')
+            source_level: Level to derive scaffold from (typically the just-completed level)
+            target_level: Level the scaffold will be used for
+
+        Returns:
+            Tuple of (scaffold_sequence, explore_indices, mutation_id) or None
+        """
+        # Get source template
+        template = self.generate_abstract_template(game_type, source_level)
+
+        # Fallback: try single winning sequence if no multi-sequence template
+        source_sequence = None
+        explore_indices: Set[int] = set()
+
+        if template and template.template_sequence:
+            # Build scaffold from template with invariant/variant markers
+            scaffold = []
+            for i, step in enumerate(template.template_sequence):
+                action_val = step['action']
+
+                if step.get('is_invariant', False):
+                    # Invariant: follow with light mutation (10% chance)
+                    if random.random() < 0.10:
+                        action_val = self._mutate_action(action_val, game_type)
+                    scaffold.append(action_val)
+                else:
+                    # Variant: mark for exploration
+                    scaffold.append(action_val)  # placeholder (won't be used)
+                    explore_indices.add(i)
+
+            source_sequence = scaffold
+        else:
+            # No template — try single best winning sequence
+            try:
+                result = self.db.execute_query("""
+                    SELECT action_sequence FROM winning_sequences
+                    WHERE game_type = ? AND level_number = ? AND is_active = 1
+                    ORDER BY efficiency_score DESC LIMIT 1
+                """, (game_type, source_level))
+
+                if result and result[0].get('action_sequence'):
+                    raw = result[0]['action_sequence']
+                    actions = json.loads(raw) if isinstance(raw, str) else list(raw)
+                    source_sequence = []
+                    for i, act in enumerate(actions):
+                        source_sequence.append(act)
+                        # With single sequence, alternate: 50% explore
+                        if random.random() < 0.50:
+                            explore_indices.add(i)
+            except Exception as e:
+                logger.debug(f"[H10-SCAFFOLD] Failed to load fallback sequence: {e}")
+
+        if not source_sequence:
+            return None
+
+        # Append exploration tail (L2 may need more actions than L1)
+        tail_length = random.randint(5, 15)
+        base_len = len(source_sequence)
+        is_click_game = game_type in ('ft09', 'vc33')
+        for j in range(tail_length):
+            if is_click_game:
+                source_sequence.append(6)
+            else:
+                source_sequence.append(random.randint(1, 4))
+            explore_indices.add(base_len + j)
+
+        mutation_id = f"h10-{game_type}-L{source_level}to{target_level}-{uuid.uuid4().hex[:8]}"
+
+        # Ensure tracking table exists
+        self._ensure_scaffold_table()
+
+        n_follow = len(source_sequence) - len(explore_indices)
+        logger.info(
+            f"[H10-SCAFFOLD] {game_type} L{source_level}->L{target_level}: "
+            f"{len(source_sequence)} actions ({n_follow} follow, {len(explore_indices)} explore)"
+        )
+
+        return source_sequence, explore_indices, mutation_id
+
+    @staticmethod
+    def _mutate_action(action_val, game_type: str):
+        """Light mutation of an action value for scaffold invariant positions."""
+        is_click_game = game_type in ('ft09', 'vc33')
+        if is_click_game:
+            # For click games, action is always 6 — nothing to mutate
+            return action_val
+        # For movement games: swap to a different movement action
+        movements = [1, 2, 3, 4]
+        try:
+            current = int(str(action_val).replace('ACTION', ''))
+            alternatives = [m for m in movements if m != current]
+            return random.choice(alternatives) if alternatives else action_val
+        except (ValueError, TypeError):
+            return action_val
+
+    def _ensure_scaffold_table(self) -> None:
+        """Create template_mutation_attempts table if it doesn't exist."""
+        try:
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS template_mutation_attempts (
+                    mutation_id TEXT PRIMARY KEY,
+                    game_type TEXT NOT NULL,
+                    source_level INTEGER NOT NULL,
+                    target_level INTEGER NOT NULL,
+                    scaffold_length INTEGER,
+                    n_follow_positions INTEGER,
+                    n_explore_positions INTEGER,
+                    outcome TEXT,
+                    agent_id TEXT,
+                    generation INTEGER,
+                    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_tma_outcome
+                ON template_mutation_attempts(game_type, target_level, outcome)
+            """)
+        except Exception as e:
+            logger.debug(f"[H10-SCAFFOLD] Table ensure failed: {e}")
 
     def get_frontier_templates(
         self,
