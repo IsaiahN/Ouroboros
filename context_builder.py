@@ -385,7 +385,7 @@ class DecisionContext:
             'last_progress_action': self.last_progress_action,
             'action_budget': self.budget_remaining + self.action_count,  # Total budget
             'total_budget': self.budget_remaining + self.action_count,  # Alias
-            'frame_changed': True,  # Default; overwritten by runner after action
+            'frame_changed': True,  # Default for first action; overwritten by game_player with meaningful_change (Fix 2.4)
         }
 
 

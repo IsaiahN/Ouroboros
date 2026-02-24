@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from engines.engine_logger import get_engine_logger
 
 logger = get_engine_logger("fitness_calculator")
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 if TYPE_CHECKING:
     from database_interface import DatabaseInterface
@@ -119,6 +119,11 @@ class FitnessCalculator:
 
         # 3. Generate evolutionary feedback
         feedback = self._generate_evolutionary_feedback(arc_rewards, derived_metrics)
+
+        # Fix 3.1: Add genre-specific fitness bonus
+        genre_bonus = self._calculate_genre_bonus(arc_rewards, game_results)
+        feedback['total_reward'] += genre_bonus
+        feedback['reward_breakdown']['genre_bonus'] = genre_bonus
 
         result = FitnessResult(
             total_reward=feedback['total_reward'],
@@ -311,6 +316,39 @@ class FitnessCalculator:
 
         effective = sum(1 for a in actions if a.get('score_change', 0) > 0)
         return effective / len(actions)
+
+    def _calculate_genre_bonus(self, arc_rewards: Dict[str, Any], game_results: Dict[str, Any]) -> float:
+        """Fix 3.1: Genre-specific fitness bonus.
+
+        Different game genres measure progress on different axes:
+        - LS20 (movement): capability axis — spatial exploration
+        - FT09 (constraint): knowledge axis — constraint satisfaction progress
+        - VC33 (alignment): knowledge axis — spatial alignment progress
+
+        For click-based games with 0 scores, frame_changes and coordinate
+        diversity provide a gradient signal that pure score cannot.
+        """
+        game_id = game_results.get('game_id', '')
+        game_type = game_id[:4] if len(game_id) >= 4 else game_id
+
+        if game_type in ('FT09', 'VC33'):
+            # Knowledge-axis games: reward click diversity and frame responsiveness
+            frame_changes = arc_rewards.get('frame_changes', 0)
+            total_actions = max(arc_rewards.get('total_actions', 1), 1)
+            coord_attempts = arc_rewards.get('coordinate_attempts', 0)
+            coord_successes = arc_rewards.get('coordinate_successes', 0)
+
+            # Click responsiveness: what fraction of clicks caused a frame change?
+            responsiveness = coord_successes / max(coord_attempts, 1)
+
+            # Frame activity: normalised frame changes per action
+            activity = min(frame_changes / total_actions, 1.0)
+
+            # Genre bonus: weighted average of responsiveness and activity
+            return (responsiveness * 0.6 + activity * 0.4) * 10.0
+        else:
+            # Capability-axis (LS20): use standard exploration bonus
+            return 0.0
 
     def _calculate_exploration_bonus(self, arc_rewards: Dict[str, Any]) -> float:
         """Calculate bonus for strategy diversity."""

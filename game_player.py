@@ -276,14 +276,25 @@ class GamePlayer:
 
     @staticmethod
     def _is_meaningful_frame_change(
-        obs_before: Any, obs_after: Any, threshold: float = 0.05
+        obs_before: Any,
+        obs_after: Any,
+        threshold: float = 0.05,
+        game_type: Optional[str] = None,
     ) -> bool:
         """Detect meaningful frame changes by pixel count threshold.
 
         Games with timers/animations change a few pixels every frame even
         when the player doesn't move. This method counts the fraction of
-        changed pixels and requires it to exceed *threshold* (default 5%)
-        to qualify as real movement. H6: fixes animation blindness.
+        changed pixels and requires it to exceed *threshold* to qualify
+        as a real state change.
+
+        Fix 1.2 (genre differentiation): Click-based puzzle games
+        (FT09, VC33) operate on the knowledge axis — a single cell
+        colour change affects <1% of pixels but represents critical
+        progress. Movement games (LS20) operate on the capability axis
+        where 5% is appropriate.
+
+        H6: original animation blindness fix.
         """
         try:
             arr_before = GamePlayer._get_frame_array(obs_before)
@@ -295,8 +306,37 @@ class GamePlayer:
             total_pixels = arr_before.size
             if total_pixels == 0:
                 return False
-            changed_pixels = int(np.sum(arr_before != arr_after))
-            return (changed_pixels / total_pixels) > threshold
+            diff_mask = arr_before != arr_after
+            changed_pixels = int(np.sum(diff_mask))
+            change_ratio = changed_pixels / total_pixels
+
+            # Fix 1.2: game-type-specific thresholds
+            if game_type in ('FT09', 'VC33'):
+                # Knowledge axis: any localised change is meaningful.
+                # Check concentration — ambient noise is evenly spread,
+                # real puzzle changes are clustered in a small area.
+                effective_threshold = 0.002  # 0.2% of pixels
+                if change_ratio <= effective_threshold:
+                    return False
+                # Concentration test: reshape diff to 2D if possible and
+                # check whether change occupies a compact region.
+                try:
+                    if diff_mask.ndim >= 2:
+                        # Collapse colour channels if present
+                        spatial = np.any(diff_mask.reshape(-1, diff_mask.shape[-1]), axis=-1) if diff_mask.ndim == 3 else diff_mask
+                        # If >80% of changes are in <25% of rows, it's concentrated
+                        row_sums = np.sum(spatial.reshape(spatial.shape[0], -1), axis=1)
+                        nonzero_rows = int(np.count_nonzero(row_sums))
+                        total_rows = spatial.shape[0]
+                        is_concentrated = nonzero_rows < total_rows * 0.5
+                        return is_concentrated or change_ratio > 0.01
+                except Exception:
+                    pass
+                return True  # Fallback: above threshold, call it meaningful
+            else:
+                # Capability axis (LS20, default): large spatial displacement
+                effective_threshold = threshold  # 5% default
+                return change_ratio > effective_threshold
         except Exception:
             return True  # On error, assume changed (safe default)
 
@@ -1043,15 +1083,62 @@ class GamePlayer:
             # Games with timers/animations change pixels every frame, so
             # raw frame_changed is always True. Use pixel-count threshold
             # to distinguish real movement from cosmetic animation.
-            meaningful_change = self._is_meaningful_frame_change(obs_before, obs)
+            # Fix 1.2: Game-type-specific thresholds — click games
+            # (FT09/VC33) use 0.2% for knowledge-axis changes vs 5%
+            # for LS20 capability-axis changes.
+            game_type_prefix = game_id[:4] if len(game_id) >= 4 else game_id
+            meaningful_change = self._is_meaningful_frame_change(
+                obs_before, obs, game_type=game_type_prefix,
+            )
             context['meaningful_frame_changed'] = meaningful_change
 
-            # Track failed actions and stuck state
-            is_action6_only = list(current_available) == [6]
+            # Fix 2.4: Override last_frame_changed with meaningful signal
+            # so the NEXT loop iteration passes meaningful_change via
+            # context['frame_changed']. This ensures all rungs that check
+            # 'frame_changed' see the real signal, not animation noise.
+            last_frame_changed = meaningful_change
+
+            # Fix 1.1: Wire Action6BehaviorEngine writes into production
+            # loop. Previously, the engine's write methods were never
+            # called — DB tables stayed empty, so rung reads always
+            # returned nothing. Now we persist click-effect knowledge.
+            if action_num == 6:
+                try:
+                    registry = None
+                    if hasattr(self.decision_system, '_engine_registry'):
+                        registry = self.decision_system._engine_registry
+                    a6_engine = getattr(registry, 'action6_behavior', None) if registry else None
+                    if a6_engine is not None:
+                        click_x = action_data.get('x', 32) if action_data else 32
+                        click_y = action_data.get('y', 32) if action_data else 32
+                        current_levels = getattr(obs, 'levels_completed', 0) or 0
+                        # Classify click region (8x8 grid over 64x64 frame)
+                        region_x = min(click_x // 8, 7)
+                        region_y = min(click_y // 8, 7)
+                        effect_desc = 'meaningful' if meaningful_change else 'no_effect'
+                        a6_engine.save_pseudo_button_behavior(
+                            game_type=game_type_prefix,
+                            level=current_levels + 1,
+                            region_x=region_x,
+                            region_y=region_y,
+                            produces_action='click',
+                            movement_direction='none',
+                            affected_objects=[],
+                            effect_description=effect_desc,
+                            confidence=0.6 if meaningful_change else 0.3,
+                        )
+                except Exception:
+                    pass
+
+            # Track failed actions and stuck state.
+            # Fix 1.3: Re-enable stuck_count for ACTION6-only games.
+            # Previously stuck_count was disabled for click-only games,
+            # which meant H5 stuck-escape and emergency rungs NEVER
+            # fired for FT09/VC33. With game-type-aware meaningful_change
+            # (Fix 1.2), stuckness is correctly detected for all genres.
             if not meaningful_change and action.name.startswith('ACTION'):
                 failed_actions.add(action.name)
-                if not is_action6_only:
-                    stuck_count += 1
+                stuck_count += 1
             else:
                 stuck_count = 0
 

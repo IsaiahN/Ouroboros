@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from agent_operating_mode_system import AgentOperatingModeSystem
 from database_interface import DatabaseInterface
+from engines.postgame.fitness_calculator import FitnessCalculator
 from engines.social.prestige_engine import PrestigeEngine
 
 # Phase 4.5: Import sensation engine for emotional intelligence inheritance
@@ -100,6 +101,11 @@ class EvolutionaryEngine:
 
         # Dynamic Role System: Initialize operating mode coordinator
         self.operating_mode_system = AgentOperatingModeSystem(database_interface)
+
+        # Fix 2.1: Reconnect FitnessCalculator to evolution pipeline.
+        # Previously 100% dead code — evolutionary_engine bypassed it
+        # entirely, reading raw metrics from agent_arc_performance.
+        self.fitness_calculator = FitnessCalculator(database_interface)
 
     def evolve_population(self, evolution_strategy: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -243,9 +249,10 @@ class EvolutionaryEngine:
             agent_id = agent['agent_id']
 
             if specialist_mode:
-                # SPECIALIST MODE DISABLED - This branch never executes
-                # Specialist system replaced by prestige + operating modes
-                # Keeping code for reference but specialist_mode is always False
+                # DEPRECATED (Fix 3.5): specialist_mode is always False.
+                # Specialist system replaced by prestige + operating modes.
+                # _calculate_specialist_fitness() is dead code — kept for
+                # reference only. See metatheory-audit-and-fixes.md.
                 fitness_scores[agent_id] = self._calculate_specialist_fitness(agent_id, agent)
 
             elif diversity_mode:
@@ -289,8 +296,14 @@ class EvolutionaryEngine:
 
     def _calculate_standard_fitness(self, agent_id: str) -> float:
         """
-        Calculate standard fitness based on win rate and performance
-        Original fitness calculation (50% wins, 25% efficiency, 15% consistency, 10% progression)
+        Calculate standard fitness based on win rate and performance.
+
+        Fix 2.1: Also runs the reconnected FitnessCalculator on most
+        recent game results to produce richer 7-component signals and
+        store them in the DB for audit.  The ad-hoc 4-component formula
+        is kept as primary to avoid regression; the FitnessCalculator
+        result is blended in at 20% weight so it starts contributing
+        immediately and can be dialled up by the lab orchestrator.
         """
         # Get ARC performance from database
         arc_performance = self.db.get_agent_arc_performance(agent_id)
@@ -318,6 +331,38 @@ class EvolutionaryEngine:
         if games_played >= 10:
             fitness *= 1.1  # 10% bonus for proven agents
 
+        # Fix 2.1: Blend FitnessCalculator signal when game data exists.
+        # This reconnects the previously-dead 7-component reward system.
+        try:
+            latest = self.db.execute_query("""
+                SELECT win_detected, final_score, total_actions,
+                       level_completions, frame_changes
+                FROM game_results
+                WHERE session_id IN (
+                    SELECT session_id FROM agent_arc_performance
+                    WHERE agent_id = ?
+                )
+                ORDER BY rowid DESC LIMIT 1
+            """, (agent_id,))
+            if latest and latest[0].get('total_actions'):
+                row = latest[0]
+                fc_result = self.fitness_calculator.calculate_fitness(
+                    agent_id,
+                    {
+                        'win_detected': bool(row.get('win_detected')),
+                        'final_score': row.get('final_score', 0.0),
+                        'total_actions': row.get('total_actions', 1),
+                        'level_completions': row.get('level_completions', 0),
+                        'frame_changes': row.get('frame_changes', 0),
+                        'win_score': 7,
+                    },
+                )
+                # Blend: 80% existing + 20% FitnessCalculator
+                fc_norm = min(fc_result.total_reward / 200.0, 1.0)
+                fitness = fitness * 0.80 + fc_norm * 0.20
+        except Exception:
+            pass
+
         # COLD-START BOOTSTRAP (H4): When standard fitness is 0 and the agent
         # has played games, use action efficiency as a proxy signal.
         # Agents that explore more game states (higher frame_changes) get
@@ -340,7 +385,8 @@ class EvolutionaryEngine:
         return fitness
 
     def _calculate_specialist_fitness(self, agent_id: str, agent_data: Dict[str, Any]) -> float:
-        """
+        """DEPRECATED (Fix 3.5): specialist_mode is always False.
+
         Calculate specialist fitness - 100% focus on assigned games
         No diversity penalties, encourages deep mastery
 
@@ -520,7 +566,40 @@ class EvolutionaryEngine:
             """, (agent_id,))
 
             if not meta_metrics or len(meta_metrics) == 0:
-                # No meta-learning data yet - return 0
+                # Fix 2.3: Bootstrap meta-learning from behavioural
+                # signals when no score-based proxy data exists.
+                # Without this, 30% of fitness is permanently 0.0 for
+                # FT09/VC33 agents that never score.
+                try:
+                    behavioural = self.db.execute_query("""
+                        SELECT
+                            COUNT(DISTINCT game_id) as games_tried,
+                            COUNT(*) as total_sessions,
+                            AVG(frame_changes) as avg_fc,
+                            COUNT(DISTINCT CASE
+                                WHEN frame_changes > 10 THEN game_id
+                            END) as active_games
+                        FROM game_results gr
+                        INNER JOIN agent_arc_performance ap
+                            ON gr.session_id = ap.session_id
+                        WHERE ap.agent_id = ?
+                    """, (agent_id,))
+                    if behavioural and behavioural[0].get('total_sessions', 0) > 0:
+                        row = behavioural[0]
+                        games_tried = row.get('games_tried', 0) or 0
+                        active_games = row.get('active_games', 0) or 0
+                        avg_fc = row.get('avg_fc', 0) or 0
+                        # Behavioural rules: unique games explored
+                        rule_proxy = min(games_tried / 5.0, 1.0) * 0.25
+                        # Transfer proxy: active games / total games
+                        transfer_proxy = (active_games / max(games_tried, 1)) * 0.35
+                        # Generality: games tried breadth
+                        general_proxy = min(games_tried / 3.0, 1.0) * 0.25
+                        # Learning speed: frame efficiency
+                        speed_proxy = min(avg_fc / 100.0, 1.0) * 0.15
+                        return min(rule_proxy + transfer_proxy + general_proxy + speed_proxy, 0.5)
+                except Exception:
+                    pass
                 return 0.0
 
             metrics = meta_metrics[0]

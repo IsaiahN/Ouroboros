@@ -1,6 +1,6 @@
 # AUTONOMOUS RESEARCH LAB — ORCHESTRATOR INSTRUCTIONS
-**Version**: 5.0
-**Date**: 2026-02-17
+**Version**: 5.1
+**Date**: 2026-02-18
 **Purpose**: Master instructions for the Autonomous Research Lab orchestrator
 **Supersedes**: copilot-instructions-v4-legacy.md (preserved for reference)
 
@@ -55,7 +55,24 @@ These are your success metrics. Everything you do should move these numbers.
 **Stabilization = Done**: All 5 metrics converged, all games completed consistently, action counts flattened. See `architecture/Autonomous Research Lab.md` for thresholds.
 
 ---
+### GENERATIONS PER TRIAL — EVOLUTION DEPTH
 
+A single generation is insufficient to judge an architectural change. Cognitive adaptations require time to diffuse through the population, undergo selection, and stabilize into measurable benchmark shifts.
+Therefore, every experiment branch MUST run for **50 generations by default**. This ensures beneficial mutations have opportunity to fix, neutral variations are filtered out by drift, and the Five Benchmarks reflect true population‑level change rather than stochastic fluctuation.
+
+The Trend Tracker monitors within‑branch progress every 10 generations to allow early pruning of non‑viable branches, but the full 50‑generation horizon is the minimum for any hypothesis test.
+Exceptions may be made only for critical bug fixes whose impact is expected within 2 generations, and such trials MUST reviewed by the Code Reviewer for justification.
+
+ To avoid disturbing the running evolution session, monitoring MUST be performed by a separate, non‑blocking process. The orchestrator SHALL launch the Trend Tracker as a background task, and do reviews in a way that does not effect current live sessions.
+ If this is not possible, then the  trend tracker must wait until the end of the full generations run.
+
+ If the orchestrator (you) have nothing to do, just calculate the time 50 generations will take * Games played per agent * agents per generation and estimate how much machine time it will take to complete, and then sleep/poll.
+ Example if it will take 50 hours, then sleep 50 hours, or sleep until you need to execute the trend tracker, so that we do not waste tokens.
+---
+## HEARTBEAT PROMPTS — CONTINUE WITHOUT INTERRUPTION
+If you receive a prompt that simply says "continue" or is otherwise a periodic heartbeat to keep this instance alive, treat it as a no‑op. Do not reset your state, do not change your current activity. Whether you are sleeping between polls, waiting for a background process, or actively computing, simply acknowledge the heartbeat and continue exactly what you were doing. These prompts exist only to satisfy external timeout mechanisms — they require no action, no output, and no change in behavior. Ignore them and proceed undeterred.
+
+---
 ## NO ORACLE — THE GAME IS THE ONLY TEACHER
 
 No agent in the system knows the rules of any game. The only signal is what the game environment returns: level completion, score, action count, timer status. Everything the lab does must be derived from these signals plus observation of agents' internal cognitive traces.
@@ -202,6 +219,90 @@ When the Theorist generates hypotheses, they should target failures in this orde
 6. **Missing compression** — blocks abstraction
 7. **Missing resonance** — blocks generalization
 
+### Resolved Priorities (metatheory audit, 2026-02-23)
+
+The following specific instances have been addressed. The priority CATEGORIES above remain valid (more instances may exist), but the Theorist should not re-hypothesize these:
+
+- **#1 feedback loops**: Epistemic tracker fed meaningful_change (H7), report_outcome wired (H8), kk_confidence decay (H9), meaningful_change now flows through context['frame_changed'] to all rungs (Fix 2.4).
+- **#3 coordinate fixation**: Game-type-specific meaningful_change thresholds: click games (FT09/VC33) use 0.2% pixel threshold vs 5% for movement games (LS20). `action6_only` rung ordering added (Fix 1.2, Fix 1.4).
+- **#4 missing context**: Action6BehaviorEngine writes now wired into production loop - click-effect knowledge accumulates in DB (Fix 1.1). stuck_count re-enabled for ACTION6 games (Fix 1.3).
+- **#5 dead pipelines**: FitnessCalculator reconnected to evolution (blended at 20% weight, tunable). Meta-learning fitness bootstraps from behavioural signals when scores=0 (Fix 2.1, Fix 2.3). EXPLORATION->OPTIMIZATION phase transition now re-evaluated every generation (Fix 2.2).
+
+### Genre Differentiation (new architectural concept)
+
+The system now treats click-based puzzle games (FT09, VC33) differently from movement games (LS20) at three levels:
+
+1. **Perception**: `_is_meaningful_frame_change()` uses game-type-specific thresholds with a spatial concentration test for click games.
+2. **Decision**: `action6_only` rung ordering prioritises visual analysis and constraint satisfaction over movement rungs.
+3. **Evolution**: `FitnessCalculator._calculate_genre_bonus()` rewards click responsiveness for FT09/VC33; role-based rung filtering gives pioneers comprehensive ordering, exploiters get efficiency ordering.
+
+The Theorist should build on this infrastructure (e.g. tuning thresholds, adding game-specific fitness components) rather than re-inventing genre differentiation from scratch.
+
+Full audit: `architecture/metatheory-audit-and-fixes.md`
+
+---
+
+## HYPOTHESIS TRIAGE — AVOIDING RABBIT HOLES
+
+Evolution cycles are expensive (~250 game sessions per generation, 2-5 min each). Every hypothesis you pursue has an opportunity cost. Before committing compute to an investigation, run the question through these three filters in order.
+
+### Filter 1: The Rumsfeld Matrix (What do we actually know?)
+
+Classify every observation before acting on it.
+
+|                    | **Known**                                                        | **Unknown**                                                      |
+| :----------------- | :--------------------------------------------------------------- | :--------------------------------------------------------------- |
+| **Known**          | **Known Knowns**: Measured metrics, confirmed bugs, verified behaviors. ACT on these directly. | **Known Unknowns**: Identified hypotheses not yet tested. DESIGN experiments for these. |
+| **Unknown**        | **Unknown Knowns**: Data already in the DB that nobody has queried. Subsystem behaviors captured in traces but never analyzed. MINE these before inventing new hypotheses. | **Unknown Unknowns**: Emergent interaction effects, game mechanics not yet encountered. You CANNOT target these — they surface through exploration. Do not waste cycles hunting them. |
+
+**Rules:**
+- Before generating a new hypothesis, check if the answer already lives in `core_data.db` or `traces/` (Unknown Knowns). Query first, hypothesize second.
+- If you cannot classify an observation into this matrix, you do not understand it well enough to act on it. Gather more data.
+- Unknown Unknowns are discovered as side effects of well-designed experiments, not by searching for them directly.
+
+### Filter 2: The Eisenhower Matrix (Is this worth doing now?)
+
+After you know *what* a question is, decide *when* to pursue it.
+
+|                      | **Urgent** (blocking current progress)                           | **Not Urgent** (would improve future progress)                   |
+| :------------------- | :--------------------------------------------------------------- | :--------------------------------------------------------------- |
+| **Important** (moves the 5 Benchmarks) | **DO NOW.** Broken feedback loops, pipeline crashes, regressions. Drop everything. | **SCHEDULE.** Architecture improvements, compression, generalization. Park it, return after current experiment cycle completes. |
+| **Not Important** (does not move the 5 Benchmarks) | **DELEGATE or DISMISS.** One-off anomalies, cosmetic issues, metric noise. Log and move on. Do not spend an experiment cycle. | **DROP.** Theoretical questions with no measurable impact. Interesting but irrelevant. Recognize it as a rabbit hole and walk away. |
+
+**Rules:**
+- An observation is **Important** ONLY if acting on it would change at least one of the 5 Benchmarks within the next 3 experiment cycles.
+- An observation is **Urgent** ONLY if it is blocking the current experiment cycle from completing or producing valid data.
+- If a question is neither Important nor Urgent, it does not get an experiment branch. Period.
+
+### Filter 3: The Pre-Question Gut Check (Should I even start?)
+
+For any hypothesis that survived Filters 1 and 2, run these five tests before committing a trial:
+
+1. **The "So What?" Test**: If I confirm this hypothesis, what code change results? If the answer is "I'd just know it," it is trivia — not science. Every hypothesis must imply a specific, implementable intervention.
+
+2. **The "Actionability" Test**: Can this be implemented and tested within one experiment cycle (one branch, one trial)? If it requires changing 5 subsystems simultaneously, decompose it or reject it.
+
+3. **The "Premise" Test**: Does this hypothesis rest on an unverified assumption? Example: "Agents are stuck because they lack spatial memory" assumes agents ARE stuck (verified?) and that spatial memory would help (how?). Verify premises before building on them.
+
+4. **The "1-Gen / 10-Gen / 100-Gen" Test**: Will this matter in 1 generation? 10? 100? Cold-start artifacts matter for 1 gen. Architectural fixes matter for 100. Do not spend 100-gen effort on 1-gen problems.
+
+5. **The "Measurement vs. Anxiety" Test**: Is this investigation driven by data (a metric moved, a trace shows anomalous behavior) or by anxiety (we have not seen progress in N cycles and feel compelled to do *something*)? Anxiety-driven hypotheses produce busywork, not breakthroughs. If no metric changed, the system may need more generations — not more interventions.
+
+### Rabbit Hole Red Flags — STOP if you notice:
+
+- **Hypothesis Explosion**: The investigation keeps spawning sub-questions instead of converging on an answer. You are exploring, not experimenting.
+- **Diminishing Signal**: You have run 3+ queries/analyses and they all say the same thing. You already have the answer — act on it or drop it.
+- **Vanishing Goal**: You started investigating "why agents do not complete Level 2" and are now deep in the internals of the event bus serialization format. Zoom out.
+- **Premise Drift**: The original observation that triggered the investigation turned out to be a cold-start artifact or measurement error, but you kept investigating anyway.
+
+### The Parking Lot
+
+Questions that are interesting but not actionable RIGHT NOW go here. Log them in `lab/parking_lot.md` with:
+```
+- [DATE] [QUESTION] [WHY IT IS INTERESTING] [WHAT WOULD MAKE IT ACTIONABLE]
+```
+Review the parking lot every 10 experiment cycles. Some parked questions become actionable as the system evolves. Most do not — and that is the point.
+
 ---
 
 ## KEY ARCHITECTURAL INVARIANTS
@@ -239,6 +340,98 @@ You (the orchestrator) are the outer scaffolding. The BitterTruth-AI system is t
 
 ---
 
+## SLEEP, POLLING, AND PROCESS MONITORING
+
+Evolution runs are long-lived background processes. Getting `sleep` and monitoring wrong is one of the fastest ways to corrupt data, waste hours, or miss a crash. Follow these rules.
+
+### When to Use `sleep`
+
+**USE `sleep` when:**
+- Polling a background evolution run for completion. Sleep between checks — do NOT busy-loop.
+- Waiting for a game session to finish before querying `core_data.db` for results.
+- Giving a just-launched process time to initialize before checking its PID or output file.
+
+**DO NOT use `sleep` as:**
+- A substitute for checking whether a process is actually alive. Sleeping 30 minutes and then reading output is gambling — the process may have crashed at minute 2.
+- A way to "fix" race conditions. If you need a file to exist before reading it, check for it — do not sleep and hope.
+
+### How to Know if a Run Is Actually Running
+
+There are four signals. Use them in combination — no single one is sufficient.
+
+| Signal | How to check | What it tells you | Gotcha |
+|--------|-------------|-------------------|--------|
+| **PID alive** | `tasklist /FI "PID eq $(cat lab/trial_pid.txt)" /NH` | Process exists in OS | PID file is NOT deleted on exit. A stale PID could even belong to a different process. Always cross-check with output. |
+| **Output growing** | `tail -5 lab/trial_combined_output.txt` (or `trial_output.txt`) | Process is producing work | A hung process may stop writing but remain alive. Compare timestamps — if the last timestamp is >10 min old at 10-agent scale, suspect a stall. |
+| **DB advancing** | `SELECT MAX(generation), COUNT(*) FROM game_results` | Generations are completing | DB only updates at generation boundaries. Long silence between generations is normal during game play — check the output log for per-game progress. |
+| **Done sentinel** | `cat lab/trial_done.txt` (only from `_run_trial.ps1`) | Run finished | Only the PowerShell launcher writes this file. Python launchers do NOT. For those, look for `[TRIAL] Process exiting` or `EVOLUTION COMPLETE` in output. |
+
+### Recommended Polling Pattern
+
+```bash
+# 1. Launch the run (fire-and-forget)
+PYTHONDONTWRITEBYTECODE=1 .venv/Scripts/python.exe _run_trial_detached.py
+
+# 2. Wait briefly for process to initialize and write PID
+sleep 5
+
+# 3. Confirm it started
+PID=$(cat lab/trial_pid.txt)
+tasklist /FI "PID eq $PID" /NH
+
+# 4. Poll with sleep intervals — adapt interval to expected duration
+#    At 10 agents x 3 games: ~3-5 min/gen, so check every 2-3 min
+#    At 50 agents x 5 games: ~15-60 min/gen, so check every 5-10 min
+while tasklist /FI "PID eq $PID" /NH 2>/dev/null | grep -q "$PID"; do
+    echo "=== $(date) ==="
+    tail -3 lab/trial_output.txt
+    sleep 120  # 2 minutes between checks
+done
+
+# 5. Check how it ended
+tail -20 lab/trial_output.txt
+# Look for: "[TRIAL] Completed successfully" or "[TRIAL-ERROR] ..."
+```
+
+### Detecting Stuck vs. Slow
+
+Game sessions have wildly different durations:
+- **vc33**: ~3-15 seconds per game (fast, 50 actions)
+- **ft09**: ~5-8 seconds per game (medium, 46-68 actions)
+- **ls20**: ~11-120 seconds per game (slowest, 129 actions, occasionally stalls 2-3 min)
+
+At **10-agent scale** (30 games/gen): expect **3-5 minutes per generation**.
+At **50-agent scale** (250 games/gen): expect **15-60+ minutes per generation**.
+
+**Stuck indicators:**
+- Output log timestamps show >5 min gap between game completions at 10-agent scale
+- Same generation number in DB for >2x the expected generation time
+- PID alive but zero output growth over two consecutive polls
+
+**What to do when stuck:**
+1. Check the last few lines of output — look for Python tracebacks or hanging API calls
+2. Query the DB to see how many games completed in the current generation: `SELECT COUNT(*) FROM game_results WHERE generation = (SELECT MAX(generation) FROM game_results)`
+3. If truly hung, kill the PID and use `_cleanup_partial_gens.py` to remove incomplete generation data before re-running
+
+### Offline vs. Online Mode
+
+- **Offline mode** (`--mode=offline`): Uses cached game data. Faster, no network dependency. Use this for all hypothesis testing and trials.
+- **Online mode** (`--mode=online`): Hits the live ARC game API. Slower, subject to rate limits and network issues. Reserved for final validation runs.
+
+When testing offline, a "game running" means the local game simulation is processing agent actions against cached frames. There is no external server to check. The process either advances or it does not — monitor via output logs and DB.
+
+When testing online, add network failure to your mental model: a silent hang may be an API timeout, not a code bug. Check for `ConnectionError`, `Timeout`, or `HTTPError` in the output before assuming a logic bug.
+
+### After a Run Completes
+
+Always verify results before drawing conclusions:
+1. Check exit status: `[TRIAL] Completed successfully` vs. `[TRIAL-ERROR]`
+2. Verify generation count matches expectations: `SELECT MIN(generation), MAX(generation), COUNT(DISTINCT generation) FROM game_results WHERE generation >= <start_gen>`
+3. Check for partial generations (fewer games than expected): `SELECT generation, COUNT(*) FROM game_results GROUP BY generation ORDER BY generation DESC LIMIT 5`
+4. If a run crashed mid-generation, clean up with `_cleanup_partial_gens.py` before re-running — partial data corrupts metrics
+
+---
+
 ## REFERENCE FILES
 
 | File | What it contains |
@@ -250,5 +443,5 @@ You (the orchestrator) are the outer scaffolding. The BitterTruth-AI system is t
 ---
 
 **END OF ORCHESTRATOR INSTRUCTIONS**
-**Version**: 5.0
-**Date**: 2026-02-17
+**Version**: 5.3
+**Date**: 2026-02-20

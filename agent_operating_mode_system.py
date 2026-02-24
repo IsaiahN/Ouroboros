@@ -490,6 +490,11 @@ class AgentOperatingModeSystem:
         PERSISTENT MODE MEMORY: If game_id provided and agent has history with that game,
         use their most effective mode. Otherwise maintain 10/60/30 distribution.
 
+        Fix 2.2: Re-check EXPLORATION->OPTIMIZATION transition every
+        generation, not just at __init__. Without this, the first win
+        at gen 15 never switches the population from 60% pioneers to
+        10% pioneers.
+
         Args:
             generation: Current evolution generation
             active_agents: List of active agent IDs
@@ -500,6 +505,9 @@ class AgentOperatingModeSystem:
         """
         if not active_agents:
             return {}
+
+        # Fix 2.2: Dynamic phase transition — re-check every generation
+        self._update_population_distribution()
 
         # Calculate target counts
         total_agents = len(active_agents)

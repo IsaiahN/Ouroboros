@@ -333,6 +333,53 @@ ORDERING_PRESETS = {
         ('smart_action_selection', 99),
     ],
 
+    # Fix 1.4: ACTION6-only ordering for click-based puzzle games
+    # (FT09, VC33). Prioritises visual analysis, click-effect learning,
+    # and constraint satisfaction over movement-oriented rungs.
+    'action6_only': [
+        # EMERGENCY (Priority 1-5)
+        ('infinite_loop_breaker', 1),
+        ('coordinate_oscillation', 2),
+        ('palette_detection', 3),
+        ('sparse_grid', 3),
+        # VISUAL UNDERSTANDING (Priority 5-15) — find what's clickable
+        ('frame_interpretation', 5),
+        ('affordance_detection', 6),
+        ('visual_analyzer', 7),
+        ('network_object_inventory', 8),
+        ('action6_object_exploration', 9),
+        ('survey', 10),
+        # CLICK BEHAVIOUR (Priority 15-30) — apply learned patterns
+        ('click_behavior_learning', 15),
+        ('causal_click_mapping', 16),
+        ('object_color_targeting', 17),
+        ('interactable_tile_discovery', 18),
+        # CONSTRAINT SOLVING (Priority 30-45)
+        ('constraint_satisfaction', 30),
+        ('constraint_decoder', 31),
+        ('goal_relationship_modeling', 32),
+        ('near_miss_analyzer', 33),
+        ('completion_prediction', 34),
+        ('state_matching', 35),
+        # HYPOTHESIS & REASONING (Priority 45-60)
+        ('hypothesis_system', 45),
+        ('scientific_method', 46),
+        ('theory_gate', 47),
+        ('hypothesis_testing', 48),
+        ('belief_system', 49),
+        ('two_streams', 50),
+        ('discovery_exploitation', 51),
+        # NETWORK KNOWLEDGE (Priority 60-70)
+        ('network_sharing', 60),
+        ('network_wisdom', 61),
+        ('embedding_suggestion', 62),
+        ('primitive_suggester', 63),
+        # EXPLORATION FALLBACK (Priority 70-99)
+        ('grid_exploration', 75),
+        ('exploration_phase', 80),
+        ('smart_action_selection', 99),
+    ],
+
     # Phased approach - different order by budget phase
     'phased_orientation': [
         ('infinite_loop_breaker', 1),
@@ -821,16 +868,35 @@ class DecisionRungSystem:
                 self._switch_ordering_temporarily(current_ordering)
 
     def _select_ordering_for_context(self, available_actions: List[int], context: Dict[str, Any]) -> str:
-        """Select the best ordering based on available actions and context."""
+        """Select the best ordering based on available actions, game type, and agent role.
+
+        Fix 1.4: ACTION6-only games now get the 'action6_only' preset.
+        Fix 3.2: Agent role influences ordering — exploiters get minimal,
+        optimizers get efficiency, pioneers get comprehensive.
+        """
         actions_list = list(available_actions) if available_actions is not None else []
+
+        # Fix 1.4: ACTION6-only games always use click-specialised ordering
         if actions_list == [6]:
             return 'action6_only'
+
         if 6 in available_actions:
             if self.ordering_name in ('action6_world', 'action6_only', 'frontier_exploration'):
                 return self.ordering_name
             if context.get('frontier_mode', False):
                 return 'action6_world'
-            return self.ordering_name
+
+        # Fix 3.2: Role-based ordering selection (archetype differentiation).
+        # Exploiters use minimal proven strategies; optimizers refine
+        # known patterns; pioneers explore everything.
+        agent_role = context.get('agent_role', 'pioneer')
+        if agent_role == 'exploiter':
+            return 'efficiency'  # Only proven strategies
+        elif agent_role == 'optimizer':
+            return 'efficiency'  # Exploit known patterns, some exploration
+        elif agent_role == 'pioneer':
+            return 'comprehensive'  # Full exploration + all hypotheses
+
         return self.ordering_name
 
     def _switch_ordering_temporarily(self, target_ordering: str) -> None:
