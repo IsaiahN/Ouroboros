@@ -670,23 +670,15 @@ class SafeDatabaseCleaner:
         return results
 
     def _clean_zero_score_games(self, c, conn, dry_run, verbose):
-        """Delete zero-score game results."""
-        c.execute('SELECT COUNT(*) FROM game_results WHERE final_score = 0')
-        count = c.fetchone()[0]
-
+        """DISABLED: Zero-score game results are essential for computing
+        accurate completion rates. Deleting them inflates success metrics
+        and destroys the denominator needed for L1/win rate calculations.
+        See: metatheory audit gen-210 data loss incident."""
         if verbose:
-            print(f'   Found: {count:,} zero-score games')
-
-        if not dry_run and count > 0:
-            c.execute('DELETE FROM game_results WHERE final_score = 0')
-            conn.commit()
-            if verbose:
-                print(f'   Deleted: {count:,} rows')
-            return {'found': count, 'deleted': count}
-        elif count > 0 and verbose:
-            print(f'   Would delete: {count:,} rows')
-
-        return {'found': count, 'deleted': 0}
+            c.execute('SELECT COUNT(*) FROM game_results WHERE final_score = 0')
+            count = c.fetchone()[0]
+            print(f'   Found: {count:,} zero-score games (PRESERVED - needed for rate calculations)')
+        return {'found': 0, 'deleted': 0}
 
     def _clean_old_score_history(self, c, conn, dry_run, verbose):
         """Delete score history older than retention period."""
