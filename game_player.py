@@ -418,6 +418,7 @@ class GamePlayer:
         level_after: int,
         is_game_over: bool,
         coordinates: Optional[Dict] = None,
+        context_mode: Optional[str] = None,
     ) -> None:
         """Record action trace with frame hash and score change."""
         try:
@@ -445,8 +446,8 @@ class GamePlayer:
                     frame_before, frame_after, frame_changed,
                     score_before, score_after, score_change,
                     level_number, resulted_in_game_over,
-                    frame_hash, created_at
-                ) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    frame_hash, context_mode, created_at
+                ) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """, (
                 self._current_session_id,
                 game_id,
@@ -461,6 +462,7 @@ class GamePlayer:
                 level_after,
                 1 if is_game_over else 0,
                 frame_hash_before,
+                context_mode,
             ))
         except Exception as e:
             if self.verbose:

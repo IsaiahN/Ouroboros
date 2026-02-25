@@ -296,14 +296,19 @@ class EvolutionaryEngine:
 
     def _calculate_standard_fitness(self, agent_id: str) -> float:
         """
-        Calculate standard fitness based on win rate and performance.
+        Calculate standard fitness based on scoring and level progression.
 
-        Fix 2.1: Also runs the reconnected FitnessCalculator on most
-        recent game results to produce richer 7-component signals and
-        store them in the DB for audit.  The ad-hoc 4-component formula
-        is kept as primary to avoid regression; the FitnessCalculator
-        result is blended in at 20% weight so it starts contributing
-        immediately and can be dialled up by the lab orchestrator.
+        H13: Replaced dead signals with live ones.  The original formula
+        used win_rate (always 0 — no full game wins ever), score_efficiency
+        (always ~0), and a hardcoded consistency_score=0.5 placeholder.
+        Result: 97.5% of fitness was dead, evolution was blind.
+
+        New formula uses avg_score_per_game (non-zero for L1 winners) and
+        level_progression_rate (non-zero for L1 winners) — the ONLY live
+        signals in the system.  No constant terms so H4 bootstrap works
+        for zero-score agents.
+
+        Fix 2.1 (preserved): FitnessCalculator blended at 20% weight.
         """
         # Get ARC performance from database
         arc_performance = self.db.get_agent_arc_performance(agent_id)
@@ -312,18 +317,23 @@ class EvolutionaryEngine:
             # New agent with no performance data
             return 0.0
 
-        # Calculate fitness based on ARC-native metrics
-        win_rate = arc_performance.get('win_rate', 0.0)
-        score_efficiency = arc_performance.get('score_efficiency', 0.0)
-        consistency_score = arc_performance.get('consistency_score', 0.0)
-        level_progression_rate = arc_performance.get('level_progression_rate', 0.0)
+        # H13: Use avg_score (live signal) instead of win_rate (dead — always 0)
+        avg_score = arc_performance.get('avg_score_per_game', 0.0) or 0.0
+        level_progression_rate = arc_performance.get('level_progression_rate', 0.0) or 0.0
 
-        # Weighted fitness calculation (prioritizing ARC wins)
+        # Normalize avg_score: L1 completion gives 1/7 ≈ 0.143 (LS20) or
+        # 1/6 ≈ 0.167 (FT09).  Scale so a perfect L1 winner ≈ 1.0.
+        score_signal = min(avg_score * 6.0, 1.0)
+
+        # Level progression: fraction of games where agent progressed a level.
+        # Already 0-1 range from get_agent_arc_performance().
+        level_signal = min(level_progression_rate, 1.0)
+
+        # Weighted fitness: 50% score + 30% level progression + 20% FC blend
+        # No constant term — zero-score agents get 0 so H4 bootstrap activates.
         fitness = (
-            win_rate * 0.5 +                    # 50% weight on winning games
-            score_efficiency * 0.25 +           # 25% weight on score efficiency
-            consistency_score * 0.15 +          # 15% weight on consistency
-            level_progression_rate * 0.10       # 10% weight on level progression
+            score_signal * 0.50 +               # 50% on actual scoring (was: dead win_rate)
+            level_signal * 0.30                  # 30% on level progression (was: 10%)
         )
 
         # Bonus for agents with more game experience (minimum reliability)

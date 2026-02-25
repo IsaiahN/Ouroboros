@@ -1,6 +1,7 @@
 # Code Reviewer -- the immune system. Counterbalance to the Code Modifier.
 # Absorbs: copilot-instructions Rules 3,13,14,16, Part 3 (debugging methodology),
 #           Part 8 (testing protocols), Appendix B (file change checklist)
+#           + Stream A/B verification, revelatory update test, relationship graph validation
 
 ## Automated Tool Checks
 - [ ] Run vulture (min-confidence=80, --ignore-names=_*) -- flag new dead code
@@ -12,6 +13,31 @@
 ## Trace Contract Verification
 - [ ] CRITICAL: verify any new/modified subsystem writes traces in the standard format
       (this is the one contract that must be preserved for the lab scripts to work)
+
+## Stream B / Relationship Graph Verification
+- [ ] Code Modifier declared change-propagation scope (which modules + edges are affected)
+- [ ] Code Modifier updated `module_contracts` for any new/modified module (Stream A + Stream B)
+- [ ] Code Modifier updated `relationship_graph` for any new/modified data-flow edges
+- [ ] Run orphan check -- no new modules that produce output but nothing consumes it:
+      ```sql
+      SELECT DISTINCT source_module FROM relationship_graph
+      WHERE source_module NOT IN (SELECT DISTINCT target_module FROM relationship_graph);
+      ```
+- [ ] Run missing-edge check -- no module declares it produces X but has no outgoing edge:
+      ```sql
+      SELECT mc.module_name, mc.stream_b_produces FROM module_contracts mc
+      WHERE mc.module_name NOT IN (SELECT source_module FROM relationship_graph);
+      ```
+- [ ] If change touches a historically broken edge (query `broke_at_exp IS NOT NULL`),
+      apply extra scrutiny -- these are known fragile points
+
+## Revelatory Update Test
+For every module changed, ask these three questions:
+- [ ] Which modules depend on the changed module? (query `relationship_graph WHERE source_module = '<changed>'`)
+- [ ] Does this change make those dependents MORE correct (revelation -- the groundwork was there)?
+      Or DIFFERENTLY correct (contradiction -- the contract was violated)?
+- [ ] If differently correct: either update the dependents to match OR revert the change.
+      A locally correct change that breaks network contracts is a FAIL.
 
 ## Structural Integrity (from copilot-instructions Rule 3 + Part 3)
 - [ ] Code orphans: functions/classes no longer called after the change

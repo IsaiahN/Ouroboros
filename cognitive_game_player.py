@@ -470,6 +470,15 @@ class CognitiveGamePlayer:
                 )
 
             # ═══ RECORD ACTION TRACE (persist to DB) ═══
+            # H15: Wire cognitive context into action traces so we can
+            # analyze which strategies/rungs correlate with success.
+            trace_context = None
+            if cf:
+                parts = [cf.strategy]
+                if cf.rung_name:
+                    parts.append(cf.rung_name)
+                parts.append(cf.epistemic_state)
+                trace_context = '|'.join(parts)
             try:
                 self._gp._record_action_trace(
                     game_id=game_id, action_num=action_num,
@@ -478,6 +487,7 @@ class CognitiveGamePlayer:
                     level_before=prev_levels, level_after=current_levels,
                     is_game_over=(new_obs.state == GameState.GAME_OVER if new_obs else False),
                     coordinates=action_data,
+                    context_mode=trace_context,
                 )
             except Exception:
                 pass

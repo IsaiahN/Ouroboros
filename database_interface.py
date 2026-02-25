@@ -1574,7 +1574,10 @@ class DatabaseInterface:
 
             data = dict(row)
             data['win_rate'] = data['total_games_won'] / max(data['total_games_played'], 1)
-            data['consistency_score'] = 0.5  # Placeholder
+            # H13: Removed hardcoded consistency_score=0.5 placeholder.
+            # This constant made fitness non-zero for ALL agents, which
+            # prevented the H4 cold-start bootstrap from ever activating.
+            data['consistency_score'] = 0.0
             data['level_progression_rate'] = data['level_progressions_detected'] / max(data['total_games_played'], 1)
 
             return data

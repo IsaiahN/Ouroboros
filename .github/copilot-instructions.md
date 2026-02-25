@@ -1,6 +1,6 @@
 # AUTONOMOUS RESEARCH LAB — ORCHESTRATOR INSTRUCTIONS
-**Version**: 5.1
-**Date**: 2026-02-18
+**Version**: 5.4
+**Date**: 2026-02-24
 **Purpose**: Master instructions for the Autonomous Research Lab orchestrator
 **Supersedes**: copilot-instructions-v4-legacy.md (preserved for reference)
 
@@ -37,6 +37,95 @@ You manage the loop. You call Python scripts for data. You invoke LLM subagents 
 - The system naturally drifts toward death (Seven Seals). Active anti-entropic maintenance required.
 - Every problem is an alignment problem — the agent discovers the game's interface contract.
 ```
+
+---
+
+## DATABASE SIZE GUARDRAIL (NON-NEGOTIABLE)
+
+The database (`core_data.db`) is the organism's memory — but unchecked growth is Seal 5 (Hoarding). This guardrail prevents the database from consuming all disk space and corrupting itself.
+
+### Hard Limits
+
+| Threshold | Action |
+|-----------|--------|
+| **> 6 GB** | **IMMEDIATE HALT.** Stop all evolution runs, game sessions, and background processes. Do not start new games until resolved. |
+| **<= 3 GB** | **Safe to continue.** Resume normal operations. |
+| **3-6 GB** | **Warning zone.** Log a `[WARN]` and run the pruning procedure below at the next generation boundary. Do not interrupt mid-generation. |
+
+### Check Frequency
+
+Check database size at the START of every generation boundary (before launching new game sessions) and after every safe_cleanup cycle:
+
+```bash
+DB_SIZE_MB=$(stat -c%s core_data.db 2>/dev/null || wc -c < core_data.db | tr -d ' ')
+DB_SIZE_MB=$((DB_SIZE_MB / 1048576))
+echo "[DB-SIZE] core_data.db = ${DB_SIZE_MB} MB"
+```
+
+### When > 6 GB: Triage and Reduce
+
+**Step 1 — Identify what is consuming space.** Run table-level size analysis:
+```sql
+SELECT name, SUM(pgsize) as size_bytes
+FROM dbstat GROUP BY name ORDER BY size_bytes DESC LIMIT 20;
+```
+
+**Step 2 — Classify data by value tier:**
+
+| Tier | Data | Action |
+|------|------|--------|
+| **SACRED (never delete)** | `game_results` rows with `level_completions >= 2` (L2+ completions), full game completion records (game_status = 'WIN'), `sequence_abstractions` tied to L2+ replays, any `action_traces` from sessions that achieved full game completion (game_status = 'WIN') | KEEP. This data is irreplaceable. |
+| **VALUABLE (compress, do not delete)** | `game_results` with `level_completions = 1` (L1 completions), `sequence_abstractions` for L1 replays, agent genomes from top-10% fitness agents | KEEP if space permits. These feed template replay — the current primary learning path. |
+| **PRUNEABLE (delete safely)** | `action_traces` from zero-score sessions older than 20 generations, `world_model_states` older than 30 generations, `autopoiesis_snapshots` older than 50 generations (retain latest 5 per agent), raw trace JSON in `traces/` older than 20 generations, duplicate or redundant `event_log` entries | DELETE these first. They are the lowest-value, highest-volume data. |
+| **EPHEMERAL (always safe to delete)** | `__pycache__`, `.pyc` files, stale `traces/` directories from abandoned experiment branches, temporary analysis outputs | DELETE immediately. Zero data value. |
+
+**Step 3 — Execute pruning in priority order:**
+
+```sql
+-- 1. Purge action_traces from zero-score sessions (biggest table, lowest value)
+DELETE FROM action_traces
+WHERE session_id IN (
+    SELECT session_id FROM game_results
+    WHERE final_score = 0
+    AND generation < (SELECT MAX(generation) FROM game_results) - 20
+);
+
+-- 2. Purge old world_model_states
+DELETE FROM world_model_states
+WHERE generation < (SELECT MAX(generation) FROM game_results) - 30;
+
+-- 3. Trim autopoiesis_snapshots to latest 5 per agent
+DELETE FROM autopoiesis_snapshots
+WHERE id NOT IN (
+    SELECT id FROM (
+        SELECT id, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY generation DESC) as rn
+        FROM autopoiesis_snapshots
+    ) WHERE rn <= 5
+);
+
+-- 4. Reclaim space
+VACUUM;
+```
+
+**Step 4 — Re-check size after pruning.**
+- If **<= 3 GB**: Resume operations. Log what was pruned and how much space was reclaimed.
+- If **still > 3 GB but <= 6 GB**: Continue pruning — extend the generation cutoffs (e.g., action_traces older than 10 gens instead of 20). Re-VACUUM.
+- If **still > 6 GB after all pruneable data is gone**: The remaining data is SACRED or VALUABLE. **HALT the system and wait for human intervention.** Do NOT delete L1+ completion data, full game records, or replay templates to meet the size target. Log the situation clearly:
+
+```
+[HALT] Database at X.X GB after maximum safe pruning.
+[HALT] Remaining data is high-value (L1+ completions, WIN records, replay templates, sacred records).
+[HALT] Human intervention required: expand disk, archive old generations, or approve selective deletion.
+[HALT] NO further evolution runs until a human resolves this.
+```
+
+### What NOT to Do
+
+- **NEVER** delete `game_results` rows with `level_completions >= 1` to save space
+- **NEVER** delete `sequence_abstractions` that are actively referenced by replay templates
+- **NEVER** run `VACUUM` during an active evolution run (it locks the entire database)
+- **NEVER** silently continue past 6 GB hoping it will resolve itself — this is how databases corrupt
+- **NEVER** truncate tables wholesale (`DELETE FROM table_name`) — always use generation-bounded deletes
 
 ---
 
@@ -181,6 +270,141 @@ The Code Modifier MUST preserve this contract. The Code Reviewer MUST verify it.
 
 ---
 
+## STRUCTURAL ENFORCEMENT — THE RELATIONSHIP GRAPH
+
+> Source: `architecture/realizations from a different application of the theory.md`
+
+The Two Stable Contracts above are necessary but insufficient. They only cover two edges in a network of dozens. Every experiment that discovered a dead pipeline (Exp #2, #5, #9, #10) found a module that was locally correct but network-broken — it passed its unit tests and silently failed the system. The unit test audited Stream A (what the function knows about itself) but never audited Stream B (what the network requires from it).
+
+### Stream A/B — Dual Definitions for Every Module
+
+Every module in the system has two simultaneous definitions:
+
+- **Stream A**: What it knows about itself — its implementation, its local state, its internal logic.
+- **Stream B**: Its explicit contract with the network — what it produces, what it consumes, what side effects it has, what it promises not to change, and which modules depend on it.
+
+A module that only has Stream A has no mechanism to detect drift. When you change it, nothing warns you that three other modules relied on a behavior you just silently altered.
+
+### The Database Tables
+
+The relationship graph is a first-class artifact stored in `core_data.db`, not documentation extracted after the fact. Every edge is a testable claim.
+
+**IMPORTANT**: These tables are distinct from `knowledge_graph_edges` (which stores agent-level runtime knowledge discovered during gameplay). The tables below store **codebase-level structural knowledge** about how modules relate to each other. Do not confuse or conflate them.
+
+**`module_contracts`** — Stream A + Stream B declaration per module:
+```sql
+SELECT module_name, role, stream_a, stream_b_produces, stream_b_consumes,
+       stream_b_side_effects, stream_b_promises
+FROM module_contracts;
+```
+
+**`relationship_graph`** — Every data-flow edge between modules:
+```sql
+SELECT source_module, target_module, edge_type, contract, status,
+       broke_at_exp, fixed_at_exp, notes
+FROM relationship_graph;
+```
+
+### Edge Type Vocabulary
+
+When inserting or updating edges in `relationship_graph`, use these `edge_type` values:
+
+| edge_type | Meaning | Example |
+|---|---|---|
+| `calls` | Module A invokes Module B as a function/method call | evolution_runner calls cognitive_game_player |
+| `writes_db` | Module A writes rows to DB table B | cognitive_game_player writes_db game_results |
+| `reads_db` | Module A reads rows from DB table B | fitness_calculator reads_db game_results |
+| `passes_context` | Module A passes a data structure (dict, object) to B for processing | decision_rung_system passes_context rungs |
+| `returns` | Module A returns data back to its caller B (reverse of `calls`) | epistemic_tracker returns decision_rung_system |
+| `event_bus` | Module A emits an event that Module B subscribes to | (use for pub/sub communication) |
+
+### Recovery: Seeding After Schema Rebuild
+
+If the database is rebuilt from `complete_database_schema.sql`, these tables will be empty. The seed data (10 module contracts, 20 edges, 6 historically broken) was populated from experiment history (Exp #1-#11). To reseed, run:
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/Scripts/python.exe lab/seed_relationship_graph.py
+```
+This script is idempotent (uses INSERT OR REPLACE). It must be maintained alongside the graph itself — when the Code Modifier adds new edges to the live DB, the seed script should be updated to match.
+
+### Validation Queries (The Graph as Test)
+
+These queries detect structural failures that local testing misses:
+
+```sql
+-- Orphans: modules that produce output but nothing consumes it
+SELECT DISTINCT source_module FROM relationship_graph
+WHERE source_module NOT IN (SELECT DISTINCT target_module FROM relationship_graph);
+
+-- Dead ends: modules consumed but that never produce (potential sinks)
+SELECT DISTINCT target_module FROM relationship_graph
+WHERE target_module NOT IN (SELECT DISTINCT source_module FROM relationship_graph);
+
+-- Broken edges: known failure points requiring extra scrutiny on changes
+SELECT source_module, target_module, contract, broke_at_exp, notes
+FROM relationship_graph WHERE broke_at_exp IS NOT NULL;
+
+-- Missing edges: module declares it produces X but no edge carries X to a consumer
+-- (Run after every code change that modifies a module's outputs)
+SELECT mc.module_name, mc.stream_b_produces
+FROM module_contracts mc
+WHERE mc.module_name NOT IN (SELECT source_module FROM relationship_graph);
+```
+
+### Rules
+
+1. **Code Modifier**: When creating or modifying a module, update `module_contracts` (Stream A + B) and `relationship_graph` (edges). This is not optional — an unregistered module is an orphan by definition.
+2. **Code Reviewer**: Run the validation queries above. A change that introduces an orphan, breaks an edge, or creates a module without a Stream B declaration FAILS review.
+3. **Theorist**: Consult the graph before generating hypotheses. Historically broken edges (6 known) are high-probability failure recurrence points.
+4. **Change-Propagation Scope**: When modifying a module, the Code Modifier MUST declare: "I changed module X, which affects edges Y, which touch modules A, B, C." The Code Reviewer verifies this declaration is complete by querying the graph.
+
+### The Revelatory Update Test
+
+Adapted from the metatheory's Decomposition principle: a change to module X should make dependent modules *more correct* (compatible — the groundwork was there), not *differently correct* (breaking — the contract was violated).
+
+For every code change, the Code Reviewer asks:
+1. Which modules depend on the changed module? (query `relationship_graph WHERE source_module = X`)
+2. Does this change make those dependents more correct, or differently correct?
+3. If differently correct: the contract was violated. Either update the dependents or revert the change.
+
+This is structurally identical to the distinction between a refactor and a breaking change.
+
+---
+
+## CROSS-DOMAIN PROBLEM-SOLVING PROTOCOL
+
+> "When stuck in domain X, query the isomorphic problem in domain Y using the metatheory as translation layer." — This is a methodology, not an insight.
+
+The BitterTruth metatheory operates below the domain layer. The same structural problem (orphaned nodes, consequence amnesia, local correctness masking network failure) appears in narrative systems and cognitive architectures because the network dynamics are the substrate, not the surface.
+
+### When to Invoke
+
+The Theorist invokes this protocol when:
+- A problem has resisted 2+ experiment cycles with no measurable progress
+- The Five Benchmarks show a pathological pattern (e.g., VC33 at 0% for 600+ sessions)
+- The Comparative Analyst reports no discriminating features between success/failure cohorts
+
+### The Procedure
+
+1. **Name the structural problem using the Seven Seals vocabulary.** Not "VC33 doesn't work" but "VC33 exhibits Seal 2 (Amnesia) — agents take actions but accumulate no consequence memory."
+2. **Translate to the narrative domain.** Ask: "In a story, what would it look like if a character acted but accumulated no consequences?" The answer comes from the Serendipity Engine's structural vocabulary.
+3. **Extract the narrative-domain solution.** In the narrative domain, the fix for consequence amnesia is: every action must leave a trace in the relationship graph; characters who act without consequences are orphans.
+4. **Translate back to the code domain** using the metatheory as the bridge. The code-domain equivalent: the agent's click-outcome mapping must persist across actions and be queryable by the decision system.
+5. **Verify the isomorphism** by checking that the structural fix addresses the same Seal in both domains.
+
+### Cross-Domain Isomorphism Table
+
+| Metatheory Concept | Narrative Domain | Code Domain |
+|---|---|---|
+| Orphaned node | Character who acts but affects nothing | Module that writes data nothing reads |
+| Consequence amnesia | Events with no downstream impact | Actions with no feedback to epistemic tracker |
+| Monolith | One character drives all plot | One rung selected for all decisions |
+| Stasis | Character who never changes beliefs | kk_confidence with no decay mechanism |
+| Isolation | Characters in separate plotlines that never intersect | Subsystems with no shared data path |
+
+This protocol is not metaphor — it is isomorphism. The structural relationships are the same; only the surface vocabulary changes.
+
+---
+
 ## THE SEVEN SEALS (FAILURE TAXONOMY)
 
 Every failure maps to one of these death modes. The Theorist uses this to classify findings.
@@ -194,6 +418,38 @@ Every failure maps to one of these death modes. The Theorist uses this to classi
 | 5. Hoarding | Accumulation without abstraction | Evolutionary forgetting |
 | 6. Isolation | No cross-domain transfer | Resonance detection |
 | 7. Stasis | Unchanging beliefs | Pedagogical adaptation |
+
+---
+
+## ANTILIFE SEAL CHECKS — CODE CHANGE VALIDATION
+
+The Seven Seals are not just a failure taxonomy — they are an active validation tool. Before committing, merging, or proposing any code change, run it through these checks. A change that is locally correct can still be network-broken if it violates a seal.
+
+### The Check: For Every Change, Ask These Seven Questions
+
+| Seal | Question to ask about your change | Red flag |
+|------|----------------------------------|----------|
+| 1. Monolith | Does this concentrate more logic/decisions into a single component? | One file/class/rung now handles what two or more used to. A function that "does everything" grew larger. |
+| 2. Amnesia | Does this write data that nothing reads, or break a read path? | New DB writes with no consumer. A pipeline stage that produces output nobody queries. Disabling a write "temporarily." |
+| 3. Hierarchy | Does this hardcode a top-down override where bottom-up learning should occur? | A higher layer always wins regardless of evidence. Agent-level learning bypassed by a global default. |
+| 4. Monopoly | Does this let one resource/metric/pathway crowd out alternatives? | A single fitness component dominates total score. One rung always selected, starving others. Prestige leaking into ATP calculations. |
+| 5. Hoarding | Does this accumulate state without compression or pruning? | Tables grow without bound. Knowledge stored but never abstracted. Raw data kept when a summary would suffice. |
+| 6. Isolation | Does this create or deepen a boundary between components that should share information? | A module produces knowledge another module needs but has no path to receive. Game-specific logic with no cross-game transfer mechanism. |
+| 7. Stasis | Does this introduce a fixed value or behavior that should adapt to evidence? | Hardcoded thresholds, magic numbers, frozen configs that never update from runtime data. A phase transition that is set once and never re-evaluated. |
+
+### How to Apply
+
+1. **Before implementing**: Read your hypothesis through the seal lens. If the proposed change itself introduces a new seal violation, redesign before writing code.
+2. **During code review**: For each modified file, identify which seals are relevant and confirm the change moves toward the Life Mode column, not the Death Mode.
+3. **After trial results**: If metrics regressed, check which seal the regression maps to. The seal tells you where the system drifted — the fix is the corresponding Life Mode.
+
+### The Antilife Attractor
+
+All sufficiently large systems naturally drift toward death states. Hierarchies form because someone must execute first. Resources concentrate because prestige compounds. Memory accumulates because deletion is deliberate. This drift is thermodynamic — it is the default. Every code change either actively resists this drift or passively accelerates it. There is no neutral.
+
+### Cross-Domain Validation
+
+The seals are not domain-specific. They describe network dynamics below the domain layer. The same structural problem (orphaned nodes, consequence amnesia, local correctness masking network failure) appears in narrative systems, codebases, and cognitive architectures because the metatheory operates at the substrate level. When a code change violates a seal, the equivalent failure exists in the narrative domain — and the narrative domain's higher legibility often surfaces the fix before the code domain does. See `architecture/realizations from a different application of the theory.md` for the full cross-domain isomorphism.
 
 ---
 
@@ -443,5 +699,5 @@ Always verify results before drawing conclusions:
 ---
 
 **END OF ORCHESTRATOR INSTRUCTIONS**
-**Version**: 5.3
-**Date**: 2026-02-20
+**Version**: 5.4
+**Date**: 2026-02-24
