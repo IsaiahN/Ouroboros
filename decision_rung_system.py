@@ -33,7 +33,7 @@ import logging
 import random
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 # Set up logging with database support (Rule 2) + console output
 try:
@@ -828,6 +828,38 @@ class DecisionRungSystem:
         'action_count', 'level_number',
     })
 
+    def _get_wall_blocked_actions(self, context: Dict[str, Any]) -> Set[str]:
+        """H16: Query the spatial_map rung for actions that lead to known walls.
+
+        Returns a set of action names (e.g. {'ACTION1', 'ACTION3'}) that would
+        move the agent into a known wall at the current position. Other rungs
+        and the weighted-random fallback use this to avoid wasted actions.
+        """
+        game_type = context.get('game_type', '')
+        level = context.get('level', 1)
+        game_key = f"{game_type}_L{level}"
+
+        spatial_rung = next(
+            (r for r in self.rungs if r.name == 'spatial_map'), None
+        )
+        if spatial_rung is None:
+            return set()
+
+        pos = spatial_rung._position.get(game_key)
+        if pos is None:
+            return set()
+
+        spatial_map = spatial_rung._maps.get(game_key, {})
+        if not spatial_map:
+            return set()
+
+        blocked: Set[str] = set()
+        for action, (dx, dy) in spatial_rung.ACTION_DELTAS.items():
+            neighbor = (pos[0] + dx, pos[1] + dy)
+            if spatial_map.get(neighbor) == 'wall':
+                blocked.add(action)
+        return blocked
+
     def decide(self, game_state: Any, context: Dict[str, Any]) -> Tuple[str, str]:
         """Make an action decision using current strategy."""
         self.total_decisions += 1
@@ -842,6 +874,10 @@ class DecisionRungSystem:
             self._context_warned = True
 
         available = context.get('available_actions', [1, 2, 3, 4, 5, 6, 7])
+
+        # H16: Inject wall-blocked actions into context so ALL strategies
+        # can avoid known walls, not just the spatial_map rung.
+        context['_wall_blocked_actions'] = self._get_wall_blocked_actions(context)
         current_ordering = self.ordering_name
 
         target_ordering = self._select_ordering_for_context(available, context)
@@ -1117,6 +1153,15 @@ class DecisionRungSystem:
             if context:
                 return get_random_available_action(context)
             return 'ACTION1'
+
+        # H16: Suppress actions that lead to known walls.
+        # Only filter if we have alternatives — never block ALL actions.
+        wall_blocked = context.get('_wall_blocked_actions', set()) if context else set()
+        if wall_blocked:
+            safe_weights = {a: w for a, w in weights.items() if a not in wall_blocked}
+            if safe_weights:
+                weights = safe_weights
+
         total = sum(max(0.05, w) for w in weights.values())
         r = random.random() * total
         cumulative = 0
@@ -1286,6 +1331,13 @@ class DecisionRungSystem:
             filter_weight = accumulated_weights.get(action, 1.0)
             final_scores[action] = (vote + 0.1) * filter_weight
 
+        # H16: Remove wall-blocked actions from candidates if alternatives exist.
+        wall_blocked = context.get('_wall_blocked_actions', set())
+        if wall_blocked:
+            safe_scores = {a: s for a, s in final_scores.items() if a not in wall_blocked}
+            if safe_scores:
+                final_scores = safe_scores
+
         best_action = max(final_scores, key=lambda k: final_scores[k])
         best_score = final_scores[best_action]
 
@@ -1328,6 +1380,12 @@ class DecisionRungSystem:
 
             if result.has_suggestion(rung.confidence_threshold):
                 if result.action and not is_action_available(result.action, context):
+                    continue
+                # H16: Skip movement actions that lead to known walls.
+                # The spatial_map rung already avoids walls, but other rungs
+                # may suggest wall-hitting movements. Skip and try the next rung.
+                wall_blocked = context.get('_wall_blocked_actions', set())
+                if result.action in wall_blocked:
                     continue
                 if result.action == 'ACTION6':
                     result = Action6CoordinateProvider.enrich_result_with_coordinates(
