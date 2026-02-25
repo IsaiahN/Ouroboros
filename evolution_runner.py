@@ -863,7 +863,7 @@ class EvolutionRunner:
                 )
             except Exception as e:
                 # Always log cognitive fallbacks — silent swallowing hid 50% crash rate
-                logger.warning(f"[PTMA-ERR] CognitiveLoop failed for {game_id}, falling back: {e}")
+                print(f"[PTMA-ERR] CognitiveLoop failed for {game_id}, falling back: {e}")
 
         return self._game_player.play_game(
             agent=agent,
