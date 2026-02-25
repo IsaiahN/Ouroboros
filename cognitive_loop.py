@@ -2290,7 +2290,6 @@ class CognitiveLoop:
                     if isinstance(action_str, str) and action_str.startswith('ACTION'):
                         action_num = int(action_str.replace('ACTION', ''))
                     else:
-                        import random
                         action_num = random.choice(self._available_actions)
 
                     # Extract coordinates for ACTION6
