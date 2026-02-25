@@ -338,11 +338,16 @@ class CognitiveGamePlayer:
                         frame_before = frame_before.tolist()
                     if frame_after is not None and hasattr(frame_after, 'tolist'):
                         frame_after = frame_after.tolist()
-                    # Build rich outcome context from cognitive frame
-                    outcome_context = {}
+                    # Build rich outcome context from cognitive frame.
+                    # Always include game identity + frame_changed so rungs
+                    # (especially spatial_map) can key their state correctly.
+                    outcome_context = {
+                        'game_type': game_type,
+                        'level': current_levels + 1,
+                        'frame_changed': frame_changed,
+                    }
                     if cf:
-                        outcome_context = {
-                            'frame_changed': frame_changed,
+                        outcome_context.update({
                             'was_productive': cf.was_productive,
                             'was_destructive': cf.was_destructive,
                             'was_wasted': cf.was_wasted,
@@ -351,7 +356,7 @@ class CognitiveGamePlayer:
                             'goal_cells_total': cf.goal_cells_total,
                             'goal_cells_correct': cf.goal_cells_correct,
                             'pixels_changed': cf.pixels_changed,
-                        }
+                        })
                     self._gp.decision_system.notify_action_complete(
                         action=action.name, action_data=action_data or {},
                         frame_before=frame_before, frame_after=frame_after,
