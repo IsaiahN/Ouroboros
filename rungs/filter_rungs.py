@@ -202,8 +202,14 @@ class ThreeLayerFilterRung(DecisionRung):
                     weights[action] = 1.0
 
             # Layer 2: Object prefilter for click actions
-            # Penalize ACTION5/6/7 if there's no non-background pixel at position
-            if frame is not None and isinstance(frame, list):
+            # Penalize ACTION5/6/7 if there's no non-background pixel at position.
+            # Skip for games where click coordinates are set by
+            # Action6CoordinateProvider (independent of agent position).
+            game_id = context.get('game_id', '')
+            game_type = game_id[:4] if len(game_id) >= 4 else ''
+            position_independent_click = game_type in ('ft09', 'vc33')
+
+            if frame is not None and isinstance(frame, list) and not position_independent_click:
                 for action_num in [5, 6, 7]:
                     if action_num in available:
                         action = f'ACTION{action_num}'
