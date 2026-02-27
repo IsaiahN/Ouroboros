@@ -1162,6 +1162,23 @@ class DecisionRungSystem:
             if safe_weights:
                 weights = safe_weights
 
+        # H21: Modulate weights by action effectiveness.
+        # Actions that rarely produce frame changes are down-weighted.
+        # This causes FT09 to converge on ACTION6 (the only productive
+        # action) instead of wasting 85% of its step budget on NOPs.
+        action_eff = context.get('_action_effectiveness', {}) if context else {}
+        if action_eff:
+            modulated = {}
+            for action, weight in weights.items():
+                eff = action_eff.get(action)
+                if eff is not None:
+                    # Scale weight by effectiveness, floor at 0.1 to keep exploring
+                    modulated[action] = weight * max(0.1, eff)
+                else:
+                    modulated[action] = weight
+            if modulated:
+                weights = modulated
+
         total = sum(max(0.05, w) for w in weights.values())
         r = random.random() * total
         cumulative = 0

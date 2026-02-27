@@ -296,6 +296,12 @@ class CognitiveLoop:
         self._current_level: int = 1
         self._score: float = 0.0
 
+        # H21: Per-action-type effectiveness tracking.
+        # Tracks how often each action type produces a meaningful frame change.
+        # Used to down-weight unproductive actions in weighted_random fallback.
+        self._action_eff_attempts: Dict[int, int] = {}
+        self._action_eff_successes: Dict[int, int] = {}
+
         # Frame tracking
         self._prev_frame: Optional[np.ndarray] = None
         self._consecutive_no_change: int = 0
@@ -365,6 +371,8 @@ class CognitiveLoop:
         self._last_action_type = None
         self._consecutive_same_action = 0
         self._last_action_info = None
+        self._action_eff_attempts = {}
+        self._action_eff_successes = {}
         self._frames = []
         self._current_frame = None
 
@@ -906,6 +914,14 @@ class CognitiveLoop:
             self._consecutive_no_change = 0
         else:
             self._consecutive_no_change += 1
+
+        # H21: Update action effectiveness tracker
+        if self._last_action_info:
+            atype = self._last_action_info.get('type', 0)
+            if atype > 0:
+                self._action_eff_attempts[atype] = self._action_eff_attempts.get(atype, 0) + 1
+                if frame_changed:
+                    self._action_eff_successes[atype] = self._action_eff_successes.get(atype, 0) + 1
 
         # ═══ GAP 1: Update frame history for stable region detection ═══
         post_array = self._perceiver._to_numpy(post_frame)
@@ -2633,6 +2649,18 @@ class CognitiveLoop:
             context['goal_match_fraction'] = getattr(last_cf, 'goal_match_fraction', 0.0)
             context['goal_match_cells'] = getattr(last_cf, 'goal_match_cells', 0)
             context['goal_mismatch_cells'] = getattr(last_cf, 'goal_mismatch_cells', 0)
+
+        # ═══ H21: Inject action effectiveness for weighted_random ═══
+        # After enough samples, tell the decision system which action types
+        # are productive so it can down-weight unproductive ones.
+        action_eff: Dict[str, float] = {}
+        for a in self._available_actions:
+            attempts = self._action_eff_attempts.get(a, 0)
+            if attempts >= 5:  # need minimum samples
+                successes = self._action_eff_successes.get(a, 0)
+                action_eff[f'ACTION{a}'] = successes / attempts
+        if action_eff:
+            context['_action_effectiveness'] = action_eff
 
         return context
 
