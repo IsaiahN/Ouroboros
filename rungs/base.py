@@ -250,6 +250,30 @@ class Action6CoordinateProvider:
         game_type = context.get('game_type', '')
         level = context.get('level', 1)
 
+        # Extract actual 2D pixel data if game_state/obs was passed as frame.
+        # The caller often passes the raw observation object, but Strategy 3
+        # needs a List[List[int]] frame.
+        if frame is not None and not isinstance(frame, list):
+            raw = getattr(frame, 'frame', None) if not isinstance(frame, dict) else frame.get('frame')
+            if raw is not None:
+                try:
+                    if hasattr(raw, 'tolist'):
+                        raw = raw.tolist()
+                    if isinstance(raw, list) and raw:
+                        # FrameDataRaw.frame returns List[ndarray]
+                        if hasattr(raw[0], 'tolist'):
+                            raw = raw[0].tolist()
+                        # Squeeze nested [[[pixel]]] → [[pixel]]
+                        while (isinstance(raw, list) and raw
+                               and isinstance(raw[0], list) and raw[0]
+                               and isinstance(raw[0][0], list)):
+                            raw = raw[0]
+                    frame = raw if isinstance(raw, list) else None
+                except Exception:
+                    frame = None
+            else:
+                frame = None
+
         # Strategy 1: Detected objects/pseudobuttons
         if engines:
             try:
@@ -348,10 +372,12 @@ class Action6CoordinateProvider:
         target_color = sorted_colors[idx]
         target_group = valid_groups[target_color]
 
-        avg_x = sum(p[0] for p in target_group) // len(target_group)
-        avg_y = sum(p[1] for p in target_group) // len(target_group)
-
-        return {'x': avg_x, 'y': avg_y}
+        # Randomly sample from the group instead of using the center.
+        # Center-targeting creates deterministic cycling that oscillates
+        # puzzle state in Lights-Out games (clicking same cell twice
+        # undoes the first click).
+        point = random.choice(target_group)
+        return {'x': point[0], 'y': point[1]}
 
     @staticmethod
     def enrich_result_with_coordinates(
