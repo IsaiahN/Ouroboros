@@ -250,6 +250,30 @@ class Action6CoordinateProvider:
         game_type = context.get('game_type', '')
         level = context.get('level', 1)
 
+        # Extract actual 2D pixel data if game_state/obs was passed as frame.
+        # The caller often passes the raw observation object, but Strategy 3
+        # needs a List[List[int]] frame.
+        if frame is not None and not isinstance(frame, list):
+            raw = getattr(frame, 'frame', None) if not isinstance(frame, dict) else frame.get('frame')
+            if raw is not None:
+                try:
+                    if hasattr(raw, 'tolist'):
+                        raw = raw.tolist()
+                    if isinstance(raw, list) and raw:
+                        # FrameDataRaw.frame returns List[ndarray]
+                        if hasattr(raw[0], 'tolist'):
+                            raw = raw[0].tolist()
+                        # Squeeze nested [[[pixel]]] → [[pixel]]
+                        while (isinstance(raw, list) and raw
+                               and isinstance(raw[0], list) and raw[0]
+                               and isinstance(raw[0][0], list)):
+                            raw = raw[0]
+                    frame = raw if isinstance(raw, list) else None
+                except Exception:
+                    frame = None
+            else:
+                frame = None
+
         # Strategy 1: Detected objects/pseudobuttons
         if engines:
             try:
