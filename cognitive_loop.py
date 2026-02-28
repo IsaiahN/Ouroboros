@@ -2374,7 +2374,17 @@ class CognitiveLoop:
                 return action_num, action_data
 
         # --- 3b: Information-gain exploration for click games ---
-        if self._causal_map and 6 in self._available_actions:
+        # H26: For click-only games, periodically (~30%) skip grid-based
+        # exploration and use frame-pixel analysis instead.  Grid-cell
+        # centres (8 px spacing) can miss small interactive sprites like
+        # switches (4×4 px) whose positions don't fall on the grid.
+        click_only = (
+            self._available_actions
+            and all(a == 6 for a in self._available_actions)
+        )
+        use_grid = not (click_only and random.random() < 0.30)
+
+        if use_grid and self._causal_map and 6 in self._available_actions:
             target = self._causal_map.best_exploration_target()
             if target:
                 action_num = 6
@@ -2393,6 +2403,61 @@ class CognitiveLoop:
                     f" | info_gain={info_gain:.2f}"
                 )
                 return action_num, action_data
+
+        # --- 3b2: H26 pixel-accurate exploration for click-only games ---
+        # When 3b was skipped (use_grid=False), use colour-group cycling
+        # on the raw frame so we can reach small interactive sprites
+        # (e.g. 4×4 px switches) that don't align with the grid.
+        if not use_grid and 6 in self._available_actions and percept.frame is not None:
+            try:
+                arr = self._perceiver._to_numpy(percept.frame)
+                if arr is not None:
+                    # Group non-zero pixels by colour value
+                    color_groups: Dict[int, List[Tuple[int, int]]] = {}
+                    ys, xs = np.where(arr > 0)
+                    for yy, xx in zip(ys, xs):
+                        c_val = int(arr[yy, xx])
+                        if c_val not in color_groups:
+                            color_groups[c_val] = []
+                        color_groups[c_val].append((int(xx), int(yy)))
+
+                    if color_groups:
+                        # Filter: keep groups with ≥3 and ≤40% of pixels
+                        area = max(arr.size, 1)
+                        valid = {
+                            c: pts for c, pts in color_groups.items()
+                            if 3 <= len(pts) <= area * 0.4
+                        }
+                        if not valid:
+                            valid = color_groups
+
+                        sorted_colors = sorted(
+                            valid.keys(),
+                            key=lambda c: len(valid[c]),
+                            reverse=True,
+                        )
+                        # Cycle through colours per-game
+                        idx = self._actions_taken % len(sorted_colors)
+                        group = valid[sorted_colors[idx]]
+                        x, y = random.choice(group)
+
+                        action_num = 6
+                        action_data = {'x': x, 'y': y}
+                        cf.action_speed = "explore"
+                        cf.action_type = 6
+                        cf.action_x = x
+                        cf.action_y = y
+                        cf.action_reason = (
+                            f"Explore: H26 colour-{sorted_colors[idx]}"
+                        )
+                        cf.action_confidence = 0.3
+                        cf.action_summary = (
+                            f"EXPLORE-PIXEL: Click ({x},{y})"
+                            f" | H26 colour-group #{idx}"
+                        )
+                        return action_num, action_data
+            except Exception:
+                pass
 
         # --- 3c: Perception-guided fallback for click games ---
         if 6 in self._available_actions:
