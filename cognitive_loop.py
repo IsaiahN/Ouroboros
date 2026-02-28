@@ -2083,7 +2083,11 @@ class CognitiveLoop:
         # If the same action has been repeated many times without level
         # progress, the rung system is stuck in a loop.  Force a strategy
         # change so the agent tries something different.
-        if self._consecutive_same_action >= 8:
+        # H26 fix: Skip for click-only games — when available_actions=[6],
+        # every action is ACTION6 so the counter always grows.  This is
+        # normal, not a monopoly.
+        has_alternatives = len(set(self._available_actions)) > 1
+        if has_alternatives and self._consecutive_same_action >= 8:
             # Escalating response: experiment first, then explore
             if self._consecutive_same_action >= 20:
                 return "explore"   # Full reset — random walk
@@ -2374,7 +2378,7 @@ class CognitiveLoop:
                 return action_num, action_data
 
         # --- 3b: Information-gain exploration for click games ---
-        # H26: For click-only games, periodically (~30%) skip grid-based
+        # H26: For click-only games, 50% of explore actions skip grid-based
         # exploration and use frame-pixel analysis instead.  Grid-cell
         # centres (8 px spacing) can miss small interactive sprites like
         # switches (4×4 px) whose positions don't fall on the grid.
@@ -2382,7 +2386,7 @@ class CognitiveLoop:
             self._available_actions
             and all(a == 6 for a in self._available_actions)
         )
-        use_grid = not (click_only and random.random() < 0.30)
+        use_grid = not (click_only and random.random() < 0.50)
 
         if use_grid and self._causal_map and 6 in self._available_actions:
             target = self._causal_map.best_exploration_target()
@@ -2411,6 +2415,8 @@ class CognitiveLoop:
         if not use_grid and 6 in self._available_actions and percept.frame is not None:
             try:
                 arr = self._perceiver._to_numpy(percept.frame)
+                if arr is not None and arr.ndim == 3:
+                    arr = arr[0]  # (1,H,W) → (H,W)
                 if arr is not None:
                     # Group non-zero pixels by colour value
                     color_groups: Dict[int, List[Tuple[int, int]]] = {}
@@ -2456,8 +2462,8 @@ class CognitiveLoop:
                             f" | H26 colour-group #{idx}"
                         )
                         return action_num, action_data
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[H26] pixel path failed: %s", exc)
 
         # --- 3c: Perception-guided fallback for click games ---
         if 6 in self._available_actions:
