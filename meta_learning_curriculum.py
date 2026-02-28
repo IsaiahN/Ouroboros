@@ -182,8 +182,10 @@ class MetaLearningCurriculum:
         assigns deterministically based on agent_id hash to ensure even
         distribution without coordination.
 
-        Returns the focus game repeated num_games times so agents get
-        multiple practice attempts per generation.
+        H29 fix: When num_games >= len(available_games), guarantee each
+        game type is played at least once per agent. This prevents
+        curriculum starvation where hash-based assignment leaves some
+        game types with near-zero coverage. Extra slots go to focus game.
         """
         if not available_games:
             return []
@@ -208,7 +210,16 @@ class MetaLearningCurriculum:
             game_index = hash(agent_id) % len(available_games)
             focus_game = available_games[game_index]
 
-        # Return the focus game repeated num_games times for deep practice
+        # H29: Guarantee coverage — play each game at least once when
+        # num_games is large enough, fill remaining slots with focus game
+        if num_games >= len(available_games):
+            others = [g for g in available_games if g != focus_game]
+            games = [focus_game] + others
+            while len(games) < num_games:
+                games.append(focus_game)
+            return games[:num_games]
+
+        # Not enough slots for all games — pure specialization
         return [focus_game] * max(1, num_games)
 
     def _select_similar_pair(self, agent_id: str, available_games: List[str]) -> List[str]:
