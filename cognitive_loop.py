@@ -2296,17 +2296,18 @@ class CognitiveLoop:
                     )
                     return action_num, None
 
-        # ─── SPEED 1c: H26 pixel-accurate targeting for click-only games ─
-        # For games with available_actions=[6], the rung system and
-        # causal_map both produce grid-aligned coordinates (8 px spacing)
-        # that systematically miss small interactive sprites (e.g. 4×4 px
-        # switches).  50% of actions bypass the rung system and use
-        # colour-group cycling on raw frame pixels instead.
-        click_only = (
+        # ─── SPEED 1c: H26/H28 pixel-accurate targeting for click games ──
+        # For games where ACTION6 (click) is available, the rung system
+        # and causal_map both produce grid-aligned coordinates (8 px
+        # spacing) that miss small interactive sprites (e.g. 4×4 px
+        # switches in VC33, constraint cells in FT09).  50% of actions
+        # bypass the rung system: force ACTION6 with pixel-accurate
+        # colour-group cycling on raw frame data.
+        has_action6 = (
             self._available_actions
-            and all(a == 6 for a in self._available_actions)
+            and 6 in self._available_actions
         )
-        if click_only and random.random() < 0.50 and percept.frame is not None:
+        if has_action6 and random.random() < 0.50 and percept.frame is not None:
             try:
                 arr = self._perceiver._to_numpy(percept.frame)
                 if arr is not None and arr.ndim == 3:
