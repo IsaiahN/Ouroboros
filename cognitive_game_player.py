@@ -223,11 +223,12 @@ class CognitiveGamePlayer:
 
         game_type = game_id[:4] if len(game_id) >= 4 else game_id
 
-        # ═══ REPLAY-MODE: Occasionally replay winning sequences from scratch ═══
-        # Every ~1-in-5 games, instead of cognitive loop, replay known winning
-        # sequences from a clean board.  This validates stored sequences and
-        # lets agents bank cheap level-ups to accumulate prestige.
-        if random.random() < 0.20:
+        # ═══ REPLAY-MODE: Replay winning sequences from scratch ═══
+        # H30: Increased from 20% to 50%.  With L2 sequences available,
+        # more replays = more L3 cognitive attempts.  30 L2 completions
+        # in Exp #24 with 0 L3 — need ~2.5x more L3 attempts to break
+        # through.  Falls through to cognitive if no sequences exist.
+        if random.random() < 0.50:
             replay_result = self._replay_winning_sequences(
                 agent=agent, env=env, game_id=game_id, game_type=game_type,
                 win_levels=win_levels, current_generation=current_generation,
