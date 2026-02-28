@@ -234,7 +234,21 @@ class CognitiveGamePlayer:
                 is_running_fn=is_running_fn,
             )
             if replay_result is not None:
-                return replay_result
+                # H25: Check for handoff (replay got L1 but not full win)
+                if isinstance(replay_result, dict) and replay_result.get('_handoff'):
+                    actions_taken = replay_result['actions_taken']
+                    last_obs = replay_result['last_obs']
+                    prev_levels = replay_result['levels_completed']
+                    prev_score = replay_result['score']
+                    # Extend budget: grant actions for each completed level
+                    action_budget += prev_levels * actions_per_level
+                    loop._max_actions = action_budget
+                    # Tell cognitive loop it's starting at L2+
+                    loop._current_level = prev_levels + 1
+                    loop._actions_taken = actions_taken
+                    # Fall through to cognitive loop at L2+
+                else:
+                    return replay_result
             # If replay returned None (no sequences found), fall through
             # to normal cognitive loop.
 
@@ -1293,15 +1307,15 @@ class CognitiveGamePlayer:
         win_levels: int,
         current_generation: int,
         is_running_fn: Callable[[], bool],
-    ) -> 'Optional[GameResult]':
+    ) -> 'Optional[Any]':
         """Play a game by replaying stored winning sequences from scratch.
 
         Called randomly (~20% of games) to validate sequences and bank
         cheap level-ups.  Runs on the already-clean initial board state
         (no mid-game reset needed).
 
-        Returns GameResult on success, or None if no sequences exist
-        (caller falls through to normal cognitive loop).
+        Returns GameResult on completion, dict on H25 handoff (L1 done,
+        game not won), or None if no sequences exist.
         """
         import json as _json
 
@@ -1433,9 +1447,11 @@ class CognitiveGamePlayer:
         # Build result
         levels_completed = 0
         is_win = False
+        game_over = False
         if last_obs:
             levels_completed = getattr(last_obs, 'levels_completed', 0) or 0
             is_win = last_obs.state == GameState.WIN
+            game_over = last_obs.state == GameState.GAME_OVER
         score = levels_completed / win_levels if win_levels > 0 else 0.0
 
         if self._verbose:
@@ -1460,6 +1476,23 @@ class CognitiveGamePlayer:
                       outcome, agent.agent_id, current_generation))
             except Exception:
                 pass
+
+        # H25: Replay-to-Cognitive Handoff
+        # If replay completed L1+ but game isn't won or over, hand off to
+        # cognitive loop for L2 exploration instead of returning immediately.
+        if levels_completed > 0 and not is_win and not game_over:
+            if self._verbose:
+                print(
+                    f"    [H25-HANDOFF] L{levels_completed} done via replay, "
+                    f"handing off to cognitive loop for L{levels_completed + 1}"
+                )
+            return {
+                '_handoff': True,
+                'actions_taken': actions_taken,
+                'last_obs': last_obs,
+                'levels_completed': levels_completed,
+                'score': score,
+            }
 
         return GameResult(
             game_id=game_id, agent_id=agent.agent_id, score=score,
