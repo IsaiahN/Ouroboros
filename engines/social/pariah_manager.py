@@ -18,9 +18,10 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 import json
+import math
 import uuid
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from database_interface import DatabaseInterface
 from engines.engine_logger import get_engine_logger, log_silent_failure
@@ -152,6 +153,45 @@ class PariahManager:
         # Only create pariahs for severe failures (score < 1.0)
         if final_score >= 1.0:
             return None
+
+        try:
+            # REACTIVATION: Check if similar pariahs already exist for this game+level.
+            # If so, re-trigger them (reset half-life clock, bump trigger_count)
+            # instead of creating unbounded duplicates.
+            existing_pariahs = self.db.execute_query("""
+                SELECT pariah_id, trigger_count, toxicity
+                FROM pariahs
+                WHERE source_game_id LIKE ? AND source_level_number = ?
+                AND is_active = TRUE
+                LIMIT 5
+            """, (f"{game_id[:4]}%", source_level_number))
+
+            if existing_pariahs:
+                reactivated = 0
+                new_toxicity = max(0.0, min(1.0, 1.0 - (final_score / 10.0)))
+                for ep in existing_pariahs:
+                    # Re-trigger: reset decay clock, bump count, refresh toxicity
+                    refreshed_toxicity = max(ep['toxicity'], new_toxicity)
+                    self.db.execute_query("""
+                        UPDATE pariahs
+                        SET last_triggered_generation = ?,
+                            trigger_count = trigger_count + 1,
+                            toxicity = ?
+                        WHERE pariah_id = ?
+                    """, (generation, refreshed_toxicity, ep['pariah_id']))
+                    reactivated += 1
+
+                if reactivated > 0:
+                    logger.debug(f"Reactivated {reactivated} existing pariahs for "
+                                 f"{game_id[:4]} L{source_level_number} (gen {generation})")
+                    # Still make the failing agent aware of the first pariah
+                    self._make_agent_aware_of_pariah(
+                        agent_id, existing_pariahs[0]['pariah_id'],
+                        generation, 'self_discovery', None
+                    )
+                    return existing_pariahs[0]['pariah_id']
+        except Exception as e:
+            logger.debug("Pariah reactivation check failed, creating new", detail=str(e))
 
         pariah_id = f"pariah_{uuid.uuid4().hex[:12]}"
 
@@ -640,7 +680,7 @@ class PariahManager:
     # PARIAH LIFECYCLE (DECAY / OBSOLESCENCE)
     # ========================================================================
 
-    def check_pariah_obsolescence(self, generation: int, threshold_generations: int = 30):
+    def check_pariah_obsolescence(self, generation: int, threshold_generations: int = 50):
         """
         Check if any pariahs have become obsolete.
 
@@ -649,7 +689,7 @@ class PariahManager:
 
         Pariahs are only marked obsolete if:
         1. Toxicity has decayed to minimum (0.1) AND
-        2. Not triggered in threshold_generations (50+ gens)
+        2. Not triggered in threshold_generations
 
         Low-toxicity pariahs remain ACTIVE to provide weak warnings.
         """
@@ -669,39 +709,40 @@ class PariahManager:
             logger.info(f"Reactivated {len(reactivated)} previously-obsolete pariahs")
 
         # STEP 3: Only mark truly obsolete pariahs (min toxicity AND very old)
-        # Increased threshold to 50 generations - give more time
         self.db.execute_query("""
             UPDATE pariahs
             SET obsolescence_score = 1.0,
                 is_active = FALSE
-            WHERE last_triggered_generation < ? - 50
+            WHERE last_triggered_generation < ? - ?
             AND toxicity <= 0.15
             AND is_active = TRUE
-        """, (generation,))
+        """, (generation, threshold_generations))
 
-    def decay_pariah_toxicity(self, generation: int, decay_rate: float = 0.03, min_toxicity: float = 0.1):
+    def decay_pariah_toxicity(self, generation: int, min_toxicity: float = 0.1):
         """
-        Apply relevance decay to pariah toxicity.
+        Apply half-life decay to pariah toxicity.
 
         Philosophy (from agi_unified_theory.md):
         "Forgetting is not a bug - it's essential for intelligence."
-        Pariahs should fade naturally if not re-validated by newer generations.
 
-        FIXED: Now operates on ALL pariahs, not just active ones.
-        This ensures pariahs decay properly before obsolescence check.
+        Half-life model: toxicity(t) = toxicity₀ · (1/2)^(t / t_half)
 
-        Decay Formula (exponential decay):
-        new_toxicity = current_toxicity * decay_factor
-        where decay_factor = max(0.3, 1.0 - decay_rate * generations_since_trigger)
+        Why half-life instead of the old linear decay:
+        - Old formula: 1.0 - (0.03 * min(gens, 30)) — linear, capped, arbitrary
+        - Half-life: smooth exponential, never hits zero, substrate-independent
+        - Reactivation: if a pariah is re-triggered, last_triggered_generation
+          resets and the decay clock restarts
+
+        Pariahs decay faster than prestige (t_half=10 vs 15) because failure
+        patterns become less relevant more quickly — the network evolves past them.
 
         Args:
             generation: Current generation
-            decay_rate: How fast toxicity decays per generation (default 3% - slower decay)
-            min_toxicity: Minimum toxicity floor to maintain some warning (default 0.1)
+            min_toxicity: Minimum toxicity floor to maintain faint warning (default 0.1)
         """
+        PARIAH_HALF_LIFE = 10  # generations until toxicity halves
+
         try:
-            # FIXED: Operate on ALL pariahs, not just active ones
-            # This ensures decay happens before obsolescence marking
             pariahs = self.db.execute_query("""
                 SELECT pariah_id, toxicity, discovery_generation,
                        COALESCE(last_triggered_generation, discovery_generation) as last_trigger
@@ -717,10 +758,11 @@ class PariahManager:
                 last_trigger = p['last_trigger'] or p['discovery_generation'] or 0
                 generations_since_trigger = max(0, generation - last_trigger)
 
-                # Apply decay based on age
-                # FIXED: Cap at 30 generations to prevent over-decay
-                decay_factor = 1.0 - (decay_rate * min(generations_since_trigger, 30))
-                decay_factor = max(0.3, decay_factor)  # Floor at 30% of original
+                # Half-life decay: 0.5^(t / t_half)
+                if generations_since_trigger > 0 and PARIAH_HALF_LIFE > 0:
+                    decay_factor = math.pow(0.5, generations_since_trigger / PARIAH_HALF_LIFE)
+                else:
+                    decay_factor = 1.0
 
                 new_toxicity = max(min_toxicity, p['toxicity'] * decay_factor)
 
@@ -734,7 +776,8 @@ class PariahManager:
                     decayed_count += 1
 
             if decayed_count > 0:
-                logger.debug(f"Decayed toxicity for {decayed_count} pariahs (gen {generation})")
+                logger.debug(f"Decayed toxicity for {decayed_count} pariahs (gen {generation}, "
+                             f"half-life={PARIAH_HALF_LIFE})")
 
         except Exception as e:
             logger.error("Error in toxicity decay", exc=e)

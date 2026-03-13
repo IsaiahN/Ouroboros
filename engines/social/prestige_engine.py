@@ -28,6 +28,7 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import logging
+import math
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -95,6 +96,18 @@ class PrestigeEngine:
         """
         self.db = db
         self.logger = logging.getLogger(__name__)
+
+    def _get_current_generation(self) -> int:
+        """Get the current max generation from the database."""
+        try:
+            result = self.db.execute_query(
+                "SELECT MAX(generation) as gen FROM agents WHERE is_active = TRUE"
+            )
+            if result and result[0].get('gen') is not None:
+                return result[0]['gen']
+        except Exception:
+            pass
+        return 0
 
     def calculate_agent_prestige(self, agent_id: str, current_generation: int) -> float:
         """
@@ -211,8 +224,21 @@ class PrestigeEngine:
                 (validation_quality * 0.15)
             )
 
-            # PRESTIGE DECAY: Apply generational decay to prevent coasting
-            # Get agent's previous prestige and last update generation
+            # PRESTIGE DECAY: Half-life model (replaces linear 3% decay)
+            #
+            # N(t) = N₀ · (1/2)^(t / t_half)
+            #
+            # Why half-life instead of linear decay:
+            # 1. Substrate-independent — works for any entity with influence
+            # 2. Self-validating — if something matters, it gets reactivated
+            # 3. Bounds complexity — total prestige approaches equilibrium
+            # 4. Never hits zero — fades to irrelevance but preserves trace
+            #
+            # Reactivation: When an agent's discovery is used by others
+            # (viral spread), the decay clock resets. Ideas must be
+            # reactivated to survive — "use it or lose it" made precise.
+            PRESTIGE_HALF_LIFE = 15  # generations until prestige halves
+
             agent_data = self.db.execute_query("""
                 SELECT discovery_prestige, last_prestige_update_gen
                 FROM agents
@@ -222,28 +248,30 @@ class PrestigeEngine:
             if agent_data and len(agent_data) > 0:
                 previous_prestige = agent_data[0]['discovery_prestige'] or 0.0
                 last_update_gen = agent_data[0]['last_prestige_update_gen'] or 0
-                generations_since_update = current_generation - last_update_gen
+                generations_since_update = max(0, current_generation - last_update_gen)
 
-                # Apply 3% decay per generation to previous prestige
-                # This prevents agents from coasting on past achievements
-                DECAY_RATE = 0.03  # 3% per generation
-                decay_factor = (1.0 - DECAY_RATE) ** generations_since_update
+                # Half-life decay: 0.5^(t / t_half)
+                if generations_since_update > 0 and PRESTIGE_HALF_LIFE > 0:
+                    decay_factor = math.pow(0.5, generations_since_update / PRESTIGE_HALF_LIFE)
+                else:
+                    decay_factor = 1.0
                 decayed_previous_prestige = previous_prestige * decay_factor
 
                 # New prestige is the MAX of current contributions OR decayed previous prestige
-                # This ensures you keep prestige if still contributing, but it decays if you stop
+                # If still contributing, prestige stays high; if not, half-life decay applies
                 total_prestige = max(raw_prestige, decayed_previous_prestige)
 
                 if decayed_previous_prestige > raw_prestige:
                     self.logger.info(
                         f"Agent {agent_id}: Using decayed prestige {total_prestige:.3f} "
-                        f"(prev={previous_prestige:.3f}, decay={decay_factor:.3f}, raw={raw_prestige:.3f})"
+                        f"(prev={previous_prestige:.3f}, half-life decay={decay_factor:.3f}, "
+                        f"gens_since_update={generations_since_update}, raw={raw_prestige:.3f})"
                     )
             else:
                 # New agent, no decay
                 total_prestige = raw_prestige
 
-            # Update last prestige update generation
+            # Update last prestige update generation (reactivation resets clock)
             self.db.execute_query("""
                 UPDATE agents
                 SET last_prestige_update_gen = ?
@@ -577,6 +605,17 @@ class PrestigeEngine:
                             update_discovery_query,
                             (new_uses, new_success_rate, discoverer_id, sequence_id)
                         )
+
+                        # REACTIVATION: Reset discoverer's prestige decay clock
+                        # When someone uses your discovery, your prestige half-life
+                        # resets — ideas that spread stay alive, ideas that don't fade.
+                        # Only reactivate on successful use (failed use = noise).
+                        if success:
+                            self.db.execute_query("""
+                                UPDATE agents
+                                SET last_prestige_update_gen = ?
+                                WHERE agent_id = ?
+                            """, (self._get_current_generation(), discoverer_id))
 
                         self.logger.info(
                             f"[VIRAL] VIRAL SPREAD: Agent {agent_id[:8]} used {discoverer_id[:8]}'s "

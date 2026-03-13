@@ -405,6 +405,69 @@ This protocol is not metaphor — it is isomorphism. The structural relationship
 
 ---
 
+## GAME UNDERSTANDING BLACKBOARD — SELF-VALIDATION PROTOCOL
+
+It is NOT a human's job to tell you whether your understanding of a game is right or wrong. You MUST self-validate your understanding against real data before every hypothesis cycle.
+
+### The Principle
+
+Better understanding of every level → more consistent wins on that level.
+More levels you progress through → better overall game understanding.
+Zero understanding = zero wins. Partial understanding = inconsistent wins. Complete understanding = reliable wins.
+
+### The Blackboard
+
+Maintain a living scratchpad of your current understanding of each game at each level in your auto-memory directory:
+
+```
+C:\Users\Admin\.claude\projects\c--Users-Admin-Documents-GitHub-BitterTruth-AI\memory\game_understanding.md
+```
+
+This file is YOUR blackboard. It tracks:
+1. **Per-game, per-level mechanics**: What does the agent need to DO to complete this level?
+2. **Win conditions**: What exact state constitutes a level completion?
+3. **Action mapping**: Which actions produce which effects?
+4. **Level transitions**: How does L2 differ from L1? What new mechanics appear?
+5. **Confidence rating**: How confident are you in each claim? (VERIFIED / INFERRED / UNKNOWN)
+6. **Evidence source**: Where did this understanding come from? (code reading, trace analysis, game data, API response)
+
+### When to Validate (Token-Efficient)
+
+Do NOT validate all three games every cycle. Validate only the SPECIFIC game+level that is relevant:
+
+- **Before a hypothesis**: Validate ONLY the game+level the hypothesis targets. If your hypothesis is about LS20 navigation, validate LS20 L1 — not FT09 or VC33.
+- **After a trial completes**: Validate ONLY the game+level where results were surprising (unexpected regression, unexpected improvement, or anomalous data). Stable metrics do not need re-validation.
+- **On level progression**: When a game first achieves L(N+1) completions, validate your understanding of L(N+1) mechanics — this is new territory.
+- **NEVER validate a game that is not part of your current work.** If VC33 is stable at ~20% and you are not touching it, leave its blackboard entry alone.
+
+### The Validation Steps (for the targeted game+level only)
+
+1. **Read the blackboard entry** for this specific game+level. What do you currently believe?
+2. **Query the evidence** in `core_data.db` — only for this game+level:
+   - Winning sessions: `SELECT game_id, level_completions, final_score, total_actions FROM game_results WHERE game_id LIKE '<game>%' AND level_completions > 0 LIMIT 20`
+   - Action patterns: Check `action_traces` for winning sessions — what actions preceded level completion?
+   - Stored solutions: Check `winning_sequences` for this game
+3. **Read the game interaction code** if your blackboard entry has UNKNOWN or INFERRED items. The game API responses, frame data, and scoring logic are the GROUND TRUTH.
+4. **Update ONLY the relevant blackboard entry.** Correct beliefs the evidence contradicts. Add new findings. Downgrade confidence on unverified claims.
+5. **Flag gaps.** If your understanding has UNKNOWN entries for the targeted game+level, you are guessing — not experimenting. Fill the gaps first.
+
+### Red Flags (Your Understanding Is Wrong)
+
+- Agents win L1 through template replay but never through real-time exploration → you may not understand what L1 actually requires
+- A hypothesis "should work" but produces 0% improvement across 25+ gens → your premise about the game mechanics is likely wrong
+- Win rates DECLINE after a change that "helps" agents → your model of what helps is inverted
+- Frame change analysis contradicts your action-effect model → re-examine how actions map to game state changes
+
+### Rules
+
+- The blackboard is NEVER "done." Every experiment teaches you something about the games. Update it.
+- UNKNOWN is better than WRONG. If you don't know, say so. Don't fill gaps with assumptions.
+- When a hypothesis fails, ask: "Was my understanding of the game correct?" before asking "Was my code correct?"
+- The human will NOT validate your game understanding for you. The game data IS your teacher.
+- **Every new level introduces unknown variables.** Never assume L(N+1) is "L(N) but harder." New levels can add new mechanics, new constraints, new action effects, or entirely new win conditions. Treat every unseen level as UNKNOWN until evidence says otherwise. This is true of nearly every game ever made — and these games are no exception.
+
+---
+
 ## THE SEVEN SEALS (FAILURE TAXONOMY)
 
 Every failure maps to one of these death modes. The Theorist uses this to classify findings.
