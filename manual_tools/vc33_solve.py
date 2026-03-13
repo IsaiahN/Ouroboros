@@ -1,12 +1,15 @@
 """VC33 Rail Puzzle Solver.
 
 BFS search over switch/rail click sequences to solve each level.
+A* search with correctly-placed heuristic for harder levels.
 Uses Level.clone() for state management — set_level() does NOT reset sprite positions.
 
 Usage:
     python manual_tools/vc33_solve.py              # just compute and verify
     python manual_tools/vc33_solve.py --insert-db   # also insert into winning_sequences
+    python manual_tools/vc33_solve.py --level=7     # solve specific level only
 """
+import heapq
 import json
 import os
 import sqlite3
@@ -159,6 +162,140 @@ def solve_level(game, level_idx, max_depth=None, max_states=100000):
                   f"queue {len(queue)}, visited {len(visited)}")
 
     print(f"  NOT SOLVED (explored {explored}, visited {len(visited)})")
+    return None, explored
+
+
+def count_correctly_placed(game):
+    """Count people in their correct target position (for A* heuristic).
+
+    Mirrors gug() logic but counts matches instead of all-or-nothing.
+    """
+    people = game.current_level.get_sprites_by_tag("HQB")
+    markers = game.current_level.get_sprites_by_tag("fZK")
+    rails = game.current_level.get_sprites_by_tag("rDn")
+    count = 0
+    for person in people:
+        person_color = person.pixels[-1, -1]
+        for rail in rails:
+            if game.gdu(person, rail):
+                adj_slots = game.suo(rail)
+                if not adj_slots:
+                    break
+                for marker in markers:
+                    if (person_color == marker.pixels[-1, -1]
+                            and game.ebl(person) == game.ebl(marker)):
+                        count += 1
+                        break
+                break
+    return count
+
+
+def compute_distance_heuristic(game):
+    """Sum of cross-axis distances from each person to their target marker.
+
+    Returns 0 when all people are at their target positions.
+    Fine-grained: decreases as people move closer to targets.
+    """
+    people = game.current_level.get_sprites_by_tag("HQB")
+    markers = game.current_level.get_sprites_by_tag("fZK")
+    total_dist = 0
+    for person in people:
+        person_color = person.pixels[-1, -1]
+        for marker in markers:
+            if person_color == marker.pixels[-1, -1]:
+                total_dist += abs(game.ebl(person) - game.ebl(marker))
+                break
+    return total_dist
+
+
+def solve_level_astar(game, level_idx, max_depth=None, max_states=500000):
+    """Greedy best-first search with distance heuristic for harder levels.
+
+    Uses h(n) = sum of cross-axis distances from people to targets.
+    Greedy: priority = h(n) only (not g+h), with g as tiebreaker.
+    Finds a solution fast but not necessarily shortest.
+    """
+    game.set_level(level_idx)
+    pristine = game._levels[level_idx].clone()
+    n_base = len(game.current_level.get_sprites())
+
+    initial_state = save_base_state(game, n_base)
+    restore_from_pristine(game, level_idx, pristine, initial_state, n_base)
+
+    switches = game.current_level.get_sprites_by_tag("ZGd")
+    zhks = game.current_level.get_sprites_by_tag("zHk")
+    n_sw = len(switches)
+    n_zhk = len(zhks)
+    n_actions = n_sw + n_zhk
+    timer = game.current_level.get_data("RoA")
+
+    if max_depth is None:
+        max_depth = timer
+
+    print(f"  {n_sw} ZGd + {n_zhk} zHk = {n_actions} actions, "
+          f"timer={timer}, max_depth={max_depth} [greedy best-first]")
+
+    if game.gug():
+        return [], 0
+
+    initial_hash = get_state_hash(game)
+    initial_h = compute_distance_heuristic(game)
+    print(f"  Initial distance: {initial_h} "
+          f"(sum of cross-axis distances to targets)")
+
+    visited = {initial_hash}
+    counter = 0
+    # Greedy: priority = (h, g, counter) — pursue lowest distance first
+    heap = [(initial_h, 0, counter, [], initial_state)]
+    explored = 0
+    best_h_seen = initial_h
+
+    while heap:
+        h_score, g, _, seq, parent_state = heapq.heappop(heap)
+        explored += 1
+
+        if g >= max_depth:
+            continue
+
+        if explored > max_states:
+            print(f"    max_states ({max_states}) reached, stopping")
+            break
+
+        for act in range(n_actions):
+            restore_from_pristine(game, level_idx, pristine,
+                                  parent_state, n_base)
+            switches = game.current_level.get_sprites_by_tag("ZGd")
+            zhks = game.current_level.get_sprites_by_tag("zHk")
+
+            success = apply_click(game, act, switches, zhks)
+            if not success:
+                continue
+
+            if game.gug():
+                print(f"  SOLVED! {g + 1} clicks, explored {explored}")
+                return seq + [act], explored
+
+            state_hash = get_state_hash(game)
+            if state_hash not in visited:
+                visited.add(state_hash)
+                child_state = save_base_state(game, n_base)
+                h = compute_distance_heuristic(game)
+                if h < best_h_seen:
+                    best_h_seen = h
+                    placed = count_correctly_placed(game)
+                    print(f"    NEW BEST dist={h} (placed={placed}) "
+                          f"at depth {g + 1}, "
+                          f"explored {explored}, visited {len(visited)}")
+                counter += 1
+                heapq.heappush(
+                    heap, (h, g + 1, counter, seq + [act], child_state))
+
+        if explored % 2000 == 0:
+            print(f"    explored {explored}, depth={g}, h={h_score}, "
+                  f"heap {len(heap)}, visited {len(visited)}")
+
+    print(f"  NOT SOLVED (explored {explored}, visited {len(visited)}, "
+          f"best_dist={best_h_seen})")
     return None, explored
 
 
@@ -331,11 +468,30 @@ def main():
     game = Vc33()
     insert_db = '--insert-db' in sys.argv
 
+    # Parse --level=N flag for single-level solving
+    target_level = None
+    for arg in sys.argv:
+        if arg.startswith('--level='):
+            target_level = int(arg.split('=')[1])
+
+    # Parse --astar flag to force A* search
+    use_astar = '--astar' in sys.argv
+
+    # Parse --max-states=N
+    max_states_override = None
+    for arg in sys.argv:
+        if arg.startswith('--max-states='):
+            max_states_override = int(arg.split('=')[1])
+
     solutions_by_level = {}
     pristines = {}
     total_clicks = 0
 
-    for level_idx in range(len(levels)):
+    level_range = range(len(levels))
+    if target_level is not None:
+        level_range = [target_level - 1]  # Convert 1-indexed to 0-indexed
+
+    for level_idx in level_range:
         level_num = level_idx + 1
         print(f"\nLevel {level_num}:")
         t0 = time.time()
@@ -344,10 +500,25 @@ def main():
         game.set_level(level_idx)
         pristines[level_idx] = game._levels[level_idx].clone()
 
-        solution, explored = solve_level(
-            game, level_idx,
-            max_depth=min(game.current_level.get_data("RoA"), 50),
-        )
+        timer = game.current_level.get_data("RoA")
+        n_actions = (len(game.current_level.get_sprites_by_tag("ZGd"))
+                     + len(game.current_level.get_sprites_by_tag("zHk")))
+        max_states = max_states_override or 200000
+
+        # Use A* for levels with many actions (hard levels) or if forced
+        if use_astar or n_actions >= 10:
+            max_depth = min(timer, 100)
+            solution, explored = solve_level_astar(
+                game, level_idx,
+                max_depth=max_depth,
+                max_states=max_states,
+            )
+        else:
+            solution, explored = solve_level(
+                game, level_idx,
+                max_depth=min(timer, 50),
+                max_states=max_states,
+            )
 
         elapsed = time.time() - t0
 
@@ -356,7 +527,7 @@ def main():
             ok = verify_solution(game, level_idx, solution, pristines[level_idx])
             status = "PASS" if ok else "FAIL"
             print(f"  Verification: {status}")
-            print(f"  Solution: {solution}")
+            print(f"  Solution ({len(solution)} clicks): {solution}")
             print(f"  Time: {elapsed:.1f}s")
 
             if ok:
@@ -366,7 +537,7 @@ def main():
             print(f"  Time: {elapsed:.1f}s")
 
     print(f"\n{'='*60}")
-    print(f"Solved {len(solutions_by_level)}/{len(levels)} levels, "
+    print(f"Solved {len(solutions_by_level)}/{len(level_range)} levels, "
           f"{total_clicks} total clicks")
 
     if insert_db and solutions_by_level:
