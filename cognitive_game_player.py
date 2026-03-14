@@ -360,6 +360,11 @@ class CognitiveGamePlayer:
                         'game_type': game_type,
                         'level': current_levels + 1,
                         'frame_changed': frame_changed,
+                        # H38: Share world_model ref so rungs can
+                        # write-back observations for persistence
+                        'world_model': getattr(
+                            self._gp.context_builder, '_world_model',
+                            None),
                     }
                     if cf:
                         outcome_context.update({
@@ -817,6 +822,13 @@ class CognitiveGamePlayer:
                 for pos, act in causal_map._walls
             ]
 
+            # Preserve solver targets (H34) through persistence cycles
+            solver_targets = {}
+            for lvl, positions in causal_map._solver_targets.items():
+                solver_targets[str(lvl)] = [
+                    (p[0], p[1]) for p in positions
+                ]
+
             objects_json = _json.dumps({
                 'causal_map': causal_data,
                 'color_cycles': color_cycles,
@@ -826,6 +838,7 @@ class CognitiveGamePlayer:
                      'evidence': r.evidence_count, 'confidence': r.confidence}
                     for r in causal_map._rules
                 ],
+                'solver_targets': solver_targets,
                 'completeness': causal_map.completeness,
             })
 

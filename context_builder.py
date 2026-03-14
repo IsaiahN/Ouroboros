@@ -1106,10 +1106,31 @@ class ContextBuilder:
                     if isinstance(stored, dict):
                         seed_causal = stored.get('causal_map', {})
                         seed_rules = stored.get('rules_learned', [])
+                        seed_goals = stored.get('goal_states', {})
+                        seed_no_effect = stored.get('no_effect_positions', {})
                         if seed_causal:
                             self._world_model['causal_map'] = seed_causal
                         if seed_rules:
                             self._world_model['rules_learned'] = seed_rules
+                        if seed_goals:
+                            self._world_model['solver_goal_states'] = seed_goals
+                        if seed_no_effect:
+                            self._world_model['no_effect_positions'] = seed_no_effect
+                # Also load solver-seeded knowledge (wms_*_best) if goal_states
+                # not found in the most recent entry (gameplay entries override it)
+                if 'solver_goal_states' not in self._world_model:
+                    solver_rows = self._db.execute_query("""
+                        SELECT objects_json FROM world_model_states
+                        WHERE state_id = ?
+                    """, (f"wms_{game_prefix}_best",))
+                    if solver_rows and solver_rows[0].get('objects_json'):
+                        import json as _json2
+                        solver_stored = _json2.loads(
+                            solver_rows[0]['objects_json'])
+                        if isinstance(solver_stored, dict):
+                            sg = solver_stored.get('goal_states', {})
+                            if sg:
+                                self._world_model['solver_goal_states'] = sg
             except Exception:
                 pass  # Non-critical: seeding failure is fine, start fresh
 

@@ -248,6 +248,8 @@ ORDERING_PRESETS = {
 
     # Full comprehensive ordering
     'comprehensive': [
+        # CLASSIFY (Priority 1)
+        ('game_classifier', 1),
         # EMERGENCY (Priority 1-5)
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 2),
@@ -303,11 +305,13 @@ ORDERING_PRESETS = {
         ('trigger_sequences', 43),
         ('discovery_exploitation', 44),
         ('embedding_matcher', 45),
+        ('solver_goal_extraction', 43),
+        ('constraint_decoder', 44),
+        ('causal_click_mapping', 45),
         ('spatial_relationship', 46),
-        ('causal_click_mapping', 46),
-        ('constraint_decoder', 46),
         ('constraint_satisfaction', 46),
         ('object_color_targeting', 47),
+        ('goal_progress', 47),
         ('controlled_movement_planning', 47),
         ('spatial_map', 47),
         ('embedding_suggestion', 48),
@@ -337,6 +341,8 @@ ORDERING_PRESETS = {
     # (FT09, VC33). Prioritises visual analysis, click-effect learning,
     # and constraint satisfaction over movement-oriented rungs.
     'action6_only': [
+        # CLASSIFY (Priority 1)
+        ('game_classifier', 1),
         # EMERGENCY (Priority 1-5)
         ('infinite_loop_breaker', 1),
         ('coordinate_oscillation', 2),
@@ -351,12 +357,14 @@ ORDERING_PRESETS = {
         ('survey', 10),
         # CLICK BEHAVIOUR (Priority 15-30) — apply learned patterns
         ('click_behavior_learning', 15),
-        ('causal_click_mapping', 16),
         ('object_color_targeting', 17),
         ('interactable_tile_discovery', 18),
-        # CONSTRAINT SOLVING (Priority 30-45)
+        # EXTRACT_GOAL + MAP_EFFECTS + PLAN (Priority 27-35)
+        ('solver_goal_extraction', 27),
+        ('constraint_decoder', 28),
+        ('causal_click_mapping', 29),
         ('constraint_satisfaction', 30),
-        ('constraint_decoder', 31),
+        ('goal_progress', 31),
         ('goal_relationship_modeling', 32),
         ('near_miss_analyzer', 33),
         ('completion_prediction', 34),
@@ -1433,6 +1441,19 @@ class DecisionRungSystem:
         emergency_result = self._check_emergency_rungs(game_state, context)
         if emergency_result is not None:
             return emergency_result
+
+        # Context-setter rungs: rungs with confidence_threshold=0.0 that
+        # enrich context['world_model'] as side effects but never propose
+        # actions. Must run before the cognitive router selects action rungs,
+        # otherwise CLASSIFY/EXTRACT_GOAL/VERIFY chains are broken.
+        for rung in sorted(self.rungs, key=lambda r: r.get_priority()):
+            if not rung.enabled or rung.name in self.EMERGENCY_RUNG_NAMES:
+                continue
+            if getattr(rung, 'confidence_threshold', 0.1) == 0.0:
+                try:
+                    rung.evaluate(game_state, context)
+                except Exception:
+                    pass
 
         # Replay fast-path
         active_seq = context.get('active_sequence')

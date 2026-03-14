@@ -289,10 +289,12 @@ class ResultRecorder:
             rules_learned = world_model.get('rules_learned', [])
             symbolic_state = world_model.get('symbolic_state')
 
-            # Serialize objects_json: causal_map + rules_learned
+            # Serialize objects_json: causal_map + rules_learned + H38 data
+            no_effect_positions = world_model.get('no_effect_positions', {})
             objects_payload = {
                 'causal_map': causal_map,
                 'rules_learned': rules_learned,
+                'no_effect_positions': no_effect_positions,
             }
             objects_json = json.dumps(objects_payload, default=str)
 

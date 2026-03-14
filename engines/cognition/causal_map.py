@@ -217,6 +217,12 @@ class CausalMap:
         # Total steps for surprise event numbering
         self._total_steps: int = 0
 
+        # ─── Solver-Seeded Knowledge (H34) ────────────────────────────
+        # Per-level ordered list of positions from solver sequences.
+        # Used by H26 pixel targeting as high-priority click targets.
+        self._solver_targets: Dict[int, List[Tuple[int, int]]] = {}
+        # {level_number: [(x1,y1), (x2,y2), ...]} -- solver click order
+
     # ─── Public Properties ────────────────────────────────────────────
 
     @property
@@ -243,6 +249,10 @@ class CausalMap:
     def plan_step(self) -> int:
         """Current step in the plan."""
         return self._plan_step
+
+    def get_solver_targets(self, level: int) -> List[Tuple[int, int]]:
+        """Get solver-seeded target positions for a specific level."""
+        return self._solver_targets.get(level, [])
 
     # ─── Reading the Map (for PERCEIVE channel 5) ────────────────────
 

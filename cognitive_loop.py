@@ -597,8 +597,117 @@ class CognitiveLoop:
                         except Exception:
                             continue
 
+                    # ── Load solver targets (H34) ──
+                    solver_targets_data = data.get('solver_targets', {})
+                    for level_str, positions in solver_targets_data.items():
+                        try:
+                            level_num = int(level_str)
+                            parsed = [
+                                (int(p[0]), int(p[1]))
+                                for p in positions
+                                if isinstance(p, (list, tuple)) and len(p) == 2
+                            ]
+                            if parsed:
+                                causal_map._solver_targets[level_num] = parsed
+                        except (ValueError, TypeError):
+                            continue
+
         except Exception as e:
             logger.debug(f"[PRIOR-KNOWLEDGE] World model load failed: {e}")
+
+        # ─── 1b. Load solver-seeded knowledge (H34) ───────────────────
+        # Solver seeds are stored under state_id "wms_{game_type}_best"
+        # with game_id "{game_type}-solver". They may not be found by
+        # the regular exact/LIKE queries above if older entries exist.
+        if not causal_map._solver_targets:
+            try:
+                solver_state_id = f"wms_{game_type}_best"
+                solver_rows = self._db.execute_query("""
+                    SELECT objects_json FROM world_model_states
+                    WHERE state_id = ?
+                    LIMIT 1
+                """, (solver_state_id,))
+
+                if solver_rows:
+                    solver_json = (
+                        solver_rows[0].get('objects_json')
+                        if isinstance(solver_rows[0], dict)
+                        else solver_rows[0][0]
+                    )
+                    if solver_json:
+                        solver_data = json.loads(solver_json)
+                        st_data = solver_data.get('solver_targets', {})
+                        for level_str, positions in st_data.items():
+                            try:
+                                level_num = int(level_str)
+                                parsed = [
+                                    (int(p[0]), int(p[1]))
+                                    for p in positions
+                                    if isinstance(p, (list, tuple))
+                                    and len(p) == 2
+                                ]
+                                if parsed:
+                                    causal_map._solver_targets[level_num] = parsed
+                            except (ValueError, TypeError):
+                                continue
+
+                        # Also load solver effects/rules/walls if main
+                        # query didn't find anything
+                        if effects_loaded == 0:
+                            s_cm = solver_data.get('causal_map', {})
+                            for pos_key, effect_data in s_cm.items():
+                                try:
+                                    parts = pos_key.strip('()').split(',')
+                                    pos = (
+                                        int(parts[0].strip()),
+                                        int(parts[1].strip()),
+                                    )
+                                    observations = effect_data.get(
+                                        'observations', []
+                                    )
+                                    obs_count = effect_data.get(
+                                        'observation_count', 0
+                                    )
+                                    productive = effect_data.get(
+                                        'productive_count', 0
+                                    )
+                                    affected: list = []
+                                    color_transitions: dict = {}
+                                    for obs in observations:
+                                        for ch in obs.get('changes', []):
+                                            cell = (
+                                                ch.get('x', 0),
+                                                ch.get('y', 0),
+                                            )
+                                            if cell not in affected:
+                                                affected.append(cell)
+                                            from_c = ch.get('from_color', 0)
+                                            to_c = ch.get('to_color', 0)
+                                            if cell not in color_transitions:
+                                                color_transitions[cell] = []
+                                            color_transitions[cell].append(
+                                                (from_c, to_c)
+                                            )
+                                    from engines.cognition.causal_map import TileEffect
+                                    causal_map._effects[pos] = TileEffect(
+                                        position=pos,
+                                        affected=affected,
+                                        color_transitions=color_transitions,
+                                        observation_count=max(
+                                            len(observations), obs_count
+                                        ),
+                                        last_frame_changed=True,
+                                        productive_count=productive,
+                                    )
+                                    causal_map._explored.add(pos)
+                                    causal_map._all_positions.add(pos)
+                                    effects_loaded += 1
+                                except Exception:
+                                    continue
+            except Exception as e:
+                logger.debug(
+                    f"[PRIOR-KNOWLEDGE] Solver seed load failed: {e}"
+                )
 
         # ─── 2. Load action effectiveness for this game ──────────────
         try:
@@ -763,10 +872,20 @@ class CognitiveLoop:
             logger.debug(f"[PRIOR-KNOWLEDGE] Cross-game mechanics load failed: {e}")
 
         # ─── Summary ─────────────────────────────────────────────────
-        if effects_loaded > 0 or rules_loaded > 0:
+        solver_target_levels = len(causal_map._solver_targets)
+        if effects_loaded > 0 or rules_loaded > 0 or solver_target_levels > 0:
             self._prior_knowledge_loaded = True
             self._prior_effects_count = effects_loaded
             self._prior_rules_count = rules_loaded
+            if solver_target_levels > 0 and self._verbose:
+                total_targets = sum(
+                    len(v) for v in causal_map._solver_targets.values()
+                )
+                print(
+                    f"    [H34] Solver targets loaded: "
+                    f"{solver_target_levels} levels, "
+                    f"{total_targets} positions"
+                )
 
     # ─── The Main Loop: Perceive -> Think -> Map -> Act ───────────────
 
@@ -2303,11 +2422,97 @@ class CognitiveLoop:
         # switches in VC33, constraint cells in FT09).  50% of actions
         # bypass the rung system: force ACTION6 with pixel-accurate
         # colour-group cycling on raw frame data.
+        #
+        # H34: When solver_targets exist for the current level, 70% of
+        # these actions use solver positions (high-priority scaffolding),
+        # 30% use normal colour-group cycling (exploration).
         has_action6 = (
             self._available_actions
             and 6 in self._available_actions
         )
         if has_action6 and random.random() < 0.50 and percept.frame is not None:
+            # ── H34: Solver target scaffolding ──
+            solver_targets = (
+                self._causal_map.get_solver_targets(self._current_level)
+                if self._causal_map else []
+            )
+            if solver_targets and random.random() < 0.70:
+                # Use solver positions: cycle through in order, wrapping
+                target_idx = self._actions_taken % len(solver_targets)
+                x, y = solver_targets[target_idx]
+                action_num = 6
+                action_data = {'x': x, 'y': y}
+                cf.action_speed = "exploit"
+                cf.action_type = 6
+                cf.action_x = x
+                cf.action_y = y
+                cf.action_reason = (
+                    f"H34 solver-target L{self._current_level}"
+                    f"[{target_idx}/{len(solver_targets)}]"
+                )
+                cf.action_confidence = 0.7
+                cf.action_summary = (
+                    f"SOLVER-SCAFFOLD: Click ({x},{y})"
+                    f" | H34 target #{target_idx}"
+                )
+                return action_num, action_data
+
+            # ── H38: Interactive position preference ──
+            # If causal_map has known interactive positions, 60% of
+            # non-solver clicks target near them (+/- 2px jitter).
+            # Also collect dead positions to filter from colour groups.
+            _h38_interactive = []
+            _h38_dead = set()
+            try:
+                _wm = getattr(self._context_builder, '_world_model', None)
+                if _wm and isinstance(_wm, dict):
+                    _h38_causal = _wm.get('causal_map', {})
+                    for pos_str in _h38_causal:
+                        try:
+                            parts = pos_str.split(',')
+                            _h38_interactive.append(
+                                (int(parts[0]), int(parts[1])))
+                        except (ValueError, IndexError):
+                            pass
+                    _h38_gk = (
+                        f"{self._game_type}_L{self._current_level}"
+                    )
+                    _h38_ne = _wm.get('no_effect_positions', {})
+                    for pos_str, cnt in _h38_ne.get(_h38_gk, {}).items():
+                        if cnt >= 2:
+                            try:
+                                parts = pos_str.split(',')
+                                _h38_dead.add(
+                                    (int(parts[0]), int(parts[1])))
+                            except (ValueError, IndexError):
+                                pass
+            except Exception:
+                pass
+
+            if _h38_interactive and random.random() < 0.60:
+                # Click near a known interactive position
+                base = random.choice(_h38_interactive)
+                jx = base[0] + random.randint(-2, 2)
+                jy = base[1] + random.randint(-2, 2)
+                jx = max(0, min(63, jx))
+                jy = max(0, min(63, jy))
+                action_num = 6
+                action_data = {'x': jx, 'y': jy}
+                cf.action_speed = "exploit"
+                cf.action_type = 6
+                cf.action_x = jx
+                cf.action_y = jy
+                cf.action_reason = (
+                    f"H38 interactive-near ({base[0]},{base[1]})"
+                )
+                cf.action_confidence = 0.5
+                cf.action_summary = (
+                    f"INTERACTIVE: Click ({jx},{jy})"
+                    f" | H38 near ({base[0]},{base[1]})"
+                )
+                return action_num, action_data
+
+            # ── H26: Colour-group cycling (original or fallback) ──
             try:
                 arr = self._perceiver._to_numpy(percept.frame)
                 if arr is not None and arr.ndim == 3:
@@ -2320,6 +2525,18 @@ class CognitiveLoop:
                         if c_val not in color_groups:
                             color_groups[c_val] = []
                         color_groups[c_val].append((int(xx), int(yy)))
+
+                    # H38: Filter out confirmed dead positions
+                    if _h38_dead and color_groups:
+                        for c_key in list(color_groups.keys()):
+                            filtered = [
+                                p for p in color_groups[c_key]
+                                if p not in _h38_dead
+                            ]
+                            if filtered:
+                                color_groups[c_key] = filtered
+                            # Keep original if ALL positions are dead
+                            # (avoid empty groups)
 
                     if color_groups:
                         area = max(arr.size, 1)
@@ -2494,6 +2711,64 @@ class CognitiveLoop:
                     f" | periodic quadrant discovery"
                 )
                 return action_num, None
+
+        # --- 3d-solver: H34 waypoint-guided navigation for movement games --
+        if movement_actions and self._causal_map:
+            solver_waypoints = self._causal_map.get_solver_targets(
+                self._current_level
+            )
+            if solver_waypoints and self._agent_position:
+                # Find nearest unvisited waypoint
+                ax, ay = self._agent_position
+                best_wp = None
+                best_dist = float('inf')
+                for wx, wy in solver_waypoints:
+                    if (wx, wy) in self._causal_map._visited_positions:
+                        continue
+                    dist = abs(wx - ax) + abs(wy - ay)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_wp = (wx, wy)
+
+                if best_wp is not None:
+                    wx, wy = best_wp
+                    # Pick direction that moves toward waypoint
+                    dx, dy = wx - ax, wy - ay
+                    candidates = []
+                    if dy < 0 and 1 in movement_actions:  # UP
+                        candidates.append((1, abs(dy)))
+                    if dy > 0 and 2 in movement_actions:  # DOWN
+                        candidates.append((2, abs(dy)))
+                    if dx < 0 and 3 in movement_actions:  # LEFT
+                        candidates.append((3, abs(dx)))
+                    if dx > 0 and 4 in movement_actions:  # RIGHT
+                        candidates.append((4, abs(dx)))
+
+                    if candidates:
+                        # Filter out known walls
+                        pos = self._agent_position
+                        open_cands = [
+                            (a, d) for a, d in candidates
+                            if not self._causal_map.is_wall(pos, a)
+                        ]
+                        if open_cands:
+                            candidates = open_cands
+
+                        # Pick direction with largest delta
+                        candidates.sort(key=lambda x: x[1], reverse=True)
+                        action_num = candidates[0][0]
+                        cf.action_speed = "exploit"
+                        cf.action_type = action_num
+                        cf.action_reason = (
+                            f"H34 waypoint ({wx},{wy}) "
+                            f"dist={best_dist}"
+                        )
+                        cf.action_confidence = 0.6
+                        cf.action_summary = (
+                            f"SOLVER-NAV: ACTION{action_num}"
+                            f" | toward ({wx},{wy}) d={best_dist}"
+                        )
+                        return action_num, None
 
         # --- 3d: Wall-avoiding exploration for movement-only games ---
         if movement_actions and self._causal_map:
