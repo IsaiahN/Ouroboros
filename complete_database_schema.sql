@@ -6417,6 +6417,20 @@ CREATE TABLE IF NOT EXISTS phenomenology_trace (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- H41: Rung Affinity Learning via Solver Imitation
+CREATE TABLE IF NOT EXISTS rung_affinity (
+    game_type TEXT NOT NULL,
+    rung_name TEXT NOT NULL,
+    hits INTEGER DEFAULT 0,
+    misses INTEGER DEFAULT 0,
+    total INTEGER DEFAULT 0,
+    affinity REAL DEFAULT 0.0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (game_type, rung_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rung_affinity_game ON rung_affinity(game_type);
+
 -- Performance indexes
 CREATE INDEX IF NOT EXISTS idx_phenomenology_agent ON phenomenology_trace(agent_id);
 CREATE INDEX IF NOT EXISTS idx_phenomenology_game ON phenomenology_trace(game_id);

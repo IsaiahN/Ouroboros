@@ -97,6 +97,23 @@ class CognitiveGamePlayer:
         Mirrors GamePlayer.play_game() signature exactly.
         Preserves all side effects (DB writes, events, etc.).
         """
+        # H41: Create rung affinity model for imitation learning
+        rung_affinity = None
+        try:
+            from engines.cognition.rung_affinity import RungAffinityModel
+            rung_affinity = RungAffinityModel()
+            rung_affinity.load(self._gp.db)
+            # Wire into decision system (for shadow eval during replay)
+            ds = self._gp.decision_system
+            if ds is not None:
+                ds._rung_affinity_model = rung_affinity
+                # Wire into cognitive router (for affinity-driven boost)
+                router = getattr(ds, '_cognitive_router', None)
+                if router is not None:
+                    router.rung_affinity = rung_affinity
+        except Exception as e:
+            logger.debug(f"[H41] Rung affinity init failed: {e}")
+
         # Create cognitive loop
         loop = CognitiveLoop(
             decision_system=self._gp.decision_system,
@@ -651,13 +668,23 @@ class CognitiveGamePlayer:
         # Replace dead avg_score_impact with goal-directed productivity
         self._record_action_productivity(replay, game_id)
 
-        # Extract results
+        # H41: Record online credit for cognitive wins + persist affinity
         levels_completed = 0
         is_win = False
         if last_obs:
             levels_completed = getattr(last_obs, 'levels_completed', 0) or 0
             is_win = last_obs.state == GameState.WIN
         score = levels_completed / win_levels if win_levels > 0 else 0.0
+
+        if rung_affinity is not None:
+            try:
+                game_type = game_id[:4] if len(game_id) >= 4 else game_id
+                ds = self._gp.decision_system
+                if ds is not None and is_win:
+                    ds.record_game_outcome(game_type, won=True)
+                rung_affinity.persist(self._gp.db)
+            except Exception as e:
+                logger.debug(f"[H41] Affinity persist failed: {e}")
 
         return GameResult(
             game_id=game_id, agent_id=agent.agent_id, score=score,
@@ -1374,6 +1401,17 @@ class CognitiveGamePlayer:
         actions_taken = 0
         last_obs = env.observation_space
 
+        # H41: Shadow evaluation setup — evaluate rungs against solver actions
+        shadow_affinity = None
+        shadow_ds = None
+        try:
+            from engines.cognition.rung_affinity import RungAffinityModel
+            shadow_ds = self._gp.decision_system
+            if shadow_ds is not None:
+                shadow_affinity = getattr(shadow_ds, '_rung_affinity_model', None)
+        except Exception:
+            pass
+
         for level_idx, sequence in enumerate(all_sequences):
             if not is_running_fn():
                 break
@@ -1409,6 +1447,36 @@ class CognitiveGamePlayer:
                         action_data = None
 
                 action = getattr(GameAction, f'ACTION{action_num}', GameAction.ACTION1)
+
+                # H41: Shadow-evaluate all rungs against solver action
+                # This runs BEFORE env.step — observation is the pre-action state.
+                # The solver action is known-correct; we ask each rung:
+                # "would you have suggested this same action?"
+                if shadow_affinity is not None and shadow_ds is not None:
+                    solver_action_str = f'ACTION{action_num}'
+                    available = getattr(last_obs, 'available_actions', None) or [1, 2, 3, 4, 5, 6]
+                    minimal_context = {
+                        'game_type': game_type,
+                        'game_id': game_id,
+                        'level': level_idx + 1,
+                        'available_actions': available,
+                        'is_action6_only_game': (available == [6]),
+                        'action6_available': (6 in available),
+                    }
+                    for rung in shadow_ds.rungs:
+                        if not rung.enabled:
+                            continue
+                        if rung.name in shadow_ds.EMERGENCY_RUNG_NAMES:
+                            continue
+                        try:
+                            result = rung.evaluate(last_obs, minimal_context)
+                            hit = (
+                                result.action == solver_action_str
+                                and result.confidence > 0
+                            )
+                            shadow_affinity.record(game_type, rung.name, hit)
+                        except Exception:
+                            pass
 
                 # Execute with retry
                 new_obs = None
@@ -1488,6 +1556,13 @@ class CognitiveGamePlayer:
                 """, (mut_id, game_type, scaffold_level - 1, scaffold_level,
                       len(scaffold_seq), n_follow, len(explore_idx),
                       outcome, agent.agent_id, current_generation))
+            except Exception:
+                pass
+
+        # H41: Persist shadow evaluation data from replay
+        if shadow_affinity is not None:
+            try:
+                shadow_affinity.persist(self._gp.db)
             except Exception:
                 pass
 

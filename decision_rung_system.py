@@ -639,6 +639,9 @@ class DecisionRungSystem:
         if cognitive_router is not None:
             _load_cognitive_router()
 
+        # H41: Rung affinity model for imitation learning
+        self._rung_affinity_model: Optional[Any] = None
+
         # Load default ordering
         self._suppress_ordering_deprecation = (self.strategy == DecisionStrategy.COGNITIVE)
         self.load_ordering('comprehensive')
@@ -1461,6 +1464,29 @@ class DecisionRungSystem:
         if active_seq and seq_pos < len(active_seq) and context.get('is_replay'):
             seq_action = active_seq[seq_pos]
             if is_action_available(seq_action, context):
+                # H41: Shadow-evaluate all rungs against solver action
+                # This is the imitation learning signal — which rungs would
+                # have produced the same action the solver chose?
+                if self._rung_affinity_model is not None:
+                    game_type = context.get('game_type', '')
+                    if game_type:
+                        for rung in self.rungs:
+                            if not rung.enabled:
+                                continue
+                            if rung.name in self.EMERGENCY_RUNG_NAMES:
+                                continue
+                            try:
+                                result = rung.evaluate(game_state, context)
+                                hit = (
+                                    result.action == seq_action
+                                    and result.confidence > 0
+                                )
+                                self._rung_affinity_model.record(
+                                    game_type, rung.name, hit
+                                )
+                            except Exception:
+                                pass
+
                 rung_name = 'three_try_sequence'
                 self.rung_wins[rung_name] = self.rung_wins.get(rung_name, 0) + 1
                 rung_obj = next((r for r in self.rungs if r.name == rung_name), None)
@@ -1644,6 +1670,22 @@ class DecisionRungSystem:
             import traceback
             logger.error(f"[COGNITIVE] Router error: {e}, falling back to context_adaptive\n{traceback.format_exc()}")
             return self._decide_context_adaptive(game_state, context)
+
+    # ── H41: Online credit assignment ────────────────────────────────────────
+
+    def record_game_outcome(self, game_type: str, won: bool) -> None:
+        """Credit winning rungs from this game to the affinity model.
+
+        Called at end of cognitive (non-replay) games. Winning rungs
+        get 'hit' credit; this complements shadow evaluation during replay.
+        """
+        if self._rung_affinity_model is None or not won or not game_type:
+            return
+        for rung_name, count in self.rung_wins.items():
+            if rung_name == 'three_try_sequence':
+                continue  # Skip replay rung — not a cognitive rung
+            for _ in range(count):
+                self._rung_affinity_model.record(game_type, rung_name, hit=True)
 
     # ── Stats & experiments ──────────────────────────────────────────────────
 

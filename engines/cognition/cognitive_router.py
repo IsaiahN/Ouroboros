@@ -551,6 +551,9 @@ class CognitiveRouter:
         # Tracks traversals with FeltState context for intelligent path learning
         self.graph_evolution = _GraphEvolution() if _GRAPH_EVOLUTION_AVAILABLE else None
 
+        # H41: Rung affinity model for learned priority boosting
+        self.rung_affinity: Optional[Any] = None
+
         # Phase 12: Path Crystallization for shortcutting known-good paths
         self.path_crystallizer: Optional[Any] = None
         try:
@@ -907,26 +910,41 @@ class CognitiveRouter:
                 break  # Algorithm returned nothing - exit loop
 
             # =================================================================
-            # CLICK-GAME ROUTING BOOST: When available_actions == [6],
-            # ensure click-specific rungs are evaluated early in the batch.
-            # Without this, click rungs compete uniformly with 60+ other
-            # rungs and may never be reached before the decision commits.
+            # H41: AFFINITY-DRIVEN RUNG BOOST (replaces hardcoded click boost)
+            # Uses learned rung affinities from solver imitation to boost
+            # high-affinity rungs for the current game type. Falls back to
+            # hardcoded click boost when no affinity data exists yet.
             # =================================================================
-            available_actions = list(game_state.get('available_actions', []))
-            if available_actions == [6]:
-                _CLICK_BOOST_RUNGS = frozenset({
-                    'causal_click_mapping', 'constraint_satisfaction',
-                    'constraint_decoder', 'object_color_targeting',
-                    'click_behavior_learning', 'action6_object_exploration',
-                })
-                # Find click rungs in frontier but NOT already in next_rungs
-                missing_click_rungs = [
-                    r for r in _CLICK_BOOST_RUNGS
-                    if r in frontier and r not in set(next_rungs)
-                ]
-                if missing_click_rungs:
-                    # Prepend them to the batch so they get evaluated first
-                    next_rungs = missing_click_rungs + list(next_rungs)
+            next_rungs_set = set(next_rungs)
+            game_type = game_state.get('game_type', '')
+            affinity_boosted = False
+
+            if self.rung_affinity and game_type:
+                boost_rungs = self.rung_affinity.get_boost_rungs(game_type)
+                if boost_rungs:
+                    missing_boost = [
+                        r for r in boost_rungs
+                        if r in frontier and r not in next_rungs_set
+                    ]
+                    if missing_boost:
+                        next_rungs = missing_boost + list(next_rungs)
+                        affinity_boosted = True
+
+            # Fallback: hardcoded click-game boost (pre-H41 behavior)
+            if not affinity_boosted:
+                available_actions = list(game_state.get('available_actions', []))
+                if available_actions == [6]:
+                    _CLICK_BOOST_RUNGS = frozenset({
+                        'causal_click_mapping', 'constraint_satisfaction',
+                        'constraint_decoder', 'object_color_targeting',
+                        'click_behavior_learning', 'action6_object_exploration',
+                    })
+                    missing_click_rungs = [
+                        r for r in _CLICK_BOOST_RUNGS
+                        if r in frontier and r not in next_rungs_set
+                    ]
+                    if missing_click_rungs:
+                        next_rungs = missing_click_rungs + list(next_rungs)
 
             # =================================================================
             # BATCH EVALUATION: Evaluate top-K candidates in one pass
