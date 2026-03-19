@@ -1116,13 +1116,17 @@ class ContextBuilder:
                             self._world_model['solver_goal_states'] = seed_goals
                         if seed_no_effect:
                             self._world_model['no_effect_positions'] = seed_no_effect
-                # Also load solver-seeded knowledge (wms_*_best) if goal_states
-                # not found in the most recent entry (gameplay entries override it)
+                        # H39b: Load LS20 level configs if present
+                        seed_level_configs = stored.get('solver_level_configs', {})
+                        if seed_level_configs:
+                            self._world_model['solver_level_configs'] = seed_level_configs
+                # Load solver-seeded knowledge from dedicated solver_seed_*
+                # entry (separate from runtime wms_*_best to avoid overwrites)
                 if 'solver_goal_states' not in self._world_model:
                     solver_rows = self._db.execute_query("""
                         SELECT objects_json FROM world_model_states
                         WHERE state_id = ?
-                    """, (f"wms_{game_prefix}_best",))
+                    """, (f"solver_seed_{game_prefix}",))
                     if solver_rows and solver_rows[0].get('objects_json'):
                         import json as _json2
                         solver_stored = _json2.loads(
@@ -1131,6 +1135,10 @@ class ContextBuilder:
                             sg = solver_stored.get('goal_states', {})
                             if sg:
                                 self._world_model['solver_goal_states'] = sg
+                            # H39b: Load LS20 level configs (targets, changers, init)
+                            slc = solver_stored.get('solver_level_configs', {})
+                            if slc:
+                                self._world_model['solver_level_configs'] = slc
             except Exception:
                 pass  # Non-critical: seeding failure is fine, start fresh
 

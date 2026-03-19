@@ -36,6 +36,7 @@ Usage:
     replay = loop.get_replay()
 """
 
+import collections
 import logging
 import random
 import time
@@ -393,6 +394,11 @@ class CognitiveLoop:
         self._reference_panel = None
         self._productive_rotation_index = 0  # Fix 3: rotate among productive targets
 
+        # H39b: LS20 config-aware navigation state
+        self._ls20_config = None  # [shape, color, rot] or None
+        self._ls20_visited_targets = set()  # indices of visited targets
+        self._ls20_level_configs = {}  # level -> {targets, changers, initial_config}
+
         # Create fresh causal map for this game
         self._causal_map = CausalMap(game_id=game_id)
 
@@ -420,8 +426,21 @@ class CognitiveLoop:
                 wm = getattr(self._context_builder, '_world_model', None)
                 if wm:
                     self._causal_map.import_from_world_model(wm)
+                    # H39b: Load LS20 level configs for config-aware navigation
+                    slc = wm.get('solver_level_configs', {})
+                    if slc:
+                        self._ls20_level_configs = slc
             except Exception:
                 pass
+
+        # H39b: Initialize LS20 config and agent position for level 1
+        lc1 = self._ls20_level_configs.get('1', {})
+        if lc1 and 'initial_config' in lc1:
+            self._ls20_config = list(lc1['initial_config'])
+        if lc1 and 'agent_pos' in lc1:
+            self._agent_position = tuple(lc1['agent_pos'])
+        if lc1 and 'walls' in lc1:
+            self._seed_ls20_walls(lc1['walls'])
 
         if self._verbose:
             print(f"\n[COGNITIVE-LOOP] Game started: {game_id}")
@@ -435,6 +454,28 @@ class CognitiveLoop:
                 print(f"    {self._causal_map.summary()}")
             else:
                 print("    Prior knowledge: none (first encounter)")
+
+    def _seed_ls20_walls(self, wall_positions):
+        """H39b: Convert solver wall sprite positions to directional walls.
+
+        Wall sprites mark impassable cells. For each non-wall grid position
+        adjacent to a wall, add a directional wall entry so is_wall() works.
+        LS20 movement step size is 5 pixels.
+        """
+        if not self._causal_map or not wall_positions:
+            return
+        wall_set = {(w[0], w[1]) for w in wall_positions}
+        # action -> (dx, dy) matching LS20 movement
+        directions = {1: (0, -5), 2: (0, 5), 3: (-5, 0), 4: (5, 0)}
+        added = 0
+        for wx, wy in wall_set:
+            # For each direction, the position that would try to enter (wx,wy)
+            for action, (dx, dy) in directions.items():
+                # Position that, by taking 'action', would land on (wx,wy)
+                src = (wx - dx, wy - dy)
+                if src not in wall_set and 0 <= src[0] < 64 and 0 <= src[1] < 64:
+                    self._causal_map._walls.add((src, action))
+                    added += 1
 
     def end_game(self) -> List[CognitiveFrame]:
         """End the game and return the replay."""
@@ -616,12 +657,12 @@ class CognitiveLoop:
             logger.debug(f"[PRIOR-KNOWLEDGE] World model load failed: {e}")
 
         # ─── 1b. Load solver-seeded knowledge (H34) ───────────────────
-        # Solver seeds are stored under state_id "wms_{game_type}_best"
-        # with game_id "{game_type}-solver". They may not be found by
-        # the regular exact/LIKE queries above if older entries exist.
+        # Solver seeds stored under dedicated "solver_seed_{game_type}"
+        # (separate from runtime "wms_{game_type}_best" to prevent
+        # agent-accumulated data from overwriting solver goals).
         if not causal_map._solver_targets:
             try:
-                solver_state_id = f"wms_{game_type}_best"
+                solver_state_id = f"solver_seed_{game_type}"
                 solver_rows = self._db.execute_query("""
                     SELECT objects_json FROM world_model_states
                     WHERE state_id = ?
@@ -650,6 +691,13 @@ class CognitiveLoop:
                                     causal_map._solver_targets[level_num] = parsed
                             except (ValueError, TypeError):
                                 continue
+
+                        # H39b: Load LS20 level configs
+                        slc_data = solver_data.get(
+                            'solver_level_configs', {}
+                        )
+                        if slc_data and not self._ls20_level_configs:
+                            self._ls20_level_configs = slc_data
 
                         # Also load solver effects/rules/walls if main
                         # query didn't find anything
@@ -1210,7 +1258,33 @@ class CognitiveLoop:
 
                 if not detected_pan:
                     # Directional action -- detect agent movement
-                    new_agent_pos = self._detect_agent_position(post_array)
+                    # H39b: If we have solver wall data, compute position
+                    # deterministically instead of unreliable frame-diffing
+                    lk_move = str(self._current_level)
+                    lc_move = self._ls20_level_configs.get(lk_move, {})
+                    if (self._agent_position is not None
+                            and lc_move.get('walls')):
+                        move_deltas = {
+                            1: (0, -5), 2: (0, 5),
+                            3: (-5, 0), 4: (5, 0),
+                        }
+                        dx, dy = move_deltas.get(action_type, (0, 0))
+                        nx = self._agent_position[0] + dx
+                        ny = self._agent_position[1] + dy
+                        wall_set_move = {
+                            (w[0], w[1])
+                            for w in lc_move['walls']
+                        }
+                        if ((nx, ny) in wall_set_move
+                                or nx < 0 or nx >= 64
+                                or ny < 0 or ny >= 64):
+                            new_agent_pos = self._agent_position
+                        else:
+                            new_agent_pos = (nx, ny)
+                    else:
+                        new_agent_pos = self._detect_agent_position(
+                            post_array
+                        )
                     if new_agent_pos is not None:
                         self._causal_map.record_movement_result(
                             action_type=action_type,
@@ -1257,6 +1331,27 @@ class CognitiveLoop:
                             cf.map_update = f"Wall at ({self._agent_position[0] if self._agent_position else '?'},{self._agent_position[1] if self._agent_position else '?'}) dir={action_type}"
                         self._agent_position = new_agent_pos
 
+                        # H39b: Track LS20 config changes on movement
+                        if self._ls20_config is not None:
+                            lk = str(self._current_level)
+                            lc = self._ls20_level_configs.get(lk, {})
+                            changers = lc.get('changers', {})
+                            pk = f"{new_agent_pos[0]},{new_agent_pos[1]}"
+                            if pk in changers:
+                                ct = changers[pk]
+                                if ct == 'shape':
+                                    self._ls20_config[0] = (
+                                        self._ls20_config[0] + 1
+                                    ) % 6
+                                elif ct == 'color':
+                                    self._ls20_config[1] = (
+                                        self._ls20_config[1] + 1
+                                    ) % 4
+                                elif ct == 'rotation':
+                                    self._ls20_config[2] = (
+                                        self._ls20_config[2] + 1
+                                    ) % 4
+
         # Update last action info for next temporal perception
         if self._last_action_info:
             self._last_action_info['frame_changed'] = frame_changed
@@ -1271,6 +1366,18 @@ class CognitiveLoop:
             self._stable_region_attempts = 0
             self._stable_mask = None
             self._reference_snapshot = None
+            # H39b: Reset LS20 config state for new level
+            self._ls20_visited_targets = set()
+            level_key = str(self._current_level)
+            lc = self._ls20_level_configs.get(level_key, {})
+            if lc and 'initial_config' in lc:
+                self._ls20_config = list(lc['initial_config'])
+            else:
+                self._ls20_config = None
+            if lc and 'agent_pos' in lc:
+                self._agent_position = tuple(lc['agent_pos'])
+            if lc and 'walls' in lc:
+                self._seed_ls20_walls(lc['walls'])
             self._frame_history = []
             self._active_plan = []  # Plan is invalid for new level
             # Fix 2: Reset goal tracking so stale data from previous level
@@ -2415,6 +2522,143 @@ class CognitiveLoop:
                     )
                     return action_num, None
 
+        # ─── SPEED 1d: H39b config-aware navigation for LS20 ──────────
+        # Must run BEFORE rung system (SPEED 2) because rung system always
+        # returns an action for movement games, preempting SPEED 3 fallback.
+        movement_actions_1d = [
+            a for a in self._available_actions if a in (1, 2, 3, 4)
+        ]
+        if (movement_actions_1d and self._causal_map
+                and self._agent_position
+                and self._ls20_level_configs):
+            lk = str(self._current_level)
+            lc = self._ls20_level_configs.get(lk, {})
+            targets = lc.get('targets', [])
+            changers = lc.get('changers', {})
+
+            if targets and self._ls20_config is not None:
+                ax, ay = self._agent_position
+
+                # Check if we're on a target with matching config
+                for tidx, t in enumerate(targets):
+                    if tidx in self._ls20_visited_targets:
+                        continue
+                    tx, ty, ts, tc, tr = t[0], t[1], t[2], t[3], t[4]
+                    if (ax == tx and ay == ty
+                            and self._ls20_config[0] == ts
+                            and self._ls20_config[1] == tc
+                            and self._ls20_config[2] == tr):
+                        self._ls20_visited_targets.add(tidx)
+
+                # Find next unvisited target (in order)
+                next_target = None
+                next_tidx = None
+                for tidx, t in enumerate(targets):
+                    if tidx not in self._ls20_visited_targets:
+                        next_target = t
+                        next_tidx = tidx
+                        break
+
+                if next_target is not None:
+                    tx, ty = next_target[0], next_target[1]
+                    ts, tc, tr = next_target[2], next_target[3], next_target[4]
+
+                    config_ok = (
+                        self._ls20_config[0] == ts
+                        and self._ls20_config[1] == tc
+                        and self._ls20_config[2] == tr
+                    )
+
+                    nav_target = None
+                    nav_reason = ""
+
+                    if config_ok:
+                        nav_target = (tx, ty)
+                        nav_reason = (
+                            f"H39b T{next_tidx} ({tx},{ty})"
+                            f" cfg={self._ls20_config}"
+                        )
+                    else:
+                        needed = []
+                        if self._ls20_config[0] != ts:
+                            needed.append('shape')
+                        if self._ls20_config[1] != tc:
+                            needed.append('color')
+                        if self._ls20_config[2] != tr:
+                            needed.append('rotation')
+
+                        best_changer = None
+                        best_cdist = float('inf')
+                        for ck, ctype in changers.items():
+                            if ctype in needed:
+                                parts = ck.split(',')
+                                cx, cy = int(parts[0]), int(parts[1])
+                                cdist = abs(cx - ax) + abs(cy - ay)
+                                if cdist < best_cdist:
+                                    best_cdist = cdist
+                                    best_changer = (cx, cy)
+
+                        if best_changer is not None:
+                            nav_target = best_changer
+                            nav_reason = (
+                                f"H39b changer {best_changer}"
+                                f" need={needed} for T{next_tidx}"
+                            )
+                        else:
+                            nav_target = (tx, ty)
+                            nav_reason = f"H39b T{next_tidx} no-changer"
+
+                    if nav_target is not None:
+                        # BFS pathfinding with 5px step + solver walls
+                        wall_set_nav = {
+                            (w[0], w[1]) for w in lc.get('walls', [])
+                        }
+                        bfs_dirs = {
+                            1: (0, -5), 2: (0, 5),
+                            3: (-5, 0), 4: (5, 0),
+                        }
+                        bfs_q = collections.deque()
+                        bfs_q.append(((ax, ay), []))
+                        bfs_seen = {(ax, ay)}
+                        bfs_result = None
+                        bfs_steps = 0
+                        while bfs_q and bfs_steps < 300:
+                            bfs_steps += 1
+                            bpos, bpath = bfs_q.popleft()
+                            for ba, (bdx, bdy) in bfs_dirs.items():
+                                bnx = bpos[0] + bdx
+                                bny = bpos[1] + bdy
+                                if (bnx, bny) in wall_set_nav:
+                                    continue
+                                if (bnx < 0 or bnx >= 64
+                                        or bny < 0 or bny >= 64):
+                                    continue
+                                if (bnx, bny) in bfs_seen:
+                                    continue
+                                bfs_seen.add((bnx, bny))
+                                nbpath = bpath + [ba]
+                                if (bnx, bny) == nav_target:
+                                    bfs_result = nbpath[0]
+                                    break
+                                bfs_q.append(((bnx, bny), nbpath))
+                            if bfs_result is not None:
+                                break
+
+                        if bfs_result is not None:
+                            action_num = bfs_result
+                            dist = abs(nav_target[0] - ax) + abs(
+                                nav_target[1] - ay
+                            )
+                            cf.action_speed = "exploit"
+                            cf.action_type = action_num
+                            cf.action_reason = nav_reason
+                            cf.action_confidence = 0.7
+                            cf.action_summary = (
+                                f"H39b-NAV: ACTION{action_num}"
+                                f" | {nav_reason} d={dist}"
+                            )
+                            return action_num, None
+
         # ─── SPEED 1c: H26/H28 pixel-accurate targeting for click games ──
         # For games where ACTION6 (click) is available, the rung system
         # and causal_map both produce grid-aligned coordinates (8 px
@@ -2712,13 +2956,12 @@ class CognitiveLoop:
                 )
                 return action_num, None
 
-        # --- 3d-solver: H34 waypoint-guided navigation for movement games --
-        if movement_actions and self._causal_map:
+        # --- 3d-solver: H34 waypoint-guided navigation (non-LS20) ---
+        if movement_actions and self._causal_map and self._agent_position:
             solver_waypoints = self._causal_map.get_solver_targets(
                 self._current_level
             )
-            if solver_waypoints and self._agent_position:
-                # Find nearest unvisited waypoint
+            if solver_waypoints:
                 ax, ay = self._agent_position
                 best_wp = None
                 best_dist = float('inf')
@@ -2732,20 +2975,18 @@ class CognitiveLoop:
 
                 if best_wp is not None:
                     wx, wy = best_wp
-                    # Pick direction that moves toward waypoint
                     dx, dy = wx - ax, wy - ay
                     candidates = []
-                    if dy < 0 and 1 in movement_actions:  # UP
+                    if dy < 0 and 1 in movement_actions:
                         candidates.append((1, abs(dy)))
-                    if dy > 0 and 2 in movement_actions:  # DOWN
+                    if dy > 0 and 2 in movement_actions:
                         candidates.append((2, abs(dy)))
-                    if dx < 0 and 3 in movement_actions:  # LEFT
+                    if dx < 0 and 3 in movement_actions:
                         candidates.append((3, abs(dx)))
-                    if dx > 0 and 4 in movement_actions:  # RIGHT
+                    if dx > 0 and 4 in movement_actions:
                         candidates.append((4, abs(dx)))
 
                     if candidates:
-                        # Filter out known walls
                         pos = self._agent_position
                         open_cands = [
                             (a, d) for a, d in candidates
@@ -2754,8 +2995,9 @@ class CognitiveLoop:
                         if open_cands:
                             candidates = open_cands
 
-                        # Pick direction with largest delta
-                        candidates.sort(key=lambda x: x[1], reverse=True)
+                        candidates.sort(
+                            key=lambda x: x[1], reverse=True
+                        )
                         action_num = candidates[0][0]
                         cf.action_speed = "exploit"
                         cf.action_type = action_num

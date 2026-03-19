@@ -312,15 +312,25 @@ def seed_vc33(solver_seqs):
 
 
 def seed_ls20(solver_seqs):
-    """Run LS20 solver sequences, observe movement walls and paths."""
+    """Run LS20 solver sequences, observe movement walls and paths.
+
+    H39b: Also extracts structured level info (targets with required configs,
+    config changer positions, initial player config) for cognitive navigation.
+    """
     sys.path.insert(0, ls20_dir)
+    # ls20_solve.py is in manual_tools/ (sibling file)
+    manual_tools_dir = os.path.dirname(os.path.abspath(__file__))
+    if manual_tools_dir not in sys.path:
+        sys.path.insert(0, manual_tools_dir)
     from arcengine import ActionInput, GameAction
     from ls20 import Ls20
+    from ls20_solve import extract_level_info
 
     walls = []  # [(pos, action)]
     open_paths = set()
     visited = set()
     solver_targets = {}  # level -> [(x,y), ...]
+    solver_level_configs = {}  # H39b: level -> {targets, changers, initial_config}
 
     action_map = {
         1: GameAction.ACTION1, 2: GameAction.ACTION2,
@@ -344,6 +354,35 @@ def seed_ls20(solver_seqs):
             ai = ActionInput()
             ai.id = action_map[a]
             game.perform_action(ai)
+
+        # H39b: Extract level info BEFORE playing (captures initial state)
+        try:
+            level_info = extract_level_info(game, level_num - 1)
+            solver_level_configs[level_num] = {
+                'agent_pos': list(level_info['agent_pos']),
+                'targets': [
+                    [t[0], t[1], t[2], t[3], t[4]]
+                    for t in level_info['targets']
+                ],
+                'changers': {
+                    f"{x},{y}": ctype
+                    for (x, y), ctype in level_info['changers'].items()
+                },
+                'initial_config': list(level_info['initial_config']),
+                'walls': [
+                    [wx, wy]
+                    for wx, wy in sorted(level_info['walls'])
+                ],
+            }
+            n_targets = len(level_info['targets'])
+            n_changers = len(level_info['changers'])
+            print(f"  LS20 L{level_num}: {n_targets} targets, "
+                  f"{n_changers} changers, "
+                  f"init=s{level_info['initial_config'][0]}/"
+                  f"c{level_info['initial_config'][1]}/"
+                  f"r{level_info['initial_config'][2]}")
+        except Exception as e:
+            print(f"  LS20 L{level_num}: extract_level_info failed: {e}")
 
         # Play step by step
         prev_x, prev_y = game.mgu.x, game.mgu.y
@@ -386,16 +425,24 @@ def seed_ls20(solver_seqs):
         'walls': walls,
         'rules': rules,
         'solver_targets': {str(k): v for k, v in solver_targets.items()},
+        'solver_level_configs': {
+            str(k): v for k, v in solver_level_configs.items()
+        },
         'completeness': 0.7,
     }
 
 
 def insert_knowledge(db_path, game_type, knowledge):
-    """Insert solver knowledge into world_model_states."""
+    """Insert solver knowledge into world_model_states.
+
+    Uses state_id 'solver_seed_{game_type}' (separate from runtime
+    'wms_{game_type}_best') so agent-accumulated data never overwrites
+    solver-seeded goal_states and solver_targets.
+    """
     conn = sqlite3.connect(db_path)
-    state_id = f"wms_{game_type}_best"
+    state_id = f"solver_seed_{game_type}"
     objects_json = json.dumps(knowledge)
-    step_number = len(knowledge.get('causal_map', {})) + 100  # High priority
+    step_number = len(knowledge.get('causal_map', {})) + 100
 
     conn.execute("""
         INSERT OR REPLACE INTO world_model_states
@@ -443,8 +490,10 @@ def main():
         n_rules = len(knowledge.get('rules', []))
         n_walls = len(knowledge.get('walls', []))
         n_targets = sum(len(v) for v in knowledge.get('solver_targets', {}).values())
+        n_configs = len(knowledge.get('solver_level_configs', {}))
         print(f"  {gt}: {n_effects} effects, {n_rules} rules, "
-              f"{n_walls} walls, {n_targets} solver_target positions")
+              f"{n_walls} walls, {n_targets} solver_target positions"
+              f"{f', {n_configs} level_configs' if n_configs else ''}")
 
     if insert_db:
         print(f"\nInserting into {db_path}...")
