@@ -1,23 +1,25 @@
 """
-Rung Role Taxonomy - Phase 7.2.
+Rung Role Taxonomy - Phase 7.2 + H41 Cognitive Phase Mapping.
 
-Classifies rungs by their role in the universal problem-solving pattern,
-not just their category. This enables:
-1. Abstract pattern extraction (process knowledge)
-2. Transfer learning between domains
-3. Suggesting paths for new game types
+Two complementary taxonomies:
 
-The Four Roles:
-- ENTRY: Low-friction starting points, orientation, broad coverage
-- LEVERAGE: Build on entry points to reach deeper understanding
-- COMPOUNDING: Knowledge spreads, connections multiply
-- RESOLUTION: Path crystallizes, commit to action
+1. **RungRole** (4-tier): Problem-solving progression
+   - ENTRY → LEVERAGE → COMPOUNDING → RESOLUTION
+
+2. **CognitivePhase** (7-phase): Solver cognitive pipeline
+   - OBSERVE → CLASSIFY → EXTRACT_GOAL → MAP_EFFECTS → PLAN → EXECUTE → VERIFY
+   - Mirrors the universal pattern behind all solver solutions.
+   - Used by H41 rung affinity to group learned affinities by phase.
 
 Usage:
-    from engines.cognition.rung_roles import RungRole, get_rung_role
+    from engines.cognition.rung_roles import (
+        RungRole, get_rung_role,
+        CognitivePhase, get_cognitive_phase, get_rungs_by_phase,
+    )
 
-    role = get_rung_role("survey")  # Returns RungRole.ENTRY
-    phase_role = get_role_for_phase("exploration")  # Returns RungRole.ENTRY
+    role = get_rung_role("survey")           # RungRole.ENTRY
+    phase = get_cognitive_phase("survey")    # CognitivePhase.OBSERVE
+    plan_rungs = get_rungs_by_phase(CognitivePhase.PLAN)  # [...]
 """
 # RULE 1: PYTHONDONTWRITEBYTECODE=1 (no .pyc files)
 import sys
@@ -77,84 +79,292 @@ class RungRole(Enum):
 
 
 # =============================================================================
-# RUNG ROLE MAPPING
+# COGNITIVE PHASE ENUM — The 7-Phase Solver Pipeline
 # =============================================================================
 
-# Map rungs to their primary role in problem-solving
-# Based on Part 4 taxonomy analysis
+class CognitivePhase(Enum):
+    """
+    The 7-phase cognitive pipeline behind all solver solutions.
+
+    OBSERVE → CLASSIFY → EXTRACT_GOAL → MAP_EFFECTS → PLAN → EXECUTE → VERIFY
+
+    Each rung participates primarily in one phase. Context-setter rungs
+    (confidence=0.0) are pure phase contributions. Action-proposing rungs
+    participate in their phase AND implicitly in EXECUTE.
+
+    Used by H41 rung affinity to report phase-level coverage per game type.
+    """
+    OBSERVE = "observe"            # Perceive state, detect features
+    CLASSIFY = "classify"          # Determine game type, mechanics, problem class
+    EXTRACT_GOAL = "extract_goal"  # Identify target state, constraints
+    MAP_EFFECTS = "map_effects"    # Learn action → outcome mappings
+    PLAN = "plan"                  # Compute action sequence toward goal
+    EXECUTE = "execute"            # Select and commit to next action
+    VERIFY = "verify"              # Check outcome, track progress, detect errors
+
+    def __str__(self) -> str:
+        return self.value
+
+    @property
+    def description(self) -> str:
+        descriptions = {
+            CognitivePhase.OBSERVE: "Perceive game state, extract visual features",
+            CognitivePhase.CLASSIFY: "Determine game type and problem class",
+            CognitivePhase.EXTRACT_GOAL: "Identify target state and constraints",
+            CognitivePhase.MAP_EFFECTS: "Learn what each action does",
+            CognitivePhase.PLAN: "Compute optimal action sequence",
+            CognitivePhase.EXECUTE: "Select and commit to action",
+            CognitivePhase.VERIFY: "Check outcome against prediction",
+        }
+        return descriptions[self]
+
+    @property
+    def maps_to_role(self) -> RungRole:
+        """Which RungRole this phase most naturally maps to."""
+        mapping = {
+            CognitivePhase.OBSERVE: RungRole.ENTRY,
+            CognitivePhase.CLASSIFY: RungRole.ENTRY,
+            CognitivePhase.EXTRACT_GOAL: RungRole.LEVERAGE,
+            CognitivePhase.MAP_EFFECTS: RungRole.LEVERAGE,
+            CognitivePhase.PLAN: RungRole.COMPOUNDING,
+            CognitivePhase.EXECUTE: RungRole.RESOLUTION,
+            CognitivePhase.VERIFY: RungRole.COMPOUNDING,
+        }
+        return mapping[self]
+
+
+# =============================================================================
+# COGNITIVE PHASE MAP — Every real rung → its primary phase
+# =============================================================================
+
+# Maps all actual rung names (from rung registries) to their primary cognitive
+# phase. Rungs may contribute to multiple phases, but this records the PRIMARY
+# phase where the rung's core logic lives.
+COGNITIVE_PHASE_MAP: Dict[str, CognitivePhase] = {
+    # -------------------------------------------------------------------------
+    # OBSERVE: Perceive state, detect features, scan environment
+    # -------------------------------------------------------------------------
+    "survey": CognitivePhase.OBSERVE,
+    "frame_interpretation": CognitivePhase.OBSERVE,
+    "sparse_grid": CognitivePhase.OBSERVE,
+    "palette_detection": CognitivePhase.OBSERVE,
+    "affordance_detection": CognitivePhase.OBSERVE,
+    "visual_analyzer": CognitivePhase.OBSERVE,
+    "network_object_inventory": CognitivePhase.OBSERVE,
+    "action6_object_exploration": CognitivePhase.OBSERVE,
+    "exploration_phase": CognitivePhase.OBSERVE,
+    "grid_exploration": CognitivePhase.OBSERVE,
+    "control_tracker": CognitivePhase.OBSERVE,
+    "questioning_engine": CognitivePhase.OBSERVE,
+    "network_exploration_stats": CognitivePhase.OBSERVE,
+    "self_trust_boost": CognitivePhase.OBSERVE,
+
+    # -------------------------------------------------------------------------
+    # CLASSIFY: Determine game type, problem class, click semantics
+    # -------------------------------------------------------------------------
+    "game_classifier": CognitivePhase.CLASSIFY,
+    "sensation_engine": CognitivePhase.CLASSIFY,
+    "two_streams": CognitivePhase.CLASSIFY,
+
+    # -------------------------------------------------------------------------
+    # EXTRACT_GOAL: Identify target state, constraints, subgoals
+    # -------------------------------------------------------------------------
+    "solver_goal_extraction": CognitivePhase.EXTRACT_GOAL,
+    "constraint_decoder": CognitivePhase.EXTRACT_GOAL,
+    "interactable_tile_discovery": CognitivePhase.EXTRACT_GOAL,
+    "goal_relationship_modeling": CognitivePhase.EXTRACT_GOAL,
+    "valence_goals": CognitivePhase.EXTRACT_GOAL,
+    "subgoal_planning": CognitivePhase.EXTRACT_GOAL,
+
+    # -------------------------------------------------------------------------
+    # MAP_EFFECTS: Learn action → outcome, build causal model
+    # -------------------------------------------------------------------------
+    "causal_click_mapping": CognitivePhase.MAP_EFFECTS,
+    "click_behavior_learning": CognitivePhase.MAP_EFFECTS,
+    "spatial_relationship": CognitivePhase.MAP_EFFECTS,
+    "event_understanding": CognitivePhase.MAP_EFFECTS,
+    "object_color_targeting": CognitivePhase.MAP_EFFECTS,
+    "hypothesis_system": CognitivePhase.MAP_EFFECTS,
+    "hypothesis_testing": CognitivePhase.MAP_EFFECTS,
+    "scientific_method": CognitivePhase.MAP_EFFECTS,
+    "assumption_formation": CognitivePhase.MAP_EFFECTS,
+    "belief_system": CognitivePhase.MAP_EFFECTS,
+    "resonance_detector": CognitivePhase.MAP_EFFECTS,
+    "symbolic_tracker": CognitivePhase.MAP_EFFECTS,
+    "map_intel_collision": CognitivePhase.MAP_EFFECTS,
+    "effect_prediction": CognitivePhase.MAP_EFFECTS,
+
+    # -------------------------------------------------------------------------
+    # PLAN: Compute action sequence, solve constraints, navigate
+    # -------------------------------------------------------------------------
+    "constraint_satisfaction": CognitivePhase.PLAN,
+    "wall_aware_navigation": CognitivePhase.PLAN,
+    "spatial_map": CognitivePhase.PLAN,
+    "controlled_movement_planning": CognitivePhase.PLAN,
+    "trigger_sequences": CognitivePhase.PLAN,
+    "theory_gate": CognitivePhase.PLAN,
+    "metacognitive_prediction": CognitivePhase.PLAN,
+    "deliberation_system": CognitivePhase.PLAN,
+    "i_thread": CognitivePhase.PLAN,
+    "budget_aware_planning": CognitivePhase.PLAN,
+
+    # -------------------------------------------------------------------------
+    # EXECUTE: Select action, commit, fallback strategies
+    # -------------------------------------------------------------------------
+    "smart_action_selection": CognitivePhase.EXECUTE,
+    "three_try_sequence": CognitivePhase.EXECUTE,
+    "discovery_exploitation": CognitivePhase.EXECUTE,
+    "embedding_suggestion": CognitivePhase.EXECUTE,
+    "embedding_matcher": CognitivePhase.EXECUTE,
+    "network_wisdom": CognitivePhase.EXECUTE,
+    "network_sharing": CognitivePhase.EXECUTE,
+    "primitive_suggester": CognitivePhase.EXECUTE,
+    "state_matching": CognitivePhase.EXECUTE,
+    "multi_stage_matching": CognitivePhase.EXECUTE,
+    "replay_learning": CognitivePhase.EXECUTE,
+    "few_shot_invariants": CognitivePhase.EXECUTE,
+    "few_shot_relations": CognitivePhase.EXECUTE,
+    "abstraction_templates": CognitivePhase.EXECUTE,
+
+    # -------------------------------------------------------------------------
+    # VERIFY: Check outcome, track progress, detect errors
+    # -------------------------------------------------------------------------
+    "goal_progress": CognitivePhase.VERIFY,
+    "near_miss_analyzer": CognitivePhase.VERIFY,
+    "completion_prediction": CognitivePhase.VERIFY,
+    "rule_transfer": CognitivePhase.VERIFY,
+    "frontier_topology": CognitivePhase.VERIFY,
+    "frontier_checkpoint": CognitivePhase.VERIFY,
+    "theory_contradiction": CognitivePhase.VERIFY,
+    "metacognitive_elimination": CognitivePhase.VERIFY,
+    "contextual_failure": CognitivePhase.VERIFY,
+    "action_outcome_verifier": CognitivePhase.VERIFY,
+
+    # -------------------------------------------------------------------------
+    # SAFETY RUNGS: Cross-cutting (mapped to VERIFY — they check/filter)
+    # -------------------------------------------------------------------------
+    "death_avoidance": CognitivePhase.VERIFY,
+    "prior_lessons": CognitivePhase.VERIFY,
+    "three_layer_filter": CognitivePhase.VERIFY,
+    "pariah_avoidance": CognitivePhase.VERIFY,
+    "terminal_pattern": CognitivePhase.VERIFY,
+    "destructive_action_detection": CognitivePhase.VERIFY,
+    "viral_package_weights": CognitivePhase.EXECUTE,
+
+    # -------------------------------------------------------------------------
+    # EMERGENCY: Always-first (mapped to OBSERVE — they perceive danger)
+    # -------------------------------------------------------------------------
+    "infinite_loop_breaker": CognitivePhase.OBSERVE,
+    "coordinate_oscillation": CognitivePhase.OBSERVE,
+
+    # -------------------------------------------------------------------------
+    # BUDGET/META: Resource tracking (mapped to PLAN — they constrain)
+    # -------------------------------------------------------------------------
+    "frustration_detection": CognitivePhase.VERIFY,
+    "breakthrough_budget": CognitivePhase.PLAN,
+    "regulatory_signal": CognitivePhase.PLAN,
+    "imagination_budget": CognitivePhase.PLAN,
+}
+
+
+# =============================================================================
+# RUNG ROLE MAPPING — Grounded to actual rung names
+# =============================================================================
+
+# Map rungs to their primary role in problem-solving.
+# All entries correspond to actual registered rung names.
 RUNG_ROLE_MAP: Dict[str, RungRole] = {
-    # =========================================================================
-    # ENTRY RUNGS: Low friction, broad coverage, orientation
-    # These rungs provide the initial survey and understanding
-    # =========================================================================
+    # ENTRY: Orientation, perception, broad survey
     "survey": RungRole.ENTRY,
     "frame_interpretation": RungRole.ENTRY,
     "sparse_grid": RungRole.ENTRY,
     "palette_detection": RungRole.ENTRY,
-    "scan_for_goals": RungRole.ENTRY,
-    "pattern_recognition": RungRole.ENTRY,
-    "novelty_detection": RungRole.ENTRY,
-    "boundary_detection": RungRole.ENTRY,
-    "object_recognition": RungRole.ENTRY,
-    "initial_survey": RungRole.ENTRY,
-    "environment_scan": RungRole.ENTRY,
-    "attention_guidance": RungRole.ENTRY,
+    "affordance_detection": RungRole.ENTRY,
+    "visual_analyzer": RungRole.ENTRY,
+    "network_object_inventory": RungRole.ENTRY,
+    "action6_object_exploration": RungRole.ENTRY,
+    "exploration_phase": RungRole.ENTRY,
+    "grid_exploration": RungRole.ENTRY,
+    "questioning_engine": RungRole.ENTRY,
+    "game_classifier": RungRole.ENTRY,
+    "control_tracker": RungRole.ENTRY,
+    "network_exploration_stats": RungRole.ENTRY,
+    "self_trust_boost": RungRole.ENTRY,
+    "infinite_loop_breaker": RungRole.ENTRY,
+    "coordinate_oscillation": RungRole.ENTRY,
+    "sensation_engine": RungRole.ENTRY,
+    "two_streams": RungRole.ENTRY,
 
-    # =========================================================================
-    # LEVERAGE RUNGS: Build on entry points to reach deeper understanding
-    # These rungs use initial observations to develop understanding
-    # =========================================================================
-    "control_tracker": RungRole.LEVERAGE,
-    "object_interaction_test": RungRole.LEVERAGE,
-    "hypothesis_testing": RungRole.LEVERAGE,
-    "event_understanding": RungRole.LEVERAGE,
+    # LEVERAGE: Build understanding, test hypotheses, map effects
+    "solver_goal_extraction": RungRole.LEVERAGE,
+    "constraint_decoder": RungRole.LEVERAGE,
+    "interactable_tile_discovery": RungRole.LEVERAGE,
+    "goal_relationship_modeling": RungRole.LEVERAGE,
+    "causal_click_mapping": RungRole.LEVERAGE,
+    "click_behavior_learning": RungRole.LEVERAGE,
     "spatial_relationship": RungRole.LEVERAGE,
-    "physics_probe": RungRole.LEVERAGE,
-    "affordance_detection": RungRole.LEVERAGE,
-    "goal_decomposition": RungRole.LEVERAGE,
-    "constraint_analysis": RungRole.LEVERAGE,
-    "sequence_detection": RungRole.LEVERAGE,
-    "temporal_reasoning": RungRole.LEVERAGE,
-    "causal_probing": RungRole.LEVERAGE,
-    "movement_analysis": RungRole.LEVERAGE,
-    "collision_detection": RungRole.LEVERAGE,
-    "transformation_detection": RungRole.LEVERAGE,
+    "event_understanding": RungRole.LEVERAGE,
+    "object_color_targeting": RungRole.LEVERAGE,
+    "hypothesis_system": RungRole.LEVERAGE,
+    "hypothesis_testing": RungRole.LEVERAGE,
+    "scientific_method": RungRole.LEVERAGE,
+    "assumption_formation": RungRole.LEVERAGE,
+    "belief_system": RungRole.LEVERAGE,
+    "resonance_detector": RungRole.LEVERAGE,
+    "symbolic_tracker": RungRole.LEVERAGE,
+    "map_intel_collision": RungRole.LEVERAGE,
+    "effect_prediction": RungRole.LEVERAGE,
+    "valence_goals": RungRole.LEVERAGE,
+    "subgoal_planning": RungRole.LEVERAGE,
 
-    # =========================================================================
-    # COMPOUNDING RUNGS: Knowledge spreads, connections multiply
-    # These rungs connect observations and build understanding
-    # =========================================================================
-    "rule_transfer": RungRole.COMPOUNDING,
-    "abstraction_matching": RungRole.COMPOUNDING,
-    "network_wisdom": RungRole.COMPOUNDING,
+    # COMPOUNDING: Connect knowledge, plan sequences
+    "constraint_satisfaction": RungRole.COMPOUNDING,
+    "wall_aware_navigation": RungRole.COMPOUNDING,
+    "spatial_map": RungRole.COMPOUNDING,
+    "controlled_movement_planning": RungRole.COMPOUNDING,
+    "trigger_sequences": RungRole.COMPOUNDING,
     "theory_gate": RungRole.COMPOUNDING,
-    "causal_chain": RungRole.COMPOUNDING,
-    "pattern_synthesis": RungRole.COMPOUNDING,
-    "cross_domain_transfer": RungRole.COMPOUNDING,
-    "meta_strategy": RungRole.COMPOUNDING,
-    "knowledge_integration": RungRole.COMPOUNDING,
-    "analogy_mapping": RungRole.COMPOUNDING,
-    "principle_extraction": RungRole.COMPOUNDING,
-    "generalization": RungRole.COMPOUNDING,
-    "working_memory_update": RungRole.COMPOUNDING,
-    "scientific_method": RungRole.COMPOUNDING,
+    "metacognitive_prediction": RungRole.COMPOUNDING,
+    "deliberation_system": RungRole.COMPOUNDING,
+    "i_thread": RungRole.COMPOUNDING,
+    "rule_transfer": RungRole.COMPOUNDING,
+    "near_miss_analyzer": RungRole.COMPOUNDING,
+    "completion_prediction": RungRole.COMPOUNDING,
+    "frontier_topology": RungRole.COMPOUNDING,
+    "frontier_checkpoint": RungRole.COMPOUNDING,
+    "goal_progress": RungRole.COMPOUNDING,
+    "action_outcome_verifier": RungRole.COMPOUNDING,
+    "frustration_detection": RungRole.COMPOUNDING,
 
-    # =========================================================================
-    # RESOLUTION RUNGS: Path crystallizes, commit to action
-    # These rungs make final decisions and execute actions
-    # =========================================================================
+    # RESOLUTION: Select action, commit, exploit knowledge
     "smart_action_selection": RungRole.RESOLUTION,
-    "optimal_sequence": RungRole.RESOLUTION,
-    "confident_commit": RungRole.RESOLUTION,
-    "action_execution": RungRole.RESOLUTION,
-    "final_decision": RungRole.RESOLUTION,
-    "action_selection": RungRole.RESOLUTION,
-    "sequence_execution": RungRole.RESOLUTION,
-    "goal_achievement": RungRole.RESOLUTION,
-    "plan_execution": RungRole.RESOLUTION,
-    "commit_action": RungRole.RESOLUTION,
+    "three_try_sequence": RungRole.RESOLUTION,
     "discovery_exploitation": RungRole.RESOLUTION,
-    "exploration_exploitation": RungRole.RESOLUTION,
+    "embedding_suggestion": RungRole.RESOLUTION,
+    "embedding_matcher": RungRole.RESOLUTION,
+    "network_wisdom": RungRole.RESOLUTION,
+    "network_sharing": RungRole.RESOLUTION,
+    "primitive_suggester": RungRole.RESOLUTION,
+    "state_matching": RungRole.RESOLUTION,
+    "multi_stage_matching": RungRole.RESOLUTION,
+    "replay_learning": RungRole.RESOLUTION,
+    "few_shot_invariants": RungRole.RESOLUTION,
+    "few_shot_relations": RungRole.RESOLUTION,
+    "abstraction_templates": RungRole.RESOLUTION,
+    "death_avoidance": RungRole.RESOLUTION,
+    "prior_lessons": RungRole.RESOLUTION,
+    "three_layer_filter": RungRole.RESOLUTION,
+    "pariah_avoidance": RungRole.RESOLUTION,
+    "terminal_pattern": RungRole.RESOLUTION,
+    "destructive_action_detection": RungRole.RESOLUTION,
+    "budget_aware_planning": RungRole.RESOLUTION,
+    "theory_contradiction": RungRole.RESOLUTION,
+    "viral_package_weights": RungRole.RESOLUTION,
+    "metacognitive_elimination": RungRole.RESOLUTION,
+    "contextual_failure": RungRole.RESOLUTION,
+    "breakthrough_budget": RungRole.RESOLUTION,
+    "regulatory_signal": RungRole.RESOLUTION,
+    "imagination_budget": RungRole.RESOLUTION,
 }
 
 
@@ -213,6 +423,29 @@ def get_rung_role(rung_name: str) -> RungRole:
         RungRole for the rung, defaults to ENTRY if unknown
     """
     return RUNG_ROLE_MAP.get(rung_name, RungRole.ENTRY)
+
+
+def get_cognitive_phase(rung_name: str) -> CognitivePhase:
+    """Get the primary cognitive phase for a rung.
+
+    Falls back to EXECUTE if rung is unknown (action-proposing by default).
+    """
+    return COGNITIVE_PHASE_MAP.get(rung_name, CognitivePhase.EXECUTE)
+
+
+def get_rungs_by_phase(phase: CognitivePhase) -> List[str]:
+    """Get all rungs in a specific cognitive phase."""
+    return [rung for rung, p in COGNITIVE_PHASE_MAP.items() if p == phase]
+
+
+def get_phase_coverage() -> Dict[str, int]:
+    """Get rung count per cognitive phase — used by H41 affinity summary."""
+    counts: Dict[str, int] = {}
+    for phase in CognitivePhase:
+        counts[phase.value] = sum(
+            1 for p in COGNITIVE_PHASE_MAP.values() if p == phase
+        )
+    return counts
 
 
 def get_role_for_phase(phase: str) -> RungRole:
@@ -420,4 +653,7 @@ def suggest_next_role(current_role: RungRole, confidence: float) -> RungRole:
     return progressions.get(current_role, RungRole.RESOLUTION)
 
 
-logger.info(f"[RUNG-ROLES] Loaded {len(RUNG_ROLE_MAP)} rung role mappings")
+logger.info(
+    f"[RUNG-ROLES] Loaded {len(RUNG_ROLE_MAP)} role + "
+    f"{len(COGNITIVE_PHASE_MAP)} phase mappings"
+)

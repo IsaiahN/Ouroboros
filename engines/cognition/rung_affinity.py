@@ -186,7 +186,9 @@ class RungAffinityModel:
             logger.warning(f"[RUNG-AFFINITY] Persist failed: {e}")
 
     def summary(self) -> str:
-        """Human-readable summary of learned affinities."""
+        """Human-readable summary with per-game and per-phase affinities."""
+        from engines.cognition.rung_roles import CognitivePhase, get_cognitive_phase
+
         lines = []
         for game_type in sorted(self._data.keys()):
             affinities = self.get_affinity(game_type)
@@ -203,6 +205,26 @@ class RungAffinityModel:
                 f"  {game_type}: {total_evals} evals, "
                 f"top={', '.join(f'{n}({v:.0%})' for n, v in top5)}"
             )
+
+            # Phase-level aggregation
+            phase_hits: Dict[str, int] = {}
+            phase_totals: Dict[str, int] = {}
+            for rung_name, counts in self._data[game_type].items():
+                phase = get_cognitive_phase(rung_name).value
+                phase_hits[phase] = phase_hits.get(phase, 0) + counts['hits']
+                t = counts['hits'] + counts['misses']
+                phase_totals[phase] = phase_totals.get(phase, 0) + t
+
+            phase_parts = []
+            for phase in CognitivePhase:
+                pv = phase.value
+                pt = phase_totals.get(pv, 0)
+                if pt > 0:
+                    pa = phase_hits.get(pv, 0) / pt
+                    phase_parts.append(f"{pv[:3].upper()}={pa:.0%}")
+            if phase_parts:
+                lines.append(f"    phases: {' '.join(phase_parts)}")
+
         if lines:
             return "[RUNG-AFFINITY]\n" + "\n".join(lines)
         return "[RUNG-AFFINITY] No data yet"
