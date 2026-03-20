@@ -3244,6 +3244,25 @@ class CognitiveLoop:
         if action_eff:
             context['_action_effectiveness'] = action_eff
 
+        # ═══ H40: Inject solver spatial data for fuel-aware rung navigation ═══
+        # SpatialMapRung needs solver walls, targets, step size, and fuel budget
+        # to navigate efficiently. Data-driven: works for any game that provides
+        # solver_level_configs with walls/targets/agent_pos.
+        if self._ls20_level_configs:
+            level_key = str(self._current_level)
+            lc = self._ls20_level_configs.get(level_key, {})
+            if lc:
+                context['solver_walls'] = lc.get('walls', [])
+                context['solver_targets'] = lc.get('targets', [])
+                context['solver_agent_start'] = lc.get('agent_pos')
+                context['solver_changers'] = lc.get('changers', {})
+                context['spatial_step_size'] = 5  # LS20 uses 5-pixel steps
+        if self._agent_position is not None:
+            context['agent_position'] = self._agent_position
+        context['remaining_actions'] = max(
+            0, self._max_actions - self._actions_taken
+        )
+
         return context
 
     # ─── Replay Access ────────────────────────────────────────────────

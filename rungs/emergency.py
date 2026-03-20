@@ -24,6 +24,13 @@ from rungs.base import (
 logger = logging.getLogger(__name__)
 
 
+def _get_frame(game_state: Any) -> Any:
+    """Extract frame from game_state whether it's a dict or object."""
+    if isinstance(game_state, dict):
+        return game_state.get('frame')
+    return getattr(game_state, 'frame', None)
+
+
 class InfiniteLoopBreakerRung(DecisionRung):
     """Emergency escape from stuck loops - EMERGENCY"""
     name = "infinite_loop_breaker"
@@ -81,12 +88,47 @@ class CoordinateOscillationRung(DecisionRung):
             if hasattr(ah, 'detect_oscillation'):
                 oscillation = ah.detect_oscillation()
                 if oscillation.get('oscillation_detected', False):
-                    # Try combination point or new direction
                     coords = oscillation.get('oscillating_coords', [])
                     if len(coords) >= 2:
-                        # Suggest a different available action
-                        current_action = context.get('last_action', 'ACTION1')
                         available_list = get_available_actions_list(context)
+
+                        # H33: For ACTION6-only games (click puzzles), pick a
+                        # random unexplored coordinate instead of a different
+                        # action type. The oscillation is in POSITION, not action.
+                        if available_list == ['ACTION6'] or available_list == [6]:
+                            frame = _get_frame(game_state)
+                            if frame is not None:
+                                osc_set = set()
+                                for c in coords:
+                                    if isinstance(c, (list, tuple)) and len(c) >= 2:
+                                        osc_set.add((c[0], c[1]))
+                                # Pick a random non-zero pixel NOT in oscillating set
+                                candidates = []
+                                try:
+                                    raw = frame
+                                    if hasattr(raw, 'tolist'):
+                                        raw = raw.tolist()
+                                    if isinstance(raw, list) and raw:
+                                        while isinstance(raw[0], list) and isinstance(raw[0][0], list):
+                                            raw = raw[0]
+                                        for y, row in enumerate(raw):
+                                            for x, val in enumerate(row):
+                                                v = int(val) if hasattr(val, '__int__') else val
+                                                if v > 0 and (x, y) not in osc_set:
+                                                    candidates.append((x, y))
+                                except Exception:
+                                    pass
+                                if candidates:
+                                    cx, cy = random.choice(candidates)
+                                    return RungResult(
+                                        action='ACTION6',
+                                        confidence=0.85,
+                                        reason=f"H33: Breaking click oscillation, trying ({cx},{cy})",
+                                        metadata={'x': cx, 'y': cy, 'oscillation': oscillation},
+                                    )
+
+                        # Original: try a different action type
+                        current_action = context.get('last_action', 'ACTION1')
                         alternatives = [a for a in available_list if a != current_action]
                         if alternatives:
                             return RungResult(

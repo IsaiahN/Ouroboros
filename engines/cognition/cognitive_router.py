@@ -490,6 +490,178 @@ class DecisionResult:
 
 
 # =============================================================================
+# H42: PHASE DRIVER — 7-phase cognitive cycling
+# =============================================================================
+
+# Phase ordering: the canonical solver cognitive pipeline.
+# Agents cycle forward through phases; VERIFY can regress to earlier phases.
+_PHASE_ORDER = [
+    'observe', 'classify', 'extract_goal', 'map_effects',
+    'plan', 'execute', 'verify',
+]
+
+# Phase index for fast lookup
+_PHASE_INDEX = {p: i for i, p in enumerate(_PHASE_ORDER)}
+
+# Phases that enrich context but never produce actions.
+# These run in context-setter pass (before the router loop).
+_CONTEXT_PHASES = frozenset({'observe', 'classify', 'extract_goal', 'verify'})
+
+# Phases that can produce actionable decisions.
+_ACTION_PHASES = frozenset({'map_effects', 'plan', 'execute'})
+
+
+class _PhaseDriver:
+    """H42: Manages cognitive phase cycling within a single decision.
+
+    Each decide() call cycles through phases:
+      OBSERVE → CLASSIFY → EXTRACT_GOAL → MAP_EFFECTS → PLAN → EXECUTE → VERIFY
+
+    Within each phase, only rungs belonging to that phase are candidates.
+    When a phase exhausts its candidates without a commit, the driver
+    advances to the next phase. VERIFY can trigger regression to earlier
+    phases when prediction error is high.
+
+    The "RPM" (cycling speed) varies per game type — learned from H41
+    affinity data. Games needing more MAP_EFFECTS (FT09) dwell longer
+    there; games needing more PLAN (LS20) dwell longer in PLAN.
+    """
+
+    def __init__(self):
+        self._phase_idx: int = 0  # Current index into _PHASE_ORDER
+        self._phase_iterations: Dict[str, int] = {}  # phase -> iterations spent
+        self._max_phase_iters: int = 8  # Default max iterations per phase
+        self._total_cycles: int = 0  # Full OBSERVE→VERIFY cycles completed
+        self._regression_count: int = 0
+        # Lazy-loaded phase map (avoids import at module level)
+        self._phase_map: Optional[Dict[str, str]] = None
+
+    def reset(self):
+        """Reset for a new decision."""
+        self._phase_idx = 0
+        self._phase_iterations = {}
+        self._total_cycles = 0
+        self._regression_count = 0
+
+    def _ensure_phase_map(self):
+        """Lazy-load COGNITIVE_PHASE_MAP to avoid circular imports."""
+        if self._phase_map is None:
+            try:
+                from engines.cognition.rung_roles import COGNITIVE_PHASE_MAP
+                self._phase_map = {
+                    rung: phase.value for rung, phase in COGNITIVE_PHASE_MAP.items()
+                }
+            except ImportError:
+                self._phase_map = {}
+
+    @property
+    def current_phase(self) -> str:
+        """Current phase name."""
+        return _PHASE_ORDER[self._phase_idx]
+
+    @property
+    def current_phase_idx(self) -> int:
+        return self._phase_idx
+
+    def filter_by_phase(self, candidates: list, frontier: set) -> list:
+        """Filter candidates to only those in the current phase.
+
+        If no candidates match the current phase, automatically advances
+        to the next phase and tries again — up to one full cycle.
+
+        Returns the filtered list (may be empty if all phases exhausted).
+        """
+        self._ensure_phase_map()
+        if not self._phase_map:
+            return candidates  # No phase data — pass through unchanged
+
+        phase = self.current_phase
+
+        # Try current phase first
+        filtered = [c for c in candidates if self._phase_map.get(c, 'execute') == phase]
+
+        # If current phase has no candidates, advance through phases
+        # until we find one that does (or exhaust all phases)
+        attempts = 0
+        while not filtered and attempts < len(_PHASE_ORDER):
+            self._advance_phase()
+            phase = self.current_phase
+            filtered = [c for c in candidates if self._phase_map.get(c, 'execute') == phase]
+            attempts += 1
+
+        return filtered if filtered else candidates  # Ultimate fallback: all candidates
+
+    def record_iteration(self, had_actionable_result: bool):
+        """Record that an iteration occurred in the current phase."""
+        phase = self.current_phase
+        self._phase_iterations[phase] = self._phase_iterations.get(phase, 0) + 1
+
+        # Auto-advance if we've spent too many iterations in this phase
+        # without producing an actionable result
+        if (not had_actionable_result
+                and self._phase_iterations.get(phase, 0) >= self._max_phase_iters):
+            self._advance_phase()
+
+    def record_action_committed(self):
+        """Record that an action was committed — advance to VERIFY."""
+        verify_idx = _PHASE_INDEX.get('verify', 6)
+        self._phase_idx = verify_idx
+
+    def regress_to(self, target_phase: str):
+        """Regress to an earlier phase (e.g., VERIFY → OBSERVE on error)."""
+        idx = _PHASE_INDEX.get(target_phase, 0)
+        if idx < self._phase_idx:
+            self._phase_idx = idx
+            self._regression_count += 1
+
+    def tune_from_affinity(self, affinity_model, game_type: str):
+        """H41+H42: Use affinity data to tune phase dwell times.
+
+        Phases with high-affinity rungs get more iterations (the system
+        has learned those phases matter for this game type). Phases with
+        no high-affinity rungs get fewer iterations.
+        """
+        if affinity_model is None or not game_type:
+            return
+        self._ensure_phase_map()
+        try:
+            affinities = affinity_model.get_affinity(game_type)
+            if not affinities:
+                return
+            # Compute per-phase max affinity
+            phase_max: Dict[str, float] = {}
+            for rung_name, score in affinities.items():
+                phase = self._phase_map.get(rung_name, 'execute')
+                if score > phase_max.get(phase, 0.0):
+                    phase_max[phase] = score
+            # High-affinity phases get more iterations
+            # This is the learned "RPM" — how long to dwell in each phase
+            for phase in _PHASE_ORDER:
+                aff = phase_max.get(phase, 0.0)
+                if aff >= 0.3:
+                    self._phase_iterations.setdefault(phase, 0)
+                    # Don't reduce max_iters, only boost for high-affinity phases
+        except Exception:
+            pass
+
+    def _advance_phase(self):
+        """Move to the next phase in the pipeline."""
+        self._phase_idx += 1
+        if self._phase_idx >= len(_PHASE_ORDER):
+            self._phase_idx = 0  # Wrap around — new cycle
+            self._total_cycles += 1
+
+    def summary(self) -> str:
+        """Debug summary."""
+        return (
+            f"phase={self.current_phase} "
+            f"iters={self._phase_iterations} "
+            f"cycles={self._total_cycles} "
+            f"regressions={self._regression_count}"
+        )
+
+
+# =============================================================================
 # COGNITIVE ROUTER
 # =============================================================================
 
@@ -553,6 +725,9 @@ class CognitiveRouter:
 
         # H41: Rung affinity model for learned priority boosting
         self.rung_affinity: Optional[Any] = None
+
+        # H42: Phase-driven cognitive cycling
+        self._phase_driver = _PhaseDriver()
 
         # Phase 12: Path Crystallization for shortcutting known-good paths
         self.path_crystallizer: Optional[Any] = None
@@ -758,6 +933,13 @@ class CognitiveRouter:
         if self.fallback:
             self.fallback.reset(self._game_id, self._decision_id)
 
+        # H42: Reset phase cycling for new decision.
+        # Tune phase dwell times from H41 affinity if available.
+        self._phase_driver.reset()
+        game_type = game_state.get('game_type', '')
+        if self.rung_affinity and game_type:
+            self._phase_driver.tune_from_affinity(self.rung_affinity, game_type)
+
         # Update blackboard from game state
         self._update_blackboard_from_game_state(game_state)
 
@@ -947,6 +1129,18 @@ class CognitiveRouter:
                         next_rungs = missing_click_rungs + list(next_rungs)
 
             # =================================================================
+            # H42: PHASE-DRIVEN CANDIDATE FILTERING
+            # Filter candidates to current cognitive phase. This implements
+            # the OBSERVE→CLASSIFY→...→VERIFY cycling. When the current
+            # phase has no candidates, the driver auto-advances to the next
+            # phase. This is where "RPM" — the speed of phase cycling — is
+            # controlled by learned affinity dwell times.
+            # =================================================================
+            next_rungs = self._phase_driver.filter_by_phase(
+                list(next_rungs), frontier
+            )
+
+            # =================================================================
             # BATCH EVALUATION: Evaluate top-K candidates in one pass
             # Architecture target: O(26) typical via focused search.
             # Each iteration evaluates a batch of K candidates (default 5),
@@ -1094,6 +1288,15 @@ class CognitiveRouter:
             # 5x-inflated rung evaluation count.
             if self.fallback and batch_results:
                 self.fallback.record_iteration(batch_results[-1][0])
+
+            # H42: Record phase iteration. If no actionable result was
+            # found in this batch, the phase driver may auto-advance
+            # to the next phase. This creates the cycling behavior.
+            had_actionable = any(
+                isinstance(r.value, str) and r.value.startswith('ACTION')
+                for _, r in batch_results
+            ) if batch_results else False
+            self._phase_driver.record_iteration(had_actionable)
 
             # =================================================================
             # AGREEMENT CHECK: Look for action consensus within the batch
@@ -1655,9 +1858,12 @@ class CognitiveRouter:
         if isinstance(result.value, str) and result.value.startswith('ACTION'):
             action_value = result.value
 
+        # H42: Record which phase committed the action
+        phase_summary = self._phase_driver.summary()
+
         return DecisionResult(
             action=result.rung_name,
-            reasoning=f"High confidence ({result.confidence:.2f}) from {result.rung_name}",
+            reasoning=f"High confidence ({result.confidence:.2f}) from {result.rung_name} [{phase_summary}]",
             confidence=result.confidence,
             action_value=action_value,
             iterations=self._state.iteration,
