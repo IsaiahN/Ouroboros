@@ -1450,6 +1450,27 @@ class DecisionRungSystem:
         if emergency_result is not None:
             return emergency_result
 
+        # H44: Fuel-critical override — spatial_map gets priority when
+        # per-level fuel exists and the game has a fuel-limited navigation
+        # system. Without this, the cognitive router may not select
+        # spatial_map until fuel is nearly exhausted.
+        if context.get('solver_max_fuel', 999) < 999:
+            for rung in self.rungs:
+                if rung.name == 'spatial_map' and rung.enabled:
+                    try:
+                        result = rung.evaluate(game_state, context)
+                        if result.has_suggestion(rung.confidence_threshold):
+                            if result.action and is_action_available(result.action, context):
+                                self.rung_wins[rung.name] = self.rung_wins.get(rung.name, 0) + 1
+                                rung.record_outcome(was_accepted=True)
+                                self._last_winning_rung = rung
+                                self.last_decision_metadata = result.metadata or {}
+                                self.last_decision_metadata['rung_name'] = rung.name
+                                return result.action, f"[COGNITIVE:{rung.name}] {result.reason}"
+                    except Exception:
+                        pass
+                    break
+
         # Context-setter rungs: rungs with confidence_threshold=0.0 that
         # enrich context['world_model'] as side effects but never propose
         # actions. Must run before the cognitive router selects action rungs,
@@ -1469,10 +1490,13 @@ class DecisionRungSystem:
         if active_seq and seq_pos < len(active_seq) and context.get('is_replay'):
             seq_action = active_seq[seq_pos]
             if is_action_available(seq_action, context):
-                # H41: Shadow-evaluate all rungs against solver action
-                # This is the imitation learning signal — which rungs would
-                # have produced the same action the solver chose?
-                if self._rung_affinity_model is not None:
+                # H41: Shadow-evaluate rungs against solver action
+                # Imitation learning signal — which rungs match the solver?
+                # Optimized: sample every 5th step with rotating offset so
+                # all positions are covered across sessions (stratified).
+                # Session A: 0,5,10...  B: 1,6,11...  C: 2,7,12... etc.
+                _offset = hash(context.get('session_id', '')) % 5
+                if self._rung_affinity_model is not None and seq_pos % 5 == _offset:
                     game_type = context.get('game_type', '')
                     if game_type:
                         for rung in self.rungs:

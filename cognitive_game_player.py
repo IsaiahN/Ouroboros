@@ -264,6 +264,15 @@ class CognitiveGamePlayer:
                     # Tell cognitive loop it's starting at L2+
                     loop._current_level = prev_levels + 1
                     loop._actions_taken = actions_taken
+                    loop._level_start_actions = actions_taken  # H44: per-level fuel
+                    # H44: Initialize agent position for handoff level
+                    handoff_lk = str(prev_levels + 1)
+                    handoff_lc = loop._ls20_level_configs.get(handoff_lk, {})
+                    if handoff_lc and 'agent_pos' in handoff_lc:
+                        loop._agent_position = tuple(handoff_lc['agent_pos'])
+                    if handoff_lc and 'initial_config' in handoff_lc:
+                        loop._ls20_config = list(handoff_lc['initial_config'])
+                    loop._ls20_visited_targets = set()
                     # Fall through to cognitive loop at L2+
                 else:
                     return replay_result
@@ -291,6 +300,7 @@ class CognitiveGamePlayer:
                 w_A=self._live_w_A,
                 w_B=self._live_w_B,
                 available_actions=current_available,
+                session_id=self._gp._current_session_id,
             )
 
             # Validate action
@@ -382,6 +392,14 @@ class CognitiveGamePlayer:
                         'world_model': getattr(
                             self._gp.context_builder, '_world_model',
                             None),
+                        # H44: Spatial context for item/target tracking
+                        'agent_position': loop._agent_position,
+                        'spatial_step_size': 5,
+                        'remaining_actions': max(0, action_budget - actions_taken),
+                        'actions_this_level': actions_taken - loop._level_start_actions,
+                        'solver_max_fuel': loop._ls20_level_configs.get(
+                            str(current_levels + 1), {}).get('max_fuel', 999)
+                            if loop._ls20_level_configs else 999,
                     }
                     if cf:
                         outcome_context.update({

@@ -373,11 +373,19 @@ def seed_ls20(solver_seqs):
                     [wx, wy]
                     for wx, wy in sorted(level_info['walls'])
                 ],
+                # H44: Store items + fuel for fuel-aware BFS navigation
+                'items': [
+                    [ix, iy]
+                    for ix, iy in level_info['items']
+                ],
+                'max_fuel': level_info['max_fuel'],
             }
             n_targets = len(level_info['targets'])
             n_changers = len(level_info['changers'])
+            n_items = len(level_info['items'])
             print(f"  LS20 L{level_num}: {n_targets} targets, "
-                  f"{n_changers} changers, "
+                  f"{n_changers} changers, {n_items} items, "
+                  f"fuel={level_info['max_fuel']}, "
                   f"init=s{level_info['initial_config'][0]}/"
                   f"c{level_info['initial_config'][1]}/"
                   f"r{level_info['initial_config'][2]}")

@@ -295,6 +295,7 @@ class CognitiveLoop:
         self._max_actions: int = 500
         self._actions_taken: int = 0
         self._current_level: int = 1
+        self._level_start_actions: int = 0  # H44: track per-level action count
         self._score: float = 0.0
 
         # H21: Per-action-type effectiveness tracking.
@@ -336,6 +337,7 @@ class CognitiveLoop:
         # ═══ GAP 3: Active plan for execution ═══
         self._active_plan: List[Any] = []
         self._agent_position: Optional[Tuple[int, int]] = None  # For movement games
+        self._solver_nav_target: Optional[Tuple[int, int]] = None  # H44: SPEED 1d nav target
 
         # ═══ GAP 5: HUD state tracking ═══
         self._prev_hud_hash: int = 0
@@ -366,6 +368,7 @@ class CognitiveLoop:
         self._max_actions = max_actions
         self._actions_taken = 0
         self._current_level = 1
+        self._level_start_actions = 0  # H44: per-level action tracking
         self._score = 0.0
         self._prev_frame = None
         self._consecutive_no_change = 0
@@ -397,6 +400,7 @@ class CognitiveLoop:
         # H39b: LS20 config-aware navigation state
         self._ls20_config = None  # [shape, color, rot] or None
         self._ls20_visited_targets = set()  # indices of visited targets
+        self._ls20_visited_changers: set = set()  # H44: (x,y) of visited changers
         self._ls20_level_configs = {}  # level -> {targets, changers, initial_config}
 
         # Create fresh causal map for this game
@@ -1338,6 +1342,11 @@ class CognitiveLoop:
                             changers = lc.get('changers', {})
                             pk = f"{new_agent_pos[0]},{new_agent_pos[1]}"
                             if pk in changers:
+                                # H44: Record changer visit to prevent
+                                # SPEED 1d from re-routing back here.
+                                self._ls20_visited_changers.add(
+                                    (new_agent_pos[0], new_agent_pos[1])
+                                )
                                 ct = changers[pk]
                                 if ct == 'shape':
                                     self._ls20_config[0] = (
@@ -1362,12 +1371,14 @@ class CognitiveLoop:
         # Update game state
         if level_changed:
             self._current_level = new_level if new_level > 0 else self._current_level + 1
+            self._level_start_actions = self._actions_taken  # H44: per-level fuel
             # Reset stable regions for new level (visual layout may change)
             self._stable_region_attempts = 0
             self._stable_mask = None
             self._reference_snapshot = None
             # H39b: Reset LS20 config state for new level
             self._ls20_visited_targets = set()
+            self._ls20_visited_changers = set()  # H44
             level_key = str(self._current_level)
             lc = self._ls20_level_configs.get(level_key, {})
             if lc and 'initial_config' in lc:
@@ -2457,6 +2468,8 @@ class CognitiveLoop:
         """
         action_num: int = 1
         action_data: Optional[Dict] = None
+        # H44: Reset nav target each cycle; SPEED 1d sets it if fuel-limited
+        self._solver_nav_target = None
 
         # ─── SPEED 1: MAPPED ─────────────────────────────────────────
         if plan_action is not None and strategy == "execute":
@@ -2484,11 +2497,16 @@ class CognitiveLoop:
         # ─── SPEED 1b: MAPPED MOVEMENT (BFS pathfinding) ─────────────
         # For movement games with a known target, use BFS to find
         # shortest path avoiding known walls (Gap 3C).
+        # H44: Skip for fuel-limited games — SpatialMapRung handles routing.
+        _has_fuel_limit = bool(self._ls20_level_configs
+                               and self._ls20_level_configs.get(
+                                   str(self._current_level), {}).get('max_fuel', 999) < 999)
         if (strategy == "execute"
                 and self._causal_map
                 and self._agent_position is not None
                 and any(a in self._available_actions for a in (1, 2, 3, 4))
-                and 6 not in self._available_actions):
+                and 6 not in self._available_actions
+                and not _has_fuel_limit):
             # Movement-only game: try BFS to an unvisited position
             visited = self._causal_map.get_visited_positions()
             # Pick an exploration target: nearest unvisited adjacent cell
@@ -2593,6 +2611,13 @@ class CognitiveLoop:
                             if ctype in needed:
                                 parts = ck.split(',')
                                 cx, cy = int(parts[0]), int(parts[1])
+                                # H44: Skip changer we're standing on.
+                                # Walk-over already activated it; routing
+                                # back would waste 1 action. Agent can
+                                # revisit later if config still needs
+                                # cycling (rotation/color are mod 4/6).
+                                if (cx, cy) == (ax, ay):
+                                    continue
                                 cdist = abs(cx - ax) + abs(cy - ay)
                                 if cdist < best_cdist:
                                     best_cdist = cdist
@@ -2605,59 +2630,72 @@ class CognitiveLoop:
                                 f" need={needed} for T{next_tidx}"
                             )
                         else:
+                            # Either no changers needed, or we're at the
+                            # last one — head to target.
                             nav_target = (tx, ty)
-                            nav_reason = f"H39b T{next_tidx} no-changer"
+                            nav_reason = (
+                                f"H39b T{next_tidx} ({tx},{ty})"
+                                f" changers-done"
+                            )
 
                     if nav_target is not None:
-                        # BFS pathfinding with 5px step + solver walls
-                        wall_set_nav = {
-                            (w[0], w[1]) for w in lc.get('walls', [])
-                        }
-                        bfs_dirs = {
-                            1: (0, -5), 2: (0, 5),
-                            3: (-5, 0), 4: (5, 0),
-                        }
-                        bfs_q = collections.deque()
-                        bfs_q.append(((ax, ay), []))
-                        bfs_seen = {(ax, ay)}
-                        bfs_result = None
-                        bfs_steps = 0
-                        while bfs_q and bfs_steps < 300:
-                            bfs_steps += 1
-                            bpos, bpath = bfs_q.popleft()
-                            for ba, (bdx, bdy) in bfs_dirs.items():
-                                bnx = bpos[0] + bdx
-                                bny = bpos[1] + bdy
-                                if (bnx, bny) in wall_set_nav:
-                                    continue
-                                if (bnx < 0 or bnx >= 64
-                                        or bny < 0 or bny >= 64):
-                                    continue
-                                if (bnx, bny) in bfs_seen:
-                                    continue
-                                bfs_seen.add((bnx, bny))
-                                nbpath = bpath + [ba]
-                                if (bnx, bny) == nav_target:
-                                    bfs_result = nbpath[0]
+                        max_fuel_1d = lc.get('max_fuel', 999)
+                        if max_fuel_1d < 999:
+                            # H44: Delegate to fuel-aware SpatialMapRung.
+                            # SPEED 1d determines WHAT (config-aware target),
+                            # SpatialMapRung determines HOW (fuel-aware BFS).
+                            self._solver_nav_target = nav_target
+                            # Fall through to SPEED 2 (rung system)
+                        else:
+                            # Original BFS for non-fuel-limited games
+                            wall_set_nav = {
+                                (w[0], w[1]) for w in lc.get('walls', [])
+                            }
+                            bfs_dirs = {
+                                1: (0, -5), 2: (0, 5),
+                                3: (-5, 0), 4: (5, 0),
+                            }
+                            bfs_q = collections.deque()
+                            bfs_q.append(((ax, ay), []))
+                            bfs_seen = {(ax, ay)}
+                            bfs_result = None
+                            bfs_steps = 0
+                            while bfs_q and bfs_steps < 300:
+                                bfs_steps += 1
+                                bpos, bpath = bfs_q.popleft()
+                                for ba, (bdx, bdy) in bfs_dirs.items():
+                                    bnx = bpos[0] + bdx
+                                    bny = bpos[1] + bdy
+                                    if (bnx, bny) in wall_set_nav:
+                                        continue
+                                    if (bnx < 0 or bnx >= 64
+                                            or bny < 0 or bny >= 64):
+                                        continue
+                                    if (bnx, bny) in bfs_seen:
+                                        continue
+                                    bfs_seen.add((bnx, bny))
+                                    nbpath = bpath + [ba]
+                                    if (bnx, bny) == nav_target:
+                                        bfs_result = nbpath[0]
+                                        break
+                                    bfs_q.append(((bnx, bny), nbpath))
+                                if bfs_result is not None:
                                     break
-                                bfs_q.append(((bnx, bny), nbpath))
-                            if bfs_result is not None:
-                                break
 
-                        if bfs_result is not None:
-                            action_num = bfs_result
-                            dist = abs(nav_target[0] - ax) + abs(
-                                nav_target[1] - ay
-                            )
-                            cf.action_speed = "exploit"
-                            cf.action_type = action_num
-                            cf.action_reason = nav_reason
-                            cf.action_confidence = 0.7
-                            cf.action_summary = (
-                                f"H39b-NAV: ACTION{action_num}"
-                                f" | {nav_reason} d={dist}"
-                            )
-                            return action_num, None
+                            if bfs_result is not None:
+                                action_num = bfs_result
+                                dist = abs(nav_target[0] - ax) + abs(
+                                    nav_target[1] - ay
+                                )
+                                cf.action_speed = "exploit"
+                                cf.action_type = action_num
+                                cf.action_reason = nav_reason
+                                cf.action_confidence = 0.7
+                                cf.action_summary = (
+                                    f"H39b-NAV: ACTION{action_num}"
+                                    f" | {nav_reason} d={dist}"
+                                )
+                                return action_num, None
 
         # ─── SPEED 1c: H26/H28 pixel-accurate targeting for click games ──
         # For games where ACTION6 (click) is available, the rung system
@@ -2819,7 +2857,10 @@ class CognitiveLoop:
                 logger.debug("[H26] pixel path failed: %s", exc)
 
         # ─── SPEED 2: REASONED (delegate to rung system) ─────────────
-        if self._decision_system is not None and strategy in ("exploit", "experiment"):
+        # H44: Fuel-limited games ALWAYS use the rung system (SpatialMapRung
+        # provides fuel-aware BFS). All SPEED 1 paths were skipped above.
+        _speed2_ok = strategy in ("exploit", "experiment") or _has_fuel_limit
+        if self._decision_system is not None and _speed2_ok:
             try:
                 # Build context for the rung system (backward compatible)
                 context = self._build_rung_context(
@@ -3256,12 +3297,20 @@ class CognitiveLoop:
                 context['solver_targets'] = lc.get('targets', [])
                 context['solver_agent_start'] = lc.get('agent_pos')
                 context['solver_changers'] = lc.get('changers', {})
+                # H44: Items (fuel pickups) and max fuel for fuel-aware BFS
+                context['solver_items'] = lc.get('items', [])
+                context['solver_max_fuel'] = lc.get('max_fuel', 999)
                 context['spatial_step_size'] = 5  # LS20 uses 5-pixel steps
         if self._agent_position is not None:
             context['agent_position'] = self._agent_position
+        # H44: Pass config-aware nav target from SPEED 1d to SpatialMapRung
+        if self._solver_nav_target is not None:
+            context['solver_nav_target'] = self._solver_nav_target
         context['remaining_actions'] = max(
             0, self._max_actions - self._actions_taken
         )
+        # H44: Per-level action count for fuel-aware navigation
+        context['actions_this_level'] = self._actions_taken - self._level_start_actions
 
         return context
 

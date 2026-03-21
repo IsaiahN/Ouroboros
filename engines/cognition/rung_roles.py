@@ -207,6 +207,7 @@ COGNITIVE_PHASE_MAP: Dict[str, CognitivePhase] = {
     "deliberation_system": CognitivePhase.PLAN,
     "i_thread": CognitivePhase.PLAN,
     "budget_aware_planning": CognitivePhase.PLAN,
+    "distance_guided_click": CognitivePhase.PLAN,
 
     # -------------------------------------------------------------------------
     # EXECUTE: Select action, commit, fallback strategies
@@ -335,6 +336,7 @@ RUNG_ROLE_MAP: Dict[str, RungRole] = {
     "goal_progress": RungRole.COMPOUNDING,
     "action_outcome_verifier": RungRole.COMPOUNDING,
     "frustration_detection": RungRole.COMPOUNDING,
+    "distance_guided_click": RungRole.COMPOUNDING,
 
     # RESOLUTION: Select action, commit, exploit knowledge
     "smart_action_selection": RungRole.RESOLUTION,
