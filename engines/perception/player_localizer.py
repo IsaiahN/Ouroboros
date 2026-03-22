@@ -417,34 +417,48 @@ class PlayerLocalizer:
         self._accumulated_confidence = 0.0
         self._observations = 0
 
-    def get_player_region(self, frame: np.ndarray) -> Optional[np.ndarray]:
+    def get_player_region(
+        self,
+        frame: np.ndarray,
+        position: Optional[Tuple[int, int]] = None,
+        radius: int = 3,
+    ) -> Optional[np.ndarray]:
         """
-        Extract player region from frame using last known position.
+        Extract player region from frame.
 
-        Returns the value at the player's position (for single-cell player)
-        or a small region around it (for multi-cell player).
+        Args:
+            frame: Game frame (2D or 3D).
+            position: (x, y) position override. If None, uses internal
+                      last_known_position (requires confidence threshold).
+            radius: Half-size of extraction window (default 3 → 7x7).
+
+        Returns:
+            Cropped 2D array around the player, or None.
         """
-        if self._last_known_position is None:
-            return None
-        if self._accumulated_confidence < self.confidence_threshold:
+        if position is not None:
+            px, py = position
+        elif self._last_known_position is not None:
+            if self._accumulated_confidence < self.confidence_threshold:
+                return None
+            py, px = self._last_known_position  # internal is (row, col)
+        else:
             return None
 
         frame = self._ensure_2d_grid(frame)
         if frame is None:
             return None
 
-        r, c = self._last_known_position
         h, w = frame.shape
+        # position is (x, y) but frame is [row, col]
+        r, c = py, px
+        if not (0 <= r < h and 0 <= c < w):
+            return None
 
-        if 0 <= r < h and 0 <= c < w:
-            # For now, return a 3x3 region centered on position
-            r1 = max(0, r - 1)
-            r2 = min(h, r + 2)
-            c1 = max(0, c - 1)
-            c2 = min(w, c + 2)
-            return frame[r1:r2, c1:c2].copy()
-
-        return None
+        r1 = max(0, r - radius)
+        r2 = min(h, r + radius + 1)
+        c1 = max(0, c - radius)
+        c2 = min(w, c + radius + 1)
+        return frame[r1:r2, c1:c2].copy()
 
     @property
     def is_confident(self) -> bool:

@@ -217,6 +217,18 @@ class CausalMap:
         # Total steps for surprise event numbering
         self._total_steps: int = 0
 
+        # ─── H47: Score-Correlated Goal Discovery ─────────────────────
+        # Learn goal states from score feedback instead of solver seeds.
+        # Tracks which cell colors correlate with +score / -score.
+        self._score_positive_states: Dict[
+            Tuple[int, int], Dict[int, int]
+        ] = defaultdict(dict)  # {(x,y): {color: count}}
+        self._score_negative_states: Dict[
+            Tuple[int, int], Dict[int, int]
+        ] = defaultdict(dict)
+        self._score_observations: int = 0
+        self._goal_source: str = ''  # 'perceiver', 'score_correlation'
+
         # ─── Solver-Seeded Knowledge (H34) ────────────────────────────
         # Per-level ordered list of positions from solver sequences.
         # Used by H26 pixel targeting as high-priority click targets.
@@ -960,6 +972,135 @@ class CausalMap:
 
         except Exception as e:
             logger.debug(f"[CAUSAL-MAP] update_from_action failed: {e}")
+
+    # ─── H47: Score-Correlated Goal Discovery ────────────────────────
+
+    def record_score_correlation(
+        self,
+        pre_frame: Optional[np.ndarray],
+        post_frame: Optional[np.ndarray],
+        score_delta: float,
+    ):
+        """Learn which state changes correlate with positive/negative score.
+
+        When score_delta > 0: the post_frame colors at changed positions
+        are likely "goal-approaching" states.  After N observations,
+        infer_goal_from_scores() can derive goal cells from this data.
+        """
+        if pre_frame is None or post_frame is None or score_delta == 0:
+            return
+        try:
+            if pre_frame.shape != post_frame.shape:
+                return
+            diff_mask = pre_frame != post_frame
+            if not diff_mask.any():
+                return
+
+            ys, xs = np.where(diff_mask)
+            # Cap to prevent huge diffs (level transitions) from polluting
+            if len(ys) > 200:
+                return
+
+            for i in range(len(ys)):
+                y, x = int(ys[i]), int(xs[i])
+                pos = (x, y)
+                new_color = int(post_frame[y, x])
+
+                if score_delta > 0:
+                    self._score_positive_states[pos][new_color] = (
+                        self._score_positive_states[pos].get(new_color, 0) + 1
+                    )
+                else:
+                    self._score_negative_states[pos][new_color] = (
+                        self._score_negative_states[pos].get(new_color, 0) + 1
+                    )
+
+            self._score_observations += 1
+        except Exception as e:
+            logger.debug(f"[CAUSAL-MAP] H47 score correlation failed: {e}")
+
+    def infer_goal_from_scores(self, min_observations: int = 3):
+        """Derive goal cells from accumulated score correlations.
+
+        For each position with enough positive-score data, the most
+        frequent color seen during +score is probably the goal color.
+        Only sets goals when we DON'T already have perceiver-detected goals.
+        """
+        if self._goal_cells and len(self._goal_cells) > 3:
+            return  # Already have goals from perceiver — don't override
+
+        inferred: Dict[Tuple[int, int], int] = {}
+        for pos, color_counts in self._score_positive_states.items():
+            total = sum(color_counts.values())
+            if total < min_observations:
+                continue
+            best_color = max(color_counts, key=color_counts.get)  # type: ignore[arg-type]
+            dominance = color_counts[best_color] / total
+            if dominance >= 0.6:
+                inferred[pos] = best_color
+
+        if len(inferred) >= 3:
+            self._goal_cells = inferred
+            self._goal_source = 'score_correlation'
+            logger.info(
+                f"[CAUSAL-MAP] H47: Inferred {len(inferred)} goal cells "
+                f"from {self._score_observations} score observations"
+            )
+
+    # ─── H49: Game-Agnostic Forward Simulation ────────────────────────
+
+    def simulate_action(
+        self,
+        state: Dict[Tuple[int, int], int],
+        click_pos: Tuple[int, int],
+    ) -> Tuple[Dict[Tuple[int, int], int], float]:
+        """Simulate a click on a state dict using learned effects.
+
+        Uses color cycles and observed transitions to predict the
+        resulting state.  Game-agnostic: works for ANY game where
+        we've observed click effects.
+
+        Returns:
+            (new_state, confidence) where confidence 0-1.
+        """
+        effect = self._effects.get(click_pos)
+        if effect is None or not effect.last_frame_changed:
+            return dict(state), 0.0
+
+        new_state = dict(state)
+        transitions_applied = 0
+
+        for affected_pos in effect.affected:
+            current_color = state.get(affected_pos)
+            if current_color is None:
+                continue
+
+            # Strategy 1: Color cycle knowledge
+            cycle = self._color_cycles.get(affected_pos, [])
+            if len(cycle) >= 2:
+                unique: List[int] = []
+                for c in cycle:
+                    if not unique or c != unique[-1]:
+                        unique.append(c)
+                if current_color in unique:
+                    idx = unique.index(current_color)
+                    next_color = unique[(idx + 1) % len(unique)]
+                    new_state[affected_pos] = next_color
+                    transitions_applied += 1
+                    continue
+
+            # Strategy 2: Direct transition lookup (most recent first)
+            trans = effect.color_transitions.get(affected_pos, [])
+            for old_c, new_c in reversed(trans):
+                if old_c == current_color:
+                    new_state[affected_pos] = new_c
+                    transitions_applied += 1
+                    break
+
+        confidence = effect.confidence * (
+            transitions_applied / max(len(effect.affected), 1)
+        )
+        return new_state, confidence
 
     # ─── Planning ─────────────────────────────────────────────────────
 

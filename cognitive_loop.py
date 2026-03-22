@@ -355,6 +355,14 @@ class CognitiveLoop:
         self._reference_panel: Optional[Dict[str, Any]] = None
         # {region: (y1,y2,x1,x2), cells: {(x,y): color}, detected_at_action: N}
 
+        # ═══ H48: Player self-model ═══
+        from engines.perception.player_localizer import PlayerLocalizer
+        from engines.perception.property_extractor import PropertyExtractor
+        self._player_localizer = PlayerLocalizer()
+        self._property_extractor = PropertyExtractor(color_quantization=16)
+        self._player_properties: Dict[str, Any] = {}
+        self._player_property_history: List[Dict] = []
+
     # ─── Game Lifecycle ───────────────────────────────────────────────
 
     def start_game(
@@ -1115,6 +1123,23 @@ class CognitiveLoop:
         # ═══ GAP 4: Rich action outcome computation ═══
         self._compute_rich_outcome(cf, post_array)
 
+        # ═══ H47: Score-correlated goal learning ═══
+        # Learn goal states from score feedback (game-agnostic).
+        if self._causal_map and cf.score_delta != 0 and self._prev_frame is not None:
+            prev_2d = self._prev_frame
+            post_2d = post_array
+            if prev_2d is not None and prev_2d.ndim == 3:
+                prev_2d = prev_2d.squeeze()
+            if post_2d is not None and post_2d.ndim == 3:
+                post_2d = post_2d.squeeze()
+            self._causal_map.record_score_correlation(
+                pre_frame=prev_2d,
+                post_frame=post_2d,
+                score_delta=cf.score_delta,
+            )
+            if self._actions_taken % 10 == 0:
+                self._causal_map.infer_goal_from_scores()
+
         # ═══ GAP 5: HUD state tracking ═══
         self._check_hud_state(cf, post_array)
 
@@ -1372,6 +1397,34 @@ class CognitiveLoop:
                                     self._ls20_config[2] = (
                                         self._ls20_config[2] + 1
                                     ) % 4
+
+        # ═══ H48: Player self-model — extract appearance properties ═══
+        if self._agent_position and post_array is not None:
+            try:
+                region = self._player_localizer.get_player_region(
+                    post_array, self._agent_position,
+                )
+                if region is not None and region.size > 0:
+                    props = self._property_extractor.extract_properties(region)
+                    if props:
+                        old_props = self._player_properties
+                        self._player_properties = props
+                        if old_props:
+                            changes = self._property_extractor.properties_changed(
+                                old_props, props,
+                            )
+                            if changes:
+                                self._player_property_history.append({
+                                    'action': self._actions_taken,
+                                    'changes': changes,
+                                    'new_props': dict(props),
+                                })
+                                if len(self._player_property_history) > 50:
+                                    self._player_property_history = (
+                                        self._player_property_history[-50:]
+                                    )
+            except Exception:
+                pass  # Non-critical
 
         # Update last action info for next temporal perception
         if self._last_action_info:
@@ -3362,6 +3415,11 @@ class CognitiveLoop:
         )
         # H44: Per-level action count for fuel-aware navigation
         context['actions_this_level'] = self._actions_taken - self._level_start_actions
+
+        # ═══ H48: Player self-model for config-aware rungs ═══
+        if self._player_properties:
+            context['player_properties'] = self._player_properties
+            context['player_property_history'] = self._player_property_history[-10:]
 
         return context
 
