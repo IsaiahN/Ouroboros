@@ -851,9 +851,11 @@ class DecisionRungSystem:
         move the agent into a known wall at the current position. Other rungs
         and the weighted-random fallback use this to avoid wasted actions.
         """
-        game_type = context.get('game_type', '')
+        # H51c: Use game_id (not game_type) to match SpatialMapRung's
+        # variant-isolated keys from H51b.
+        game_id = context.get('game_id', context.get('game_type', ''))
         level = context.get('level', 1)
-        game_key = f"{game_type}_L{level}"
+        game_key = f"{game_id}_L{level}"
 
         spatial_rung = next(
             (r for r in self.rungs if r.name == 'spatial_map'), None

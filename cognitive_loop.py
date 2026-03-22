@@ -405,6 +405,7 @@ class CognitiveLoop:
         self._active_plan = []
         self._agent_position = None
         self._detected_step_size = None
+        self._session_id: Optional[str] = None  # H51c: set by cycle()
         self._prev_hud_hash = 0
         self._prev_hud_region_hashes = {
             'top': 0, 'bottom': 0, 'left': 0, 'right': 0
@@ -1008,6 +1009,12 @@ class CognitiveLoop:
                 self._stable_mask = None
                 self._reference_snapshot = None
                 self._reference_panel = None
+        # H51c: Capture session_id for notify_action_complete feedback.
+        # Avoids infinite session-reset loop caused by evaluate() seeing
+        # the real session_id while on_action_complete saw game_id.
+        if 'session_id' in extra_context:
+            self._session_id = extra_context['session_id']
+
         cf = CognitiveFrame(
             action_number=self._actions_taken,
             timestamp=time.time(),
@@ -1461,7 +1468,7 @@ class CognitiveLoop:
                 'game_type': game_type,
                 'game_id': self._game_id,  # H51b: full variant ID
                 'level': self._current_level,
-                'session_id': self._game_id,
+                'session_id': self._session_id or self._game_id,  # H51c: real session_id
                 'agent_position': self._agent_position,
                 'frame_changed': frame_changed,
                 'meaningful_frame_changed': (
@@ -1472,6 +1479,9 @@ class CognitiveLoop:
                 feedback_ctx['spatial_step_size'] = 5
             elif self._detected_step_size:
                 feedback_ctx['spatial_step_size'] = self._detected_step_size
+            elif game_type == 'ls20':
+                # H51c: LS20 always uses step=5 even without solver data
+                feedback_ctx['spatial_step_size'] = 5
             try:
                 self._decision_system.notify_action_complete(
                     action=action_str,
@@ -3459,6 +3469,9 @@ class CognitiveLoop:
         # Auto-detected step size fallback (for non-solver games)
         if 'spatial_step_size' not in context and self._detected_step_size:
             context['spatial_step_size'] = self._detected_step_size
+        # H51c: LS20 always uses step=5, even without solver data
+        if 'spatial_step_size' not in context and self._game_id[:4] == 'ls20':
+            context['spatial_step_size'] = 5
         # H44: Pass config-aware nav target from SPEED 1d to SpatialMapRung
         if self._solver_nav_target is not None:
             context['solver_nav_target'] = self._solver_nav_target
