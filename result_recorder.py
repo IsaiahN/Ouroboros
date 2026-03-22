@@ -282,7 +282,11 @@ class ResultRecorder:
         """
         try:
             import hashlib
-            state_id = f"wm_{uuid.uuid4().hex[:12]}"
+
+            # Deterministic state_id per game_id: INSERT OR REPLACE
+            # keeps exactly ONE row per game, preventing unbounded
+            # growth (previously created ~20 MB/session with random UUIDs).
+            state_id = f"wm_{game_id}"
 
             # Extract the key data to persist
             causal_map = world_model.get('causal_map', {})
@@ -315,7 +319,7 @@ class ResultRecorder:
             metadata_json = json.dumps(metadata_payload, default=str)
 
             self.db.execute_query("""
-                INSERT INTO world_model_states (
+                INSERT OR REPLACE INTO world_model_states (
                     state_id, game_id, session_id, step_number,
                     objects_json, grid_hash, score, metadata,
                     created_at

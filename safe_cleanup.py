@@ -663,6 +663,19 @@ class SafeDatabaseCleaner:
             c, conn, dry_run, verbose
         )
 
+        # =====================================================================
+        # WORLD MODEL STATES CLEANUP (prevent unbounded blob growth)
+        # =====================================================================
+        # world_model_states stores JSON blobs (~5-20 MB each). Keep:
+        #   - All solver_seed_* entries (permanent)
+        #   - Top 5 per game_id by step_number (best knowledge)
+        # Everything else is stale per-session snapshots.
+        if verbose:
+            print('\n28. Old world model states (large JSON blobs)')
+        results['tables_cleaned']['world_model_states'] = self._clean_world_model_states(
+            c, conn, dry_run, verbose
+        )
+
         # Calculate total
         results['total_deleted'] = sum(r.get('deleted', 0) for r in results['tables_cleaned'].values())
 
@@ -2191,6 +2204,65 @@ class SafeDatabaseCleaner:
                 print(f'   Deleted: {deleted:,} orphaned sessions')
 
         return {'found': orphaned, 'deleted': deleted}
+
+    def _clean_world_model_states(self, c, conn, dry_run, verbose):
+        """Prune world_model_states to prevent unbounded blob growth.
+
+        Each row stores a JSON blob (5-20 MB). Per-session snapshots
+        with random UUIDs caused the table to consume 16+ GB. Strategy:
+          - KEEP all solver_seed_* entries (permanent solver knowledge)
+          - KEEP top 5 per game_id by step_number (deepest knowledge)
+          - DELETE everything else
+        """
+        deleted = 0
+        excess = 0
+        try:
+            c.execute('SELECT COUNT(*) FROM world_model_states')
+            total = c.fetchone()[0]
+
+            # Build set of state_ids to keep
+            keep_ids = set()
+
+            # Solver seeds: always keep
+            c.execute("""SELECT state_id FROM world_model_states
+                         WHERE state_id LIKE 'solver_seed_%'""")
+            for r in c.fetchall():
+                keep_ids.add(r[0])
+
+            # Top 5 per game_id by step_number
+            c.execute("SELECT DISTINCT game_id FROM world_model_states")
+            game_ids = [r[0] for r in c.fetchall()]
+            for gid in game_ids:
+                c.execute("""SELECT state_id FROM world_model_states
+                             WHERE game_id = ?
+                             ORDER BY step_number DESC LIMIT 5""", (gid,))
+                for r in c.fetchall():
+                    keep_ids.add(r[0])
+
+            excess = total - len(keep_ids)
+
+            if verbose:
+                print(f'   Total: {total:,}, Keep: {len(keep_ids):,}, '
+                      f'Excess: {excess:,}')
+
+            if not dry_run and excess > 0:
+                placeholders = ','.join('?' * len(keep_ids))
+                c.execute(
+                    f"""DELETE FROM world_model_states
+                        WHERE state_id NOT IN ({placeholders})""",
+                    list(keep_ids))
+                deleted = c.rowcount
+                conn.commit()
+                if verbose:
+                    print(f'   Deleted: {deleted:,} rows')
+            elif excess > 0 and verbose:
+                print(f'   Would delete: {excess:,} rows')
+
+        except Exception as e:
+            if verbose:
+                print(f'   Could not clean world model states: {e}')
+
+        return {'found': excess, 'deleted': deleted}
 
     def verify_critical_data(self, verbose=True):
         """Verify that critical data is preserved."""
