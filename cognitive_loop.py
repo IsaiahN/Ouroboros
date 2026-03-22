@@ -1447,6 +1447,41 @@ class CognitiveLoop:
             if level_changed:
                 self._discovered_targets.append(self._agent_position)
 
+        # ═══ H51: Wire rung feedback (on_action_complete) ═══
+        # SpatialMapRung and WallAwareNavigationRung need action outcome
+        # feedback to discover walls, track movement, and update spatial maps.
+        # Previously only wired in game_loop.py path, not cognitive_loop.
+        if self._decision_system and self._last_action_info:
+            action_str = f"ACTION{self._last_action_info['type']}"
+            game_type = (
+                self._game_id[:4] if len(self._game_id) >= 4
+                else self._game_id
+            )
+            feedback_ctx = {
+                'game_type': game_type,
+                'level': self._current_level,
+                'session_id': self._game_id,
+                'agent_position': self._agent_position,
+                'frame_changed': frame_changed,
+                'meaningful_frame_changed': (
+                    self._consecutive_no_change == 0 and frame_changed
+                ),
+            }
+            if self._ls20_level_configs:
+                feedback_ctx['spatial_step_size'] = 5
+            elif self._detected_step_size:
+                feedback_ctx['spatial_step_size'] = self._detected_step_size
+            try:
+                self._decision_system.notify_action_complete(
+                    action=action_str,
+                    action_data=self._last_action_info,
+                    frame_before=self._prev_frame,
+                    frame_after=post_array,
+                    context=feedback_ctx,
+                )
+            except Exception:
+                pass  # Non-critical
+
         # Update game state
         if level_changed:
             self._current_level = new_level if new_level > 0 else self._current_level + 1
@@ -2871,9 +2906,11 @@ class CognitiveLoop:
                                 (int(parts[0]), int(parts[1])))
                         except (ValueError, IndexError):
                             pass
-                    _h38_gk = (
-                        f"{self._game_type}_L{self._current_level}"
+                    _h38_gt = (
+                        self._game_id[:4] if len(self._game_id) >= 4
+                        else self._game_id
                     )
+                    _h38_gk = f"{_h38_gt}_L{self._current_level}"
                     _h38_ne = _wm.get('no_effect_positions', {})
                     for pos_str, cnt in _h38_ne.get(_h38_gk, {}).items():
                         if cnt >= 2:
