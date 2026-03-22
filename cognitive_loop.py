@@ -1459,6 +1459,7 @@ class CognitiveLoop:
             )
             feedback_ctx = {
                 'game_type': game_type,
+                'game_id': self._game_id,  # H51b: full variant ID
                 'level': self._current_level,
                 'session_id': self._game_id,
                 'agent_position': self._agent_position,
