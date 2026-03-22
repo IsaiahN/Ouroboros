@@ -337,6 +337,7 @@ class CognitiveLoop:
         # ═══ GAP 3: Active plan for execution ═══
         self._active_plan: List[Any] = []
         self._agent_position: Optional[Tuple[int, int]] = None  # For movement games
+        self._detected_step_size: Optional[int] = None  # Auto-detected movement step size
         self._solver_nav_target: Optional[Tuple[int, int]] = None  # H44: SPEED 1d nav target
 
         # ═══ GAP 5: HUD state tracking ═══
@@ -389,6 +390,7 @@ class CognitiveLoop:
         self._goal_cells_total = 0
         self._active_plan = []
         self._agent_position = None
+        self._detected_step_size = None
         self._prev_hud_hash = 0
         self._prev_hud_region_hashes = {
             'top': 0, 'bottom': 0, 'left': 0, 'right': 0
@@ -1298,10 +1300,11 @@ class CognitiveLoop:
                         if self._agent_position != new_agent_pos:
                             cf.map_update = f"Moved to ({new_agent_pos[0]},{new_agent_pos[1]})"
 
-                            # ═══ Object Collision Detection (LS20) ═══
+                            # ═══ Object Collision Detection ═══
                             # If the agent moved AND extra frame changes
                             # occurred beyond agent movement, the agent
                             # may have collided with an interactive object.
+                            # Game-agnostic: works for any movement game.
                             if (self._prev_frame is not None
                                     and post_array is not None
                                     and frame_changed):
@@ -1311,19 +1314,28 @@ class CognitiveLoop:
                                     # Agent movement alone changes ~10-30 pixels.
                                     # If >50 pixels changed, something else happened.
                                     if changed_px > 50:
-                                        # Check what color was at the new position
-                                        # in the PREVIOUS frame (before collision)
                                         nx, ny = new_agent_pos
                                         if (0 <= ny < self._prev_frame.shape[0]
                                                 and 0 <= nx < self._prev_frame.shape[1]):
                                             object_color = int(self._prev_frame[ny, nx])
-                                            bg_color = 0  # Background is usually black
+                                            # Use detected bg color instead of
+                                            # assuming 0 (black).
+                                            bg_color = int(np.bincount(
+                                                self._prev_frame.flatten()
+                                            ).argmax())
                                             if object_color != bg_color:
+                                                # Pass HUD region states for
+                                                # effect classification.
+                                                hud_before = dict(
+                                                    self._prev_hud_region_states
+                                                ) if self._prev_hud_region_states else None
                                                 self._causal_map.record_collision(
                                                     agent_pos=new_agent_pos,
                                                     object_color=object_color,
-                                                    hud_snapshot_before=None,
+                                                    hud_snapshot_before=hud_before,
                                                     hud_snapshot_after=None,
+                                                    _frame_before=self._prev_frame,
+                                                    _frame_after=post_array,
                                                 )
                                                 cf.map_update += (
                                                     f" [COLLISION color={object_color}"
@@ -2041,16 +2053,13 @@ class CognitiveLoop:
             return 0
 
     def _detect_agent_position(self, frame: np.ndarray) -> Optional[Tuple[int, int]]:
-        """
-        Gap 3C: Detect agent position in a movement game.
+        """Detect agent position by frame differencing.
 
-        For movement games, the agent is typically the only object
-        that moves between frames. We detect it by diffing against
-        the previous frame and finding where the "moved object"
-        ended up.
-
-        Game-agnostic: finds the centroid of the largest changed
-        region that appeared in the new frame.
+        Distinguishes "arrived" pixels (background → player) from
+        "departed" (player → background).  The centroid of arrived
+        pixels is the new player position.  Also auto-detects
+        movement step size from the displacement between old and
+        new position centroids.
         """
         if self._prev_frame is None or frame.shape != self._prev_frame.shape:
             return self._agent_position
@@ -2060,16 +2069,55 @@ class CognitiveLoop:
             if not diff.any():
                 return self._agent_position  # No change, same position
 
-            # Find positions that are NEW (present in post but not pre)
-            # These are where the agent moved TO
             changed_ys, changed_xs = np.where(diff)
-            if len(changed_xs) == 0:
+            n_changed = len(changed_ys)
+            if n_changed == 0:
                 return self._agent_position
 
-            # Use centroid of changed pixels as approximate agent position
-            cx = int(np.mean(changed_xs))
-            cy = int(np.mean(changed_ys))
-            return (cx, cy)
+            # Too many changes = level transition / animation, not simple
+            # movement.  Keep previous position.
+            if n_changed > 400:
+                return self._agent_position
+
+            # Background = most frequent color in the current frame.
+            bg_color = int(np.bincount(frame.flatten()).argmax())
+
+            old_colors = self._prev_frame[changed_ys, changed_xs]
+            new_colors = frame[changed_ys, changed_xs]
+
+            # "Arrived" pixels: were background, now non-background
+            # (the player sprite appeared at this location)
+            arrived_mask = (old_colors == bg_color) & (new_colors != bg_color)
+            n_arrived = int(arrived_mask.sum())
+
+            if n_arrived < 2:
+                # Fallback: centroid of all changes (old behaviour)
+                return (int(np.mean(changed_xs)), int(np.mean(changed_ys)))
+
+            arr_xs = changed_xs[arrived_mask]
+            arr_ys = changed_ys[arrived_mask]
+            new_pos = (int(np.mean(arr_xs)), int(np.mean(arr_ys)))
+
+            # Auto-detect step size from departed-pixel centroid
+            if self._detected_step_size is None:
+                departed_mask = (
+                    (old_colors != bg_color) & (new_colors == bg_color)
+                )
+                if departed_mask.sum() >= 2:
+                    dep_xs = changed_xs[departed_mask]
+                    dep_ys = changed_ys[departed_mask]
+                    old_pos = (
+                        int(np.mean(dep_xs)), int(np.mean(dep_ys))
+                    )
+                    step = max(
+                        abs(new_pos[0] - old_pos[0]),
+                        abs(new_pos[1] - old_pos[1]),
+                    )
+                    # Sanity: step should be 1-15 px for grid games
+                    if 1 <= step <= 15:
+                        self._detected_step_size = step
+
+            return new_pos
 
         except Exception:
             return self._agent_position
@@ -2639,63 +2687,63 @@ class CognitiveLoop:
                             )
 
                     if nav_target is not None:
-                        max_fuel_1d = lc.get('max_fuel', 999)
-                        if max_fuel_1d < 999:
-                            # H44: Delegate to fuel-aware SpatialMapRung.
-                            # SPEED 1d determines WHAT (config-aware target),
-                            # SpatialMapRung determines HOW (fuel-aware BFS).
-                            self._solver_nav_target = nav_target
-                            # Fall through to SPEED 2 (rung system)
-                        else:
-                            # Original BFS for non-fuel-limited games
-                            wall_set_nav = {
-                                (w[0], w[1]) for w in lc.get('walls', [])
-                            }
-                            bfs_dirs = {
-                                1: (0, -5), 2: (0, 5),
-                                3: (-5, 0), 4: (5, 0),
-                            }
-                            bfs_q = collections.deque()
-                            bfs_q.append(((ax, ay), []))
-                            bfs_seen = {(ax, ay)}
-                            bfs_result = None
-                            bfs_steps = 0
-                            while bfs_q and bfs_steps < 300:
-                                bfs_steps += 1
-                                bpos, bpath = bfs_q.popleft()
-                                for ba, (bdx, bdy) in bfs_dirs.items():
-                                    bnx = bpos[0] + bdx
-                                    bny = bpos[1] + bdy
-                                    if (bnx, bny) in wall_set_nav:
-                                        continue
-                                    if (bnx < 0 or bnx >= 64
-                                            or bny < 0 or bny >= 64):
-                                        continue
-                                    if (bnx, bny) in bfs_seen:
-                                        continue
-                                    bfs_seen.add((bnx, bny))
-                                    nbpath = bpath + [ba]
-                                    if (bnx, bny) == nav_target:
-                                        bfs_result = nbpath[0]
-                                        break
-                                    bfs_q.append(((bnx, bny), nbpath))
-                                if bfs_result is not None:
-                                    break
+                        # Also set hint for SpatialMapRung fuel-aware
+                        # routing (used if SPEED 1d BFS fails).
+                        self._solver_nav_target = nav_target
 
+                        # Always compute BFS directly — never delegate
+                        # to rung system which may lose competition.
+                        # (H44 regression: delegating caused Gen 110
+                        # collapse when SpatialMapRung lost to other
+                        # rungs and agents got random actions.)
+                        wall_set_nav = {
+                            (w[0], w[1]) for w in lc.get('walls', [])
+                        }
+                        bfs_dirs = {
+                            1: (0, -5), 2: (0, 5),
+                            3: (-5, 0), 4: (5, 0),
+                        }
+                        bfs_q = collections.deque()
+                        bfs_q.append(((ax, ay), []))
+                        bfs_seen = {(ax, ay)}
+                        bfs_result = None
+                        bfs_steps = 0
+                        while bfs_q and bfs_steps < 300:
+                            bfs_steps += 1
+                            bpos, bpath = bfs_q.popleft()
+                            for ba, (bdx, bdy) in bfs_dirs.items():
+                                bnx = bpos[0] + bdx
+                                bny = bpos[1] + bdy
+                                if (bnx, bny) in wall_set_nav:
+                                    continue
+                                if (bnx < 0 or bnx >= 64
+                                        or bny < 0 or bny >= 64):
+                                    continue
+                                if (bnx, bny) in bfs_seen:
+                                    continue
+                                bfs_seen.add((bnx, bny))
+                                nbpath = bpath + [ba]
+                                if (bnx, bny) == nav_target:
+                                    bfs_result = nbpath[0]
+                                    break
+                                bfs_q.append(((bnx, bny), nbpath))
                             if bfs_result is not None:
-                                action_num = bfs_result
-                                dist = abs(nav_target[0] - ax) + abs(
-                                    nav_target[1] - ay
-                                )
-                                cf.action_speed = "exploit"
-                                cf.action_type = action_num
-                                cf.action_reason = nav_reason
-                                cf.action_confidence = 0.7
-                                cf.action_summary = (
-                                    f"H39b-NAV: ACTION{action_num}"
-                                    f" | {nav_reason} d={dist}"
-                                )
-                                return action_num, None
+                                break
+
+                        if bfs_result is not None:
+                            action_num = bfs_result
+                            dist = abs(nav_target[0] - ax) + abs(
+                                nav_target[1] - ay
+                            )
+                            cf.action_speed = "exploit"
+                            cf.action_type = action_num
+                            cf.action_reason = nav_reason
+                            cf.action_confidence = 0.7
+                            cf.action_summary = (
+                                f"H39b-NAV: ACTION{action_num}"
+                                f" | {nav_reason} d={dist}"
+                            )
+                            return action_num, None
 
         # ─── SPEED 1c: H26/H28 pixel-accurate targeting for click games ──
         # For games where ACTION6 (click) is available, the rung system
@@ -3303,6 +3351,9 @@ class CognitiveLoop:
                 context['spatial_step_size'] = 5  # LS20 uses 5-pixel steps
         if self._agent_position is not None:
             context['agent_position'] = self._agent_position
+        # Auto-detected step size fallback (for non-solver games)
+        if 'spatial_step_size' not in context and self._detected_step_size:
+            context['spatial_step_size'] = self._detected_step_size
         # H44: Pass config-aware nav target from SPEED 1d to SpatialMapRung
         if self._solver_nav_target is not None:
             context['solver_nav_target'] = self._solver_nav_target

@@ -394,7 +394,9 @@ class CognitiveGamePlayer:
                             None),
                         # H44: Spatial context for item/target tracking
                         'agent_position': loop._agent_position,
-                        'spatial_step_size': 5,
+                        'spatial_step_size': (
+                            loop._detected_step_size or 5
+                        ),
                         'remaining_actions': max(0, action_budget - actions_taken),
                         'actions_this_level': actions_taken - loop._level_start_actions,
                         'solver_max_fuel': loop._ls20_level_configs.get(

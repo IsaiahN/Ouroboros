@@ -210,17 +210,39 @@ class MetaLearningCurriculum:
             game_index = hash(agent_id) % len(available_games)
             focus_game = available_games[game_index]
 
-        # H29: Guarantee coverage — play each game at least once when
-        # num_games is large enough, fill remaining slots with focus game
-        if num_games >= len(available_games):
-            others = [g for g in available_games if g != focus_game]
-            games = [focus_game] + others
+        # H29: Guarantee game-TYPE coverage — ensure each game type
+        # (e.g. ft09, ls20, vc33) appears at least once.  When multiple
+        # variants of the same type exist (ft09-abc, ft09-xyz), pick
+        # one variant per type, then fill remaining slots with focus game.
+        import random as _rng
+
+        # Group available games by type (prefix before first '-')
+        type_map: dict = {}
+        for g in available_games:
+            gtype = g.split('-')[0] if '-' in g else g
+            type_map.setdefault(gtype, []).append(g)
+
+        # Pick one representative per type (prefer focus_game's variant)
+        focus_type = focus_game.split('-')[0] if '-' in focus_game else focus_game
+        type_picks: list = []
+        for gtype, variants in type_map.items():
+            if gtype == focus_type:
+                type_picks.append(focus_game)
+            else:
+                type_picks.append(_rng.choice(variants))
+
+        if num_games >= len(type_picks):
+            # Enough slots: one per type, fill rest with focus game
+            games = list(type_picks)
             while len(games) < num_games:
                 games.append(focus_game)
+            _rng.shuffle(games)
             return games[:num_games]
 
-        # Not enough slots for all games — pure specialization
-        return [focus_game] * max(1, num_games)
+        # Fewer slots than types: focus + random sample of others
+        others = [g for g in type_picks if g != focus_game]
+        games = [focus_game] + _rng.sample(others, min(num_games - 1, len(others)))
+        return games[:num_games]
 
     def _select_similar_pair(self, agent_id: str, available_games: List[str]) -> List[str]:
         """Stage 2: Select original game + one similar game"""
