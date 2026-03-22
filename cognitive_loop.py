@@ -340,6 +340,12 @@ class CognitiveLoop:
         self._detected_step_size: Optional[int] = None  # Auto-detected movement step size
         self._solver_nav_target: Optional[Tuple[int, int]] = None  # H44: SPEED 1d nav target
 
+        # ═══ H50: Autonomous target discovery ═══
+        # When level completes, the agent's last position was a target.
+        # Track discovered targets per game for BFS routing on new levels.
+        self._discovered_targets: List[Tuple[int, int]] = []
+        self._discovered_scoring_positions: List[Tuple[int, int]] = []
+
         # ═══ GAP 5: HUD state tracking ═══
         self._prev_hud_hash: int = 0
         self._hud_edge_size: int = 6  # Pixels from frame edge considered HUD
@@ -1432,6 +1438,14 @@ class CognitiveLoop:
             self._last_action_info['score_delta'] = score_delta
             self._last_action_info['level_changed'] = level_changed
             self._last_action_info['consecutive_no_change'] = self._consecutive_no_change
+
+        # ═══ H50: Autonomous target discovery ═══
+        # When score increases in a movement game, the agent's last position
+        # was likely a target/goal.  Record it for future BFS routing.
+        if score_delta > 0 and self._agent_position is not None:
+            self._discovered_scoring_positions.append(self._agent_position)
+            if level_changed:
+                self._discovered_targets.append(self._agent_position)
 
         # Update game state
         if level_changed:
@@ -3415,6 +3429,14 @@ class CognitiveLoop:
         )
         # H44: Per-level action count for fuel-aware navigation
         context['actions_this_level'] = self._actions_taken - self._level_start_actions
+
+        # ═══ H50: Discovered targets from score/level events ═══
+        if self._discovered_targets:
+            context['discovered_targets'] = list(self._discovered_targets)
+        if self._discovered_scoring_positions:
+            context['discovered_scoring_positions'] = list(
+                self._discovered_scoring_positions
+            )
 
         # ═══ H48: Player self-model for config-aware rungs ═══
         if self._player_properties:
