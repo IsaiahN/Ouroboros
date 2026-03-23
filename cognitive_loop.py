@@ -2212,12 +2212,27 @@ class CognitiveLoop:
             n_arrived = int(arrived_mask.sum())
 
             if n_arrived < 2:
+                # H51d: Very few arrived pixels = likely timer animation
+                # only, not agent movement. Keep current position.
+                if self._agent_position is not None:
+                    return self._agent_position
                 # Fallback: centroid of all changes (old behaviour)
                 return (int(np.mean(changed_xs)), int(np.mean(changed_ys)))
 
             arr_xs = changed_xs[arrived_mask]
             arr_ys = changed_ys[arrived_mask]
             new_pos = (int(np.mean(arr_xs)), int(np.mean(arr_ys)))
+
+            # H51d: Displacement sanity check — if agent position is known,
+            # verify movement is within reasonable step distance.
+            # Timer/HUD animations can create "arrived" pixels far from
+            # the agent, causing centroid jumps of 30+ pixels.
+            if self._agent_position is not None:
+                dx = abs(new_pos[0] - self._agent_position[0])
+                dy = abs(new_pos[1] - self._agent_position[1])
+                max_step = self._detected_step_size or 15
+                if dx > max_step or dy > max_step:
+                    return self._agent_position  # Artifact, keep position
 
             # Auto-detect step size from departed-pixel centroid
             if self._detected_step_size is None:
@@ -2380,7 +2395,14 @@ class CognitiveLoop:
             # Movement-only game: try to detect agent position
             frame_array = self._perceiver._to_numpy(frame)
             if frame_array is not None:
-                self._agent_position = self._detect_agent_position(frame_array)
+                detected = self._detect_agent_position(frame_array)
+                if detected is not None:
+                    self._agent_position = detected
+                else:
+                    # H51d: Default position when no solver data and
+                    # frame differencing can't work (no prev_frame yet).
+                    # SpatialMapRung will correct via wall learning.
+                    self._agent_position = (32, 32)
 
         return percept
 
