@@ -1452,11 +1452,17 @@ class DecisionRungSystem:
         if emergency_result is not None:
             return emergency_result
 
-        # H44: Fuel-critical override — spatial_map gets priority when
-        # per-level fuel exists and the game has a fuel-limited navigation
-        # system. Without this, the cognitive router may not select
-        # spatial_map until fuel is nearly exhausted.
-        if context.get('solver_max_fuel', 999) < 999:
+        # H44/H51d: spatial_map priority for movement games. The cognitive
+        # router may not select spatial_map due to low affinity/UK-potential,
+        # but it's the ONLY rung with wall-aware BFS navigation. Without
+        # this override, agents wander randomly into walls.
+        # H44: fuel-limited games. H51d: ALL directional-action-only games.
+        _avail = context.get('available_actions', [])
+        _movement_only = (
+            any(a in (1, 2, 3, 4) for a in _avail if isinstance(a, int))
+            and not any(a in (5, 6, 7) for a in _avail if isinstance(a, int))
+        )
+        if context.get('solver_max_fuel', 999) < 999 or _movement_only:
             for rung in self.rungs:
                 if rung.name == 'spatial_map' and rung.enabled:
                     try:
