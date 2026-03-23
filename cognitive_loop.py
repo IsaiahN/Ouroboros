@@ -404,6 +404,7 @@ class CognitiveLoop:
         self._goal_cells_total = 0
         self._active_plan = []
         self._agent_position = None
+        self._position_confirmed = False  # H51d: True after frame detection
         self._detected_step_size = None
         self._session_id: Optional[str] = None  # H51c: set by cycle()
         self._prev_hud_hash = 0
@@ -460,6 +461,7 @@ class CognitiveLoop:
             self._ls20_config = list(lc1['initial_config'])
         if lc1 and 'agent_pos' in lc1:
             self._agent_position = tuple(lc1['agent_pos'])
+            self._position_confirmed = True
         if lc1 and 'walls' in lc1:
             self._seed_ls20_walls(lc1['walls'])
 
@@ -1520,6 +1522,7 @@ class CognitiveLoop:
                 self._ls20_config = None
             if lc and 'agent_pos' in lc:
                 self._agent_position = tuple(lc['agent_pos'])
+                self._position_confirmed = True
             if lc and 'walls' in lc:
                 self._seed_ls20_walls(lc['walls'])
             self._frame_history = []
@@ -2223,16 +2226,20 @@ class CognitiveLoop:
             arr_ys = changed_ys[arrived_mask]
             new_pos = (int(np.mean(arr_xs)), int(np.mean(arr_ys)))
 
-            # H51d: Displacement sanity check — if agent position is known,
-            # verify movement is within reasonable step distance.
-            # Timer/HUD animations can create "arrived" pixels far from
-            # the agent, causing centroid jumps of 30+ pixels.
-            if self._agent_position is not None:
+            # H51d: Displacement sanity check — if agent position was
+            # confirmed by frame detection (not just default), verify
+            # movement is within reasonable step distance. Timer/HUD
+            # animations can create "arrived" pixels far from the agent.
+            # Skip check when position is bootstrapping from default.
+            if (self._agent_position is not None
+                    and self._position_confirmed):
                 dx = abs(new_pos[0] - self._agent_position[0])
                 dy = abs(new_pos[1] - self._agent_position[1])
                 max_step = self._detected_step_size or 15
                 if dx > max_step or dy > max_step:
                     return self._agent_position  # Artifact, keep position
+            # Mark position as confirmed from detection
+            self._position_confirmed = True
 
             # Auto-detect step size from departed-pixel centroid
             if self._detected_step_size is None:
