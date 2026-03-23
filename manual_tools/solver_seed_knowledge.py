@@ -437,6 +437,9 @@ def seed_ls20(solver_seqs):
             str(k): v for k, v in solver_level_configs.items()
         },
         'completeness': 0.7,
+        # H51d: solver_level_configs are variant-specific (maze layout).
+        # Tag with source variant so loading code can skip for other variants.
+        'source_game_id': 'ls20-cb3b57cc',
     }
 
 

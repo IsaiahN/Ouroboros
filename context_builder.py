@@ -1096,7 +1096,7 @@ class ContextBuilder:
                 game_prefix = game_id[:4] if len(game_id) >= 4 else game_id
                 # Find most recent world_model for any game with same prefix
                 rows = self._db.execute_query("""
-                    SELECT objects_json FROM world_model_states
+                    SELECT objects_json, game_id FROM world_model_states
                     WHERE game_id LIKE ? || '%'
                     ORDER BY created_at DESC LIMIT 1
                 """, (game_prefix,))
@@ -1117,8 +1117,15 @@ class ContextBuilder:
                         if seed_no_effect:
                             self._world_model['no_effect_positions'] = seed_no_effect
                         # H39b: Load LS20 level configs if present
+                        # H51d: solver_level_configs contain variant-specific
+                        # maze layouts (walls, positions). Only load from
+                        # exact game_id match — prefix match gives wrong
+                        # variant's walls to new variants.
                         seed_level_configs = stored.get('solver_level_configs', {})
-                        if seed_level_configs:
+                        row_game_id = (
+                            rows[0].get('game_id', '') if isinstance(rows[0], dict) else ''
+                        )
+                        if seed_level_configs and row_game_id == game_id:
                             self._world_model['solver_level_configs'] = seed_level_configs
                 # Load solver-seeded knowledge from dedicated solver_seed_*
                 # entry (separate from runtime wms_*_best to avoid overwrites)
@@ -1136,8 +1143,14 @@ class ContextBuilder:
                             if sg:
                                 self._world_model['solver_goal_states'] = sg
                             # H39b: Load LS20 level configs (targets, changers, init)
+                            # H51d: solver_level_configs are variant-specific
+                            # (walls, positions, changers). The solver_seed is
+                            # built from ONE specific variant — loading its
+                            # maze layout for a different variant causes wrong
+                            # position tracking and navigation.
                             slc = solver_stored.get('solver_level_configs', {})
-                            if slc:
+                            source_gid = solver_stored.get('source_game_id', '')
+                            if slc and (not source_gid or source_gid == game_id):
                                 self._world_model['solver_level_configs'] = slc
             except Exception:
                 pass  # Non-critical: seeding failure is fine, start fresh

@@ -714,10 +714,18 @@ class CognitiveLoop:
                                 continue
 
                         # H39b: Load LS20 level configs
+                        # H51d: Only load if solver seed was built
+                        # from this exact variant — maze layouts
+                        # (walls/positions) are variant-specific.
                         slc_data = solver_data.get(
                             'solver_level_configs', {}
                         )
-                        if slc_data and not self._ls20_level_configs:
+                        source_gid = solver_data.get(
+                            'source_game_id', ''
+                        )
+                        if (slc_data and not self._ls20_level_configs
+                                and (not source_gid
+                                     or source_gid == game_id)):
                             self._ls20_level_configs = slc_data
 
                         # Also load solver effects/rules/walls if main
