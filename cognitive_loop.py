@@ -369,6 +369,20 @@ class CognitiveLoop:
         self._player_properties: Dict[str, Any] = {}
         self._player_property_history: List[Dict] = []
 
+        # ═══ H57: Reward-sparsity escalator ═══
+        # Tracks actions elapsed since last positive score event.
+        # When this grows large, the agent shifts to experiment mode
+        # to break out of reward-desert situations (RPG-style games,
+        # items-gated progression, any game where H47 hasn't fired).
+        self._actions_since_score: int = 0
+
+        # ═══ H33: Anti-oscillation frame hash ring ═══
+        # Hashes of recent post-action frames.  If the current frame
+        # matches a recent hash the agent is oscillating (same states
+        # revisited).  Triggers experiment strategy to escape the loop.
+        self._recent_frame_hashes: List[int] = []
+        self._oscillation_detected: bool = False
+
     # ─── Game Lifecycle ───────────────────────────────────────────────
 
     def start_game(
@@ -414,6 +428,11 @@ class CognitiveLoop:
         self._prev_hud_region_states = {}
         self._reference_panel = None
         self._productive_rotation_index = 0  # Fix 3: rotate among productive targets
+
+        # H57 / H33: reset per-game counters
+        self._actions_since_score = 0
+        self._recent_frame_hashes = []
+        self._oscillation_detected = False
 
         # H39b: LS20 config-aware navigation state
         self._ls20_config = None  # [shape, color, rot] or None
@@ -1181,6 +1200,23 @@ class CognitiveLoop:
             )
             if self._actions_taken % 10 == 0:
                 self._causal_map.infer_goal_from_scores()
+
+        # ═══ H57: Reward-sparsity escalator — track dry-spell length ═══
+        if score_delta != 0 or level_changed:
+            self._actions_since_score = 0   # Score event resets the counter
+        else:
+            self._actions_since_score += 1
+
+        # ═══ H33: Anti-oscillation — detect revisited frame states ═══
+        if post_array is not None:
+            try:
+                fhash = hash(post_array.tobytes())
+                self._oscillation_detected = fhash in self._recent_frame_hashes
+                self._recent_frame_hashes.append(fhash)
+                if len(self._recent_frame_hashes) > 40:
+                    self._recent_frame_hashes = self._recent_frame_hashes[-40:]
+            except Exception:
+                self._oscillation_detected = False
 
         # ═══ GAP 5: HUD state tracking ═══
         self._check_hud_state(cf, post_array)
@@ -2565,6 +2601,23 @@ class CognitiveLoop:
             if self._consecutive_same_action >= 20:
                 return "explore"   # Full reset — random walk
             return "experiment"    # Break the pattern
+
+        # ═══ H33: Anti-oscillation ═══
+        # Revisiting a recent frame state means we're stuck in a loop.
+        # Force experiment to try a different approach.
+        if self._oscillation_detected:
+            return "experiment"
+
+        # ═══ H57: Reward-sparsity escalator ═══
+        # Many actions without any score event = wrong strategy.
+        # Two thresholds: soft (50) and hard (120).
+        # Soft: frame IS changing but no reward → we're doing something,
+        #       just not scoring → switch to experiment.
+        # Hard: nothing is working at all → experiment regardless.
+        if self._actions_since_score > 120:
+            return "experiment"
+        if self._actions_since_score > 50 and percept.consecutive_no_change < 5:
+            return "experiment"
 
         # ═══ GAP 5D: Timer urgency override ═══
         # When the timer is critical, stop exploring — exploit what we know NOW.
