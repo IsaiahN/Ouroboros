@@ -229,6 +229,13 @@ class CausalMap:
         self._score_observations: int = 0
         self._goal_source: str = ''  # 'perceiver', 'score_correlation'
 
+        # ─── H53: Win-State Goal Templates ────────────────────────────
+        # When a level completes, capture the winning board state so future
+        # sessions can use it as a goal without needing solver data or a
+        # reference panel. Keyed by level number (1-based).
+        self._win_templates: Dict[int, Dict[Tuple[int, int], int]] = {}
+        # {level: {(x,y): color}} — the board state right before level-up
+
         # ─── Solver-Seeded Knowledge (H34) ────────────────────────────
         # Per-level ordered list of positions from solver sequences.
         # Used by H26 pixel targeting as high-priority click targets.
@@ -1019,6 +1026,43 @@ class CausalMap:
         except Exception as e:
             logger.debug(f"[CAUSAL-MAP] H47 score correlation failed: {e}")
 
+    # ─── H53: Win-State Goal Templates ───────────────────────────────
+
+    def record_win_state(self, level: int, cells: Dict[Tuple[int, int], int]):
+        """Capture the board state at level completion as a goal template.
+
+        Called when level_changed=True, BEFORE the level reset, so we
+        capture what the winning board actually looked like.  Stored by
+        level number so future sessions can use it as the goal.
+        """
+        if not cells:
+            return
+        self._win_templates[level] = dict(cells)
+        logger.info(
+            f"[CAUSAL-MAP] H53: Captured win-state template for L{level} "
+            f"({len(cells)} cells)"
+        )
+
+    def apply_win_template(self, level: int) -> bool:
+        """Apply a captured win-state as goal_cells for the given level.
+
+        Called on level start.  Only applies if we don't already have goals
+        from a more authoritative source (perceiver panel or solver).
+        Returns True if template was applied.
+        """
+        if self._goal_cells and len(self._goal_cells) > 3:
+            return False  # Already have goals — don't override
+        template = self._win_templates.get(level)
+        if not template:
+            return False
+        self._goal_cells = dict(template)
+        self._goal_source = 'win_template'
+        logger.info(
+            f"[CAUSAL-MAP] H53: Applied win-template as goal for L{level} "
+            f"({len(self._goal_cells)} cells)"
+        )
+        return True
+
     def infer_goal_from_scores(self, min_observations: int = 3):
         """Derive goal cells from accumulated score correlations.
 
@@ -1191,6 +1235,46 @@ class CausalMap:
                     confidence=self._effects[best_click].confidence,
                 ))
                 step += 1
+                continue
+
+            # ── H55: Self-toggle rule extrapolation ──────────────────
+            # When no observed effect covers this target and the self_toggle
+            # rule is known (clicking (x,y) affects only (x,y)), infer that
+            # clicking target_pos will toggle it — even if never visited.
+            # This lets the agent plan for the full board after seeing just
+            # a few cells, without needing solver data.
+            self_toggle_rule = next(
+                (r for r in self._rules
+                 if r.rule_type == 'self_toggle' and r.confidence >= 0.5),
+                None
+            )
+            if self_toggle_rule:
+                # Compute clicks needed based on color cycle (if known)
+                cycle = self._color_cycles.get(target_pos, [])
+                unique_cycle = []
+                for c in cycle:
+                    if c not in unique_cycle:
+                        unique_cycle.append(c)
+                if len(unique_cycle) >= 2 and current_c in unique_cycle and goal_c in unique_cycle:
+                    ci = unique_cycle.index(current_c)
+                    gi = unique_cycle.index(goal_c)
+                    clicks_needed = (gi - ci) % len(unique_cycle) or len(unique_cycle)
+                else:
+                    clicks_needed = 1  # Default: one click to toggle
+                conf = self_toggle_rule.confidence * 0.75  # Discounted — not yet observed
+                for _ in range(clicks_needed):
+                    plan.append(PlannedAction(
+                        position=target_pos,
+                        expected_changes=[(target_pos[0], target_pos[1], current_c, goal_c)],
+                        reason=(
+                            f"H55 self-toggle ({target_pos[0]},{target_pos[1]}) "
+                            f"{current_c}->{goal_c} "
+                            f"(rule conf={self_toggle_rule.confidence:.0%})"
+                        ),
+                        step_number=step,
+                        confidence=conf,
+                    ))
+                    step += 1
 
         self._plan = plan
         self._plan_valid = len(plan) > 0

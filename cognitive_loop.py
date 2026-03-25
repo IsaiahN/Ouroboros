@@ -455,6 +455,10 @@ class CognitiveLoop:
             except Exception:
                 pass
 
+        # H53: Apply win-template as goal for L1 if available from prior sessions
+        if self._causal_map:
+            self._causal_map.apply_win_template(1)
+
         # H39b: Initialize LS20 config and agent position for level 1
         lc1 = self._ls20_level_configs.get('1', {})
         if lc1 and 'initial_config' in lc1:
@@ -673,6 +677,21 @@ class CognitiveLoop:
                             ]
                             if parsed:
                                 causal_map._solver_targets[level_num] = parsed
+                        except (ValueError, TypeError):
+                            continue
+
+                    # ── H53: Load win-state goal templates ──
+                    win_templates_data = data.get('win_templates', {})
+                    for level_str, cells_dict in win_templates_data.items():
+                        try:
+                            level_num = int(level_str)
+                            parsed = {}
+                            for pos_key, color in cells_dict.items():
+                                parts = pos_key.strip('()').split(',')
+                                pos = (int(parts[0].strip()), int(parts[1].strip()))
+                                parsed[pos] = int(color)
+                            if parsed:
+                                causal_map._win_templates[level_num] = parsed
                         except (ValueError, TypeError):
                             continue
 
@@ -1505,6 +1524,19 @@ class CognitiveLoop:
 
         # Update game state
         if level_changed:
+            # ═══ H53: Capture win-state goal template BEFORE level reset ═══
+            # Record the board state at level completion so future sessions
+            # can use it as a goal without solver data or reference panels.
+            # Only useful for click games where the winning board is a visual
+            # pattern (not for movement games where level-up is positional).
+            if (self._causal_map
+                    and self._causal_map._current_cells
+                    and not any(a in self._available_actions for a in (1, 2, 3, 4))):
+                completed_level = self._current_level
+                self._causal_map.record_win_state(
+                    completed_level, self._causal_map._current_cells
+                )
+
             self._current_level = new_level if new_level > 0 else self._current_level + 1
             self._level_start_actions = self._actions_taken  # H44: per-level fuel
             # Reset stable regions for new level (visual layout may change)
@@ -1539,6 +1571,9 @@ class CognitiveLoop:
             # game-level mechanics (rules, effects, color cycles)
             if self._causal_map:
                 self._causal_map.reset_for_new_level()
+                # H53: Apply win-template as goal for this new level
+                # (template was loaded from prior sessions in _load_prior_knowledge)
+                self._causal_map.apply_win_template(self._current_level)
         self._score = new_score if new_score else self._score + score_delta
 
         # Build result summary
@@ -2453,7 +2488,9 @@ class CognitiveLoop:
 
         # Derive action strategy from FeltState + game signals
         strategy = self._derive_strategy(
-            felt, percept, _prior_loaded=self._prior_knowledge_loaded
+            felt, percept,
+            _prior_loaded=self._prior_knowledge_loaded,
+            causal_map=self._causal_map,  # H56
         )
 
         # Track strategy history for stability computation
@@ -2501,6 +2538,7 @@ class CognitiveLoop:
         felt: FeltState,
         percept: PerceptualField,
         _prior_loaded: bool = False,
+        causal_map: Any = None,
     ) -> str:
         """
         Derive action strategy from FeltState + game state.
@@ -2599,6 +2637,22 @@ class CognitiveLoop:
             return "exploit"
         if felt.valence == Valence.OPPORTUNITY and felt.agency > 0.5:
             return "exploit"
+
+        # ═══ H56: Rule-based strategy unlock ═══
+        # map_completeness > 0.2 means rule_conf > 0.5 (from completeness formula:
+        # rule_conf*0.3 + explored_frac*0.7). If we've inferred generalizable
+        # rules, stop random exploration and engage the full cognitive pipeline.
+        if percept.map_completeness > 0.2 and causal_map is not None:
+            # If rules + goals → try to plan and execute
+            if causal_map._goal_cells and causal_map._current_cells:
+                try:
+                    plan = causal_map.plan_to_goal()
+                    if plan:
+                        return "execute"
+                except Exception:
+                    pass
+            # Rules known but no plan yet → experiment to find goals/effects
+            return "experiment"
 
         # EXPLORE: default -- gather information
         return "explore"

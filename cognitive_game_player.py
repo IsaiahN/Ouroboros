@@ -876,6 +876,13 @@ class CognitiveGamePlayer:
                     (p[0], p[1]) for p in positions
                 ]
 
+            # H53: Persist win-state templates for future sessions
+            win_templates = {}
+            for lvl, cells in causal_map._win_templates.items():
+                win_templates[str(lvl)] = {
+                    f"({p[0]},{p[1]})": color for p, color in cells.items()
+                }
+
             objects_json = _json.dumps({
                 'causal_map': causal_data,
                 'color_cycles': color_cycles,
@@ -886,6 +893,7 @@ class CognitiveGamePlayer:
                     for r in causal_map._rules
                 ],
                 'solver_targets': solver_targets,
+                'win_templates': win_templates,  # H53
                 'completeness': causal_map.completeness,
             })
 
@@ -1333,28 +1341,53 @@ class CognitiveGamePlayer:
                 print(f"    [H10-SCAFFOLD] Failed to create scaffold: {e}")
             return None
 
-    def _load_fallback_sequence(self, game_type: str, level_number: int) -> List:
+    def _load_fallback_sequence(
+        self, game_type: str, level_number: int, game_id: str = None
+    ) -> List:
         """Load the best winning sequence for a specific game type and level.
+
+        H52: When game_id is provided, prefer variant-specific sequences
+        (matching game_id) before falling back to game_type-wide search.
+        This prevents cross-variant maze/puzzle sequence contamination.
 
         Returns the parsed action sequence list, or empty list if none found.
         Each entry is either a dict {'action': int, 'data': {...}} or a bare
         action name string (legacy format).
         """
+        import json as _json
+
+        def _parse_seq(result):
+            seq_data = (
+                result[0].get('action_sequence')
+                if isinstance(result[0], dict)
+                else result[0][0]
+            )
+            if seq_data:
+                return _json.loads(seq_data) if isinstance(seq_data, str) else list(seq_data)
+            return []
+
         try:
+            # H52: Try variant-specific (game_id) match first
+            if game_id:
+                result = self._gp.db.execute_query("""
+                    SELECT action_sequence FROM winning_sequences
+                    WHERE game_id = ? AND level_number = ? AND is_active = 1
+                    ORDER BY efficiency_score DESC LIMIT 1
+                """, (game_id, level_number))
+                if result:
+                    seq = _parse_seq(result)
+                    if seq:
+                        return seq
+            # Fall back to game_type-wide search (backwards compat)
             result = self._gp.db.execute_query("""
                 SELECT action_sequence FROM winning_sequences
                 WHERE game_type = ? AND level_number = ? AND is_active = 1
                 ORDER BY efficiency_score DESC LIMIT 1
             """, (game_type, level_number))
             if result:
-                import json
-                seq_data = (
-                    result[0].get('action_sequence')
-                    if isinstance(result[0], dict)
-                    else result[0][0]
-                )
-                if seq_data:
-                    return json.loads(seq_data) if isinstance(seq_data, str) else list(seq_data)
+                seq = _parse_seq(result)
+                if seq:
+                    return seq
         except Exception:
             pass
         return []
@@ -1384,7 +1417,7 @@ class CognitiveGamePlayer:
         all_sequences: List[List[dict]] = []
         scaffold_info = {}  # level_idx -> (explore_indices, mutation_id)
         for level_num in range(1, win_levels + 1):
-            seq = self._load_fallback_sequence(game_type, level_num)
+            seq = self._load_fallback_sequence(game_type, level_num, game_id=game_id)
             if not seq:
                 # H10: Try hybrid scaffold from previous level's template
                 if level_num > 1:
