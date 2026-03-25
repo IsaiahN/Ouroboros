@@ -85,3 +85,6 @@ Thumbs.db
 # Documentation (internal only)
 DOCS/
 agents.md
+competition_knowledge/ft09-*.json
+competition_knowledge/vc33-*.json
+competition_knowledge/
