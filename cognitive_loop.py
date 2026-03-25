@@ -383,6 +383,75 @@ class CognitiveLoop:
         self._recent_frame_hashes: List[int] = []
         self._oscillation_detected: bool = False
 
+        # ═══ H58: Shmup / scrolling-world mode detection ═══
+        # In scrolling shooters the agent sprite stays near a fixed
+        # screen position while the world scrolls past.  H51 sees no
+        # agent displacement and builds a phantom wall map.  When we
+        # detect this pattern, disable spatial navigation and rely on
+        # H47 score-correlation for goal learning instead.
+        self._shmup_mode: bool = False
+        self._shmup_movement_count: int = 0    # movement actions attempted
+        self._shmup_fixed_actions: int = 0     # those with <10 px agent drift
+
+        # ═══ H59: Isometric / diagonal-movement mode detection ═══
+        # In isometric games every cardinal action produces a diagonal
+        # pixel displacement (~equal dx and dy magnitude).  H51 step-size
+        # detection gets incoherent values.  We track displacement per
+        # action to detect this pattern and disable position-based BFS
+        # planning (which assumes cardinal movement).
+        self._isometric_mode: bool = False
+        self._iso_action_displacements: Dict[int, List[Tuple[int, int]]] = {}
+
+        # ═══ H60: Retrospective sequence attribution (combo learning) ═══
+        # Symmetric counterpart to the forward delayed-observation window.
+        # Instead of "watch frames T+1..T+5 after an action", we look
+        # BACKWARDS from each reward event: "which action subsequence in
+        # the window [T-3..T] consistently preceded this score?"
+        #
+        # Minimum-sufficient-cause: the SHORTEST subsequence that reliably
+        # precedes the reward is preferred (shorter = less coincidence).
+        # Gap-tolerant: up to 1 intervening "noise" action is allowed so
+        # that exploratory steps taken mid-combo don't corrupt candidates.
+        #
+        # When a candidate subsequence has been observed ≥5 times with
+        # mean(score_delta) > threshold, it is promoted to a combo template.
+        # At decision time, if the current action history is a PREFIX of any
+        # template, the next required action is returned immediately (no
+        # full planning needed).
+        self._h60_action_history: List[int] = []          # rolling last-8 actions
+        self._h60_candidates: Dict[tuple, List[float]] = {}  # seq→[score_deltas]
+        self._h60_templates: Dict[tuple, float] = {}         # seq→mean_score (promoted)
+        self._h60_executing: List[int] = []                   # remaining actions in active combo
+
+        # ═══ H61: Menu / non-spatial UI mode detection ═══
+        # Many games start with a title screen or menu that blocks gameplay.
+        # Signature: frames are static or minimally changing, no spatial map
+        # activity, but actions DO produce slight UI changes.  Strategy:
+        # cycle through all available actions systematically (one per tick)
+        # until a score/level event fires — treating the menu as a black box.
+        self._menu_mode: bool = False
+        self._menu_probe_index: int = 0     # which action to try next
+        self._menu_no_progress_count: int = 0  # consecutive no-change ticks
+
+        # ═══ H62: Spatial-incoherence guard ═══
+        # In 3D or free-camera games the spatial map fills with contradictory
+        # walls.  Detect this by tracking the rate at which new walls are
+        # recorded vs. the fraction that are immediately contradicted
+        # (agent successfully traverses a "wall" cell on the next step).
+        # When incoherence is high: null the spatial map and disable spatial
+        # planning, falling back to H47 + H33 + H57.
+        self._wall_contradictions: int = 0
+        self._wall_records: int = 0
+        self._spatial_incoherent: bool = False
+
+        # ═══ H63: Visual-cue-gated action (reaction timing) ═══
+        # For timing-sensitive games, store the frame-histogram fingerprint
+        # at the moment of each positive score event.  At decision time,
+        # if the current frame is similar to a stored cue fingerprint, boost
+        # the historically-successful action for that cue.
+        self._h63_cue_frames: List[Tuple[np.ndarray, int]] = []  # (histogram, action)
+        self._h63_max_cues: int = 20
+
     # ─── Game Lifecycle ───────────────────────────────────────────────
 
     def start_game(
@@ -433,6 +502,33 @@ class CognitiveLoop:
         self._actions_since_score = 0
         self._recent_frame_hashes = []
         self._oscillation_detected = False
+
+        # H58 / H59: reset mode-detection counters
+        self._shmup_mode = False
+        self._shmup_movement_count = 0
+        self._shmup_fixed_actions = 0
+        self._isometric_mode = False
+        self._iso_action_displacements = {}
+
+        # H60: reset per-LIFE state but KEEP cross-life learning
+        # G9 fix: templates and cue frames are game-level knowledge —
+        # they survive death/restart within the same game session so that
+        # one-hit-kill games can still accumulate ≥5 observations.
+        # Only _action_history and _executing queue reset each life.
+        self._h60_action_history = []
+        self._h60_executing = []
+        # _h60_candidates and _h60_templates are intentionally NOT reset here.
+        # They are reset only in __init__() when a brand-new game begins.
+
+        # H61 / H62 / H63: reset per-game state
+        # H63 cue frames also survive across lives (same fix as H60).
+        self._menu_mode = False
+        self._menu_probe_index = 0
+        self._menu_no_progress_count = 0
+        self._wall_contradictions = 0
+        self._wall_records = 0
+        self._spatial_incoherent = False
+        # _h63_cue_frames is intentionally NOT reset here — see G9 fix above.
 
         # H39b: LS20 config-aware navigation state
         self._ls20_config = None  # [shape, color, rot] or None
@@ -1201,11 +1297,57 @@ class CognitiveLoop:
             if self._actions_taken % 10 == 0:
                 self._causal_map.infer_goal_from_scores()
 
+        # ═══ H60: Retrospective sequence attribution — append action to history ═══
+        if self._last_action_info:
+            _h60_atype = self._last_action_info.get('type', 0)
+            if _h60_atype > 0:
+                self._h60_action_history.append(_h60_atype)
+                if len(self._h60_action_history) > 8:
+                    self._h60_action_history = self._h60_action_history[-8:]
+
         # ═══ H57: Reward-sparsity escalator — track dry-spell length ═══
         if score_delta != 0 or level_changed:
             self._actions_since_score = 0   # Score event resets the counter
         else:
             self._actions_since_score += 1
+
+        # ═══ H60: Retrospective sequence attribution — mine on reward ═══
+        # When a positive score event fires, open the retrospective window:
+        # examine subsequences of length 2-4 from recent action history.
+        # The minimum-sufficient-cause principle: prefer shorter sequences.
+        # Gap tolerance: also test sequences with 1 intervening wildcard.
+        if score_delta > 0 and len(self._h60_action_history) >= 2:
+            window = self._h60_action_history[-4:]
+            # Mine exact subsequences (no gaps)
+            for length in range(2, min(5, len(window) + 1)):
+                subseq = tuple(window[-length:])
+                bucket = self._h60_candidates.setdefault(subseq, [])
+                bucket.append(score_delta)
+                # Promote to template when seen ≥5 times with consistent positive signal
+                if len(bucket) >= 5:
+                    mean_sd = sum(bucket) / len(bucket)
+                    if mean_sd > 0.3:
+                        # Only keep if not already covered by a shorter template
+                        shorter_covered = any(
+                            self._h60_templates.get(subseq[i:]) is not None
+                            for i in range(1, len(subseq))
+                        )
+                        if not shorter_covered:
+                            self._h60_templates[subseq] = mean_sd
+            # Gap-tolerant: test length-3 sequences with 1 wildcard position
+            if len(window) >= 4:
+                for gap_pos in range(1, 3):  # wildcard at position 1 or 2
+                    gapped = (
+                        window[-4 + 0],
+                        None,  # wildcard marker
+                        window[-4 + gap_pos + 1],
+                        window[-1],
+                    )
+                    # Collapse to just the required positions (skip wildcard)
+                    required = tuple(a for a in gapped if a is not None)
+                    if len(required) >= 2:
+                        bucket_g = self._h60_candidates.setdefault(required, [])
+                        bucket_g.append(score_delta * 0.7)  # discount for gapped match
 
         # ═══ H33: Anti-oscillation — detect revisited frame states ═══
         if post_array is not None:
@@ -1217,6 +1359,62 @@ class CognitiveLoop:
                     self._recent_frame_hashes = self._recent_frame_hashes[-40:]
             except Exception:
                 self._oscillation_detected = False
+
+        # ═══ H61: Menu mode detection ═══
+        # Detect "stuck on non-gameplay screen": many consecutive no-change
+        # ticks, no spatial map activity, no score/level events.
+        if not frame_changed and score_delta == 0 and not level_changed:
+            self._menu_no_progress_count += 1
+        else:
+            self._menu_no_progress_count = 0
+            if self._menu_mode and (score_delta != 0 or level_changed):
+                # Menu successfully navigated — exit menu mode
+                self._menu_mode = False
+        if (not self._menu_mode
+                and self._menu_no_progress_count >= 15
+                and self._actions_taken < 60
+                and (len(self._causal_map._effects) == 0 if self._causal_map else True)):
+            self._menu_mode = True
+            self._menu_probe_index = 0
+
+        # ═══ H62: Spatial-incoherence guard ═══
+        # Check if the agent successfully crossed a recorded wall (contradiction).
+        if (self._causal_map
+                and self._agent_position is not None
+                and not self._spatial_incoherent):
+            try:
+                for _wall_key in list(self._causal_map._walls):
+                    wall_pos, _wall_act = _wall_key
+                    if wall_pos == self._agent_position:
+                        self._wall_contradictions += 1
+                        break
+                if (self._wall_records >= 10
+                        and self._wall_contradictions / max(self._wall_records, 1) > 0.4):
+                    self._spatial_incoherent = True
+                    # Null the spatial map to stop it from being used
+                    if self._causal_map:
+                        self._causal_map._walls.clear()
+            except Exception:
+                pass
+
+        # ═══ H63: Visual-cue fingerprinting ═══
+        # On a positive score event, store the pre-action frame histogram
+        # as a cue fingerprint paired with the action that produced the score.
+        if score_delta > 0 and self._prev_frame is not None and self._last_action_info:
+            try:
+                _cue_hist = np.bincount(
+                    self._prev_frame.flatten().astype(np.uint8), minlength=256
+                ).astype(np.float32)
+                norm = _cue_hist.sum()
+                if norm > 0:
+                    _cue_hist /= norm
+                _cue_action = self._last_action_info.get('type', 0)
+                if _cue_action > 0:
+                    self._h63_cue_frames.append((_cue_hist, _cue_action))
+                    if len(self._h63_cue_frames) > self._h63_max_cues:
+                        self._h63_cue_frames = self._h63_cue_frames[-self._h63_max_cues:]
+            except Exception:
+                pass
 
         # ═══ GAP 5: HUD state tracking ═══
         self._check_hud_state(cf, post_array)
@@ -1448,7 +1646,71 @@ class CognitiveLoop:
                                     pass
                         else:
                             cf.map_update = f"Wall at ({self._agent_position[0] if self._agent_position else '?'},{self._agent_position[1] if self._agent_position else '?'}) dir={action_type}"
+                            # ═══ H62: Track wall records for incoherence detection ═══
+                            self._wall_records += 1
                         self._agent_position = new_agent_pos
+
+                        # ═══ H58/H59: Mode detection from movement results ═══
+                        if (not self._shmup_mode
+                                and new_agent_pos is not None
+                                and self._prev_frame is not None
+                                and post_array is not None):
+                            try:
+                                # Compute pixel displacement between frames at the action result
+                                # Use the frame diff mass-centre shift as proxy for agent movement
+                                diff = (post_array.astype(int) - self._prev_frame.astype(int))
+                                moved_mask = np.abs(diff) > 20
+                                if moved_mask.any():
+                                    ys, xs = np.where(moved_mask)
+                                    cx = int(xs.mean())
+                                    cy = int(ys.mean())
+                                    dx = abs(cx - (new_agent_pos[0] if new_agent_pos else 32))
+                                    dy = abs(cy - (new_agent_pos[1] if new_agent_pos else 32))
+                                    displacement = max(dx, dy)
+                                else:
+                                    displacement = 0
+
+                                self._shmup_movement_count += 1
+                                if displacement < 10:
+                                    # Frame changed (world scrolling) but agent didn't move
+                                    self._shmup_fixed_actions += 1
+
+                                # Trigger shmup mode: ≥20 movements, ≥75% showed no agent drift
+                                if (self._shmup_movement_count >= 20
+                                        and self._shmup_fixed_actions / self._shmup_movement_count >= 0.75
+                                        and frame_changed):
+                                    self._shmup_mode = True
+                                    cf.map_update += " [SHMUP MODE DETECTED]"
+
+                                # H59: Track per-action pixel displacement for isometric detection
+                                if not self._isometric_mode and action_type in (1, 2, 3, 4):
+                                    diff_abs = np.abs(diff)
+                                    changed_px_mask = diff_abs > 20
+                                    if changed_px_mask.any():
+                                        ys2, xs2 = np.where(changed_px_mask)
+                                        disp_x = int(xs2.mean()) - 32  # offset from centre
+                                        disp_y = int(ys2.mean()) - 32
+                                        if action_type not in self._iso_action_displacements:
+                                            self._iso_action_displacements[action_type] = []
+                                        self._iso_action_displacements[action_type].append(
+                                            (disp_x, disp_y)
+                                        )
+                                    # Check after collecting ≥5 samples per action
+                                    if len(self._iso_action_displacements) >= 2:
+                                        diagonal_votes = 0
+                                        total_votes = 0
+                                        for _disps in self._iso_action_displacements.values():
+                                            for _dx, _dy in _disps[-10:]:
+                                                total_votes += 1
+                                                # Diagonal: |dx| and |dy| roughly equal and both >3
+                                                if (abs(_dx) > 3 and abs(_dy) > 3
+                                                        and abs(abs(_dx) - abs(_dy)) < abs(_dx) * 0.5):
+                                                    diagonal_votes += 1
+                                        if total_votes >= 10 and diagonal_votes / total_votes >= 0.7:
+                                            self._isometric_mode = True
+                                            cf.map_update += " [ISO MODE DETECTED]"
+                            except Exception:
+                                pass
 
                         # H39b: Track LS20 config changes on movement
                         if self._ls20_config is not None:
@@ -2588,6 +2850,18 @@ class CognitiveLoop:
         Enhanced with Gap 2C (goal-delta awareness) and
         Gap 5D (timer urgency awareness).
         """
+        # ═══ H61: Menu mode — override everything, probe systematically ═══
+        if self._menu_mode:
+            return "experiment"   # _act() checks _menu_mode and cycles actions
+
+        # ═══ H62: Spatial-incoherence guard — disable spatial planning ═══
+        # The spatial map is contradictory (3D camera or free-roam).
+        # Rely on H47 + H33 + H57 only; spatial strategies are noise.
+        if self._spatial_incoherent:
+            if percept.has_plan:
+                return "exploit"
+            return "experiment"
+
         # ═══ ACTION MONOPOLY BREAKER ═══
         # If the same action has been repeated many times without level
         # progress, the rung system is stuck in a loop.  Force a strategy
@@ -2617,6 +2891,24 @@ class CognitiveLoop:
         if self._actions_since_score > 120:
             return "experiment"
         if self._actions_since_score > 50 and percept.consecutive_no_change < 5:
+            return "experiment"
+
+        # ═══ H58: Shmup / scrolling-world mode ═══
+        # Spatial navigation is unreliable — the world scrolls while
+        # the agent sprite stays fixed.  Skip spatial planning entirely
+        # and fall through to exploit (H47 score-correlation goals).
+        if self._shmup_mode:
+            if percept.has_plan:
+                return "exploit"  # Use H47-derived targets if available
+            return "experiment"   # Otherwise probe for scoring interactions
+
+        # ═══ H59: Isometric / diagonal-movement mode ═══
+        # Position-based BFS planning assumes cardinal movement and
+        # will navigate to wrong positions in a 45°-rotated grid.
+        # Skip spatial planning; use score-correlation (H47) instead.
+        if self._isometric_mode:
+            if percept.has_plan:
+                return "exploit"
             return "experiment"
 
         # ═══ GAP 5D: Timer urgency override ═══
@@ -2775,6 +3067,42 @@ class CognitiveLoop:
         action_data: Optional[Dict] = None
         # H44: Reset nav target each cycle; SPEED 1d sets it if fuel-limited
         self._solver_nav_target = None
+
+        # ─── H60: COMBO EXECUTION ─────────────────────────────────────
+        # If we are mid-way through a learned action sequence, keep firing
+        # the remaining steps before any other planning kicks in.
+        # Also check whether current history prefix matches a known template
+        # (starting a fresh combo run).
+        if not self._h60_executing and self._h60_templates:
+            history_tail = tuple(self._h60_action_history)
+            for template in sorted(
+                self._h60_templates, key=lambda t: -self._h60_templates[t]
+            ):
+                prefix_len = len(template) - 1
+                if (prefix_len > 0
+                        and len(history_tail) >= prefix_len
+                        and history_tail[-prefix_len:] == template[:prefix_len]):
+                    # Current action history is a prefix — queue the remaining steps
+                    self._h60_executing = list(template[prefix_len:])
+                    break
+
+        if self._h60_executing:
+            next_combo_action = self._h60_executing.pop(0)
+            if next_combo_action in self._available_actions:
+                cf.action_speed = "combo"
+                cf.action_type = next_combo_action
+                cf.action_reason = f"H60 combo step (action {next_combo_action})"
+                cf.action_confidence = self._h60_templates.get(
+                    tuple(self._h60_action_history[-3:] + [next_combo_action]), 0.5
+                )
+                cf.action_summary = (
+                    f"COMBO: action {next_combo_action} | "
+                    f"{len(self._h60_executing)} steps remaining"
+                )
+                return next_combo_action, None
+            else:
+                # Template action unavailable in this game — discard the template
+                self._h60_executing = []
 
         # ─── SPEED 1: MAPPED ─────────────────────────────────────────
         if plan_action is not None and strategy == "execute":
@@ -3219,6 +3547,50 @@ class CognitiveLoop:
                 logger.debug(f"[COGNITIVE-LOOP] Rung system failed: {e}")
 
         # ─── SPEED 3: EXPLORE (maximize information gain) ─────────────
+
+        # ─── H61: Menu-mode systematic probing ───────────────────────
+        # When stuck on a non-gameplay screen, cycle through all available
+        # actions one-per-tick until a progress event fires.  No spatial
+        # reasoning needed — just probe systematically.
+        if self._menu_mode and self._available_actions:
+            next_action = self._available_actions[
+                self._menu_probe_index % len(self._available_actions)
+            ]
+            self._menu_probe_index += 1
+            cf.action_speed = "explore"
+            cf.action_type = next_action
+            cf.action_reason = f"H61 menu probe #{self._menu_probe_index}"
+            cf.action_confidence = 0.3
+            cf.action_summary = f"MENU-PROBE: action {next_action}"
+            return next_action, None
+
+        # ─── H63: Visual-cue gated action ────────────────────────────
+        # If current frame looks like a stored cue fingerprint, fire the
+        # action that historically produced a score for that cue.
+        if self._h63_cue_frames and self._prev_frame is not None:
+            try:
+                cur_hist = np.bincount(
+                    self._prev_frame.flatten().astype(np.uint8), minlength=256
+                ).astype(np.float32)
+                cur_norm = cur_hist.sum()
+                if cur_norm > 0:
+                    cur_hist /= cur_norm
+                    best_sim = 0.0
+                    best_action = 0
+                    for cue_hist, cue_action in self._h63_cue_frames:
+                        sim = float(np.dot(cur_hist, cue_hist))  # cosine (both l1-normed)
+                        if sim > best_sim:
+                            best_sim = sim
+                            best_action = cue_action
+                    if best_sim > 0.92 and best_action in self._available_actions:
+                        cf.action_speed = "exploit"
+                        cf.action_type = best_action
+                        cf.action_reason = f"H63 cue match sim={best_sim:.3f}"
+                        cf.action_confidence = best_sim
+                        cf.action_summary = f"CUE-REACT: action {best_action} sim={best_sim:.3f}"
+                        return best_action, None
+            except Exception:
+                pass
 
         # --- 3a: Goal-guided exploration for click games ---
         # If we have goal awareness AND productive targets, rotate among
