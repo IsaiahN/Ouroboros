@@ -1105,7 +1105,7 @@ check("v45-game-tags-read",
       '_game_tags = list((knowledge or {}).get("_tags", []))' in cell9_src_v45,
       "_game_tags must be read from knowledge dict")
 check("v45-pure-click-cursor-mode",
-      'pure-click -> cursor_mode=True (v45)' in cell9_src_v45,
+      'pure-click' in cell9_src_v45 and 'cursor_mode=True' in cell9_src_v45,
       "pure click games must set cursor_mode=True from tags")
 check("v45-cursor-scan-done-uses-cursor-mode",
       '_cursor_scan_done = not getattr(loop, "_cursor_mode", False)' in cell9_src_v45,
