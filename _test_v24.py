@@ -1116,6 +1116,17 @@ check("v45-keyboard-click-no-toggle",
 
 
 # ════════════════════════════════════════════════════════════════════════════
+print("\n=== v46: cursor scan improvements ===")
+cell9_src_v46 = ''.join(__import__('json').load(open('competition_notebook.ipynb', encoding='utf-8'))['cells'][9]['source'])
+check("v46-effects-gate-uses-cursor-mode",
+      "_cm_effects == 0 or getattr(loop, \"_cursor_mode\", False)" in cell9_src_v46,
+      "cursor scan must run when cursor_mode=True regardless of effects count")
+check("v46b-force-action6-during-scan",
+      "v46b: cursor scan always clicks (ACTION6) when available" in cell9_src_v46,
+      "cursor scan must force ACTION6 when it's available")
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # Summary
 # ════════════════════════════════════════════════════════════════════════════
 print(f"\n{'='*60}")
