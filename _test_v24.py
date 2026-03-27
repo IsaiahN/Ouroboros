@@ -41,8 +41,8 @@ CURSOR_SCAN_POSITIONS        = _ns["CURSOR_SCAN_POSITIONS"]
 print("\n=== CURSOR_SCAN_POSITIONS structure ===")
 # ════════════════════════════════════════════════════════════════════════════
 
-# Test 1: 36 positions (6x6 grid)
-check("cursor-scan-36-positions", len(CURSOR_SCAN_POSITIONS) == 36,
+# Test 1: 64 positions (8x8 grid, v51 denser scan)
+check("cursor-scan-36-positions", len(CURSOR_SCAN_POSITIONS) == 64,
       f"len={len(CURSOR_SCAN_POSITIONS)}")
 
 # Test 2: all positions are dicts with 'x' and 'y' keys (ActionInput requires dict, not tuple)
@@ -515,7 +515,7 @@ check("cursor-scan-idx-advances", cursor_scan_idx == 5,
 cursor_scan_done2 = False
 cursor_scan_idx2 = 0
 effects2 = {}
-for i in range(40):  # more than 36
+for i in range(70):  # more than 64 (v51)
     if (not cursor_scan_done2
             and cursor_scan_idx2 < len(CURSOR_SCAN_POSITIONS)
             and len(effects2) == 0):
@@ -524,7 +524,7 @@ for i in range(40):  # more than 36
         if cursor_scan_idx2 >= len(CURSOR_SCAN_POSITIONS):
             cursor_scan_done2 = True
 check("cursor-scan-completes-at-36",
-      cursor_scan_done2 == True and cursor_scan_idx2 == 36,
+      cursor_scan_done2 == True and cursor_scan_idx2 == 64,
       f"done={cursor_scan_done2} idx={cursor_scan_idx2}")
 
 # Test 43: cursor scan stops early when frame changes (hit found)
@@ -1133,8 +1133,8 @@ check("v46-effects-gate-uses-cursor-mode",
       "_cm_effects == 0 or getattr(loop, \"_cursor_mode\", False)" in cell9_src_v46,
       "cursor scan must run when cursor_mode=True regardless of effects count")
 check("v46b-force-action6-during-scan",
-      "v46b: cursor scan always clicks (ACTION6) when available" in cell9_src_v46,
-      "cursor scan must force ACTION6 when it's available")
+      "v46b/v51: cursor scan clicks ACTION6 or ACTION7 if available" in cell9_src_v46,
+      "cursor scan must force ACTION6/7 when available")
 
 
 # ════════════════════════════════════════════════════════════════════════════
