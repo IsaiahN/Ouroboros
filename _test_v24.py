@@ -1116,14 +1116,14 @@ check("v45-keyboard-click-no-toggle",
 
 
 # ════════════════════════════════════════════════════════════════════════════
-print("\n=== v49: fix competition mode replay bug ===")
+print("\n=== v49/v50: fix competition mode replay bug ===")
 cell6_src_v49 = ''.join(__import__('json').load(open('competition_notebook.ipynb', encoding='utf-8'))['cells'][6]['source'])
-check("v49-replay-partial-breaks-in-comp-mode",
-      'if competition_mode:' in cell6_src_v49 and 'if score > 0.0:' in cell6_src_v49,
-      "partial replay success must break not continue in competition mode")
-check("v49-replay-fail-falls-through",
-      '# score==0: fall through to cognitive play in same attempt' in cell6_src_v49,
-      "replay failure in competition mode must fall through to cognitive play")
+check("v49-replay-partial-falls-through",
+      'v49/v50' in cell6_src_v49 and 'cognitive play' in cell6_src_v49,
+      "replay in competition mode must fall through to cognitive play (v50)")
+check("v50-competition-mode-no-continue",
+      'if not competition_mode:' in cell6_src_v49 and 'continue' in cell6_src_v49,
+      "only offline mode should continue; competition mode falls through")
 
 
 # ════════════════════════════════════════════════════════════════════════════
