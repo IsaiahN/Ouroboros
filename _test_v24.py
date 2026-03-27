@@ -1116,6 +1116,17 @@ check("v45-keyboard-click-no-toggle",
 
 
 # ════════════════════════════════════════════════════════════════════════════
+print("\n=== v49: fix competition mode replay bug ===")
+cell6_src_v49 = ''.join(__import__('json').load(open('competition_notebook.ipynb', encoding='utf-8'))['cells'][6]['source'])
+check("v49-replay-partial-breaks-in-comp-mode",
+      'if competition_mode:' in cell6_src_v49 and 'if score > 0.0:' in cell6_src_v49,
+      "partial replay success must break not continue in competition mode")
+check("v49-replay-fail-falls-through",
+      '# score==0: fall through to cognitive play in same attempt' in cell6_src_v49,
+      "replay failure in competition mode must fall through to cognitive play")
+
+
+# ════════════════════════════════════════════════════════════════════════════
 print("\n=== v46: cursor scan improvements ===")
 cell9_src_v46 = ''.join(__import__('json').load(open('competition_notebook.ipynb', encoding='utf-8'))['cells'][9]['source'])
 check("v46-effects-gate-uses-cursor-mode",
