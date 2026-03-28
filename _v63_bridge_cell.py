@@ -8,7 +8,7 @@
 #
 # Per-cycle flow (each CognitiveLoop.cycle() when strategy=exploit|experiment):
 #   decide() -> classify concept from context -> get action from concept
-#   "experiment" signal + N steps -> signal_concept_failed()
+#   stagnation (30 steps no level gain) -> signal_concept_failed()
 #   ledger.record(fail) -> next_concepts() follows graph edge -> new concept
 #   May cycle back: navigation -> coverage -> sequence_commit -> navigation
 
@@ -41,11 +41,12 @@ class ConceptRungBridge:
       ledger:           EphemeralLedger recording concept outcomes
     """
 
-    def __init__(self, game_id: str, available_actions: list):
+    def __init__(self, game_id: str, available_actions: list, verbose: bool = True):
         self.game_id           = game_id
         self.available_actions = list(available_actions)
         self.ledger            = EphemeralLedger(game_id)
         self.graph             = ConceptGraph()
+        self.verbose           = verbose
 
         self._current_concept    = None
         self._concept_candidates = []
@@ -55,6 +56,11 @@ class ConceptRungBridge:
         self._concept_cycle_idx  = 0  # for cycling within concept strategies
         self._steps_without_gain = 0
         self._last_levels        = 0
+
+        # Concept action log: list of (step, concept, action, reason) for summary
+        self._action_log         = []
+        # Per-concept step counts for summary
+        self._concept_step_counts = {}
 
         self.last_decision_metadata = {}
 
@@ -72,6 +78,10 @@ class ConceptRungBridge:
             except Exception:
                 self._router = None
 
+        if self.verbose:
+            print(f"  [bridge:{game_id}] init avail={available_actions} "
+                  f"router={'yes' if self._router else 'no'}")
+
     # -- Interface stubs (duck-type compatibility) ----------------------------
 
     @property
@@ -84,6 +94,18 @@ class ConceptRungBridge:
 
     def notify_action_complete(self, *a, **kw):
         pass
+
+    def summary(self) -> str:
+        """One-line summary of this game's concept traversal."""
+        path = []
+        seen = {}
+        for a in self.ledger.attempts:
+            c = a['concept']
+            seen[c] = seen.get(c, 0) + 1
+            flag = '+' if a['success'] else '-'
+            path.append(f"{c}{flag}")
+        counts = ' '.join(f"{c}x{n}" for c, n in self._concept_step_counts.items())
+        return f"path=[{' -> '.join(path)}] steps=[{counts}]"
 
     # -- Internal helpers ----------------------------------------------------
 
@@ -213,6 +235,7 @@ class ConceptRungBridge:
     def signal_concept_failed(self):
         """Record failure and follow graph edge to next concept (cyclic traversal)."""
         if self._current_concept:
+            prev = self._current_concept
             self.ledger.record(
                 self._current_concept, False,
                 f'rotate at step={self._concept_steps}')
@@ -221,6 +244,13 @@ class ConceptRungBridge:
                 self._current_concept   = nxt[0]
                 self._concept_steps     = 0
                 self._concept_cycle_idx = 0
+                if self.verbose:
+                    print(f"  [bridge:{self.game_id}] ROTATE {prev} -> {self._current_concept} "
+                          f"(step={self._step} stagnant={self._steps_without_gain})")
+            else:
+                if self.verbose:
+                    print(f"  [bridge:{self.game_id}] ROTATE {prev} -> NONE (graph exhausted "
+                          f"step={self._step})")
 
     def signal_score(self, new_score: float):
         """Record success on score improvement."""
@@ -240,7 +270,7 @@ class ConceptRungBridge:
         Concept graph traversal state persists across calls within a game.
 
         Traversal pattern from the_way.md:
-          classify -> try concept -> if experiment+steps -> signal_failed()
+          classify -> try concept -> stagnation(30 steps) -> signal_failed()
           -> ledger -> graph.next_concepts() -> new concept
           -> may cycle back (navigation -> coverage -> navigation)
         """
@@ -259,11 +289,26 @@ class ConceptRungBridge:
             self._concept_cycle_idx  = 0
             self._steps_without_gain = 0
             self._last_levels        = 0
+            # Log classification
+            cm      = context.get('causal_map')
+            percept = context.get('percept')
+            n_effects = len(getattr(cm, '_effects', {}) or {}) if cm else 0
+            n_rules   = len(getattr(cm, '_rules',   []) or []) if cm else 0
+            has_click = 6 in avail
+            if self.verbose:
+                print(f"  [bridge:{self.game_id}] CLASSIFY avail={sorted(avail)} "
+                      f"click={has_click} effects={n_effects} rules={n_rules} "
+                      f"-> {cands[:3]}")
 
         # Level completion -> record success, reset stagnation counter.
         # Use obs.levels_completed directly — reliable, not context-dependent.
         cur_levels = int(getattr(obs, 'levels_completed', 0) or 0)
         if cur_levels > self._last_levels:
+            gained = cur_levels - self._last_levels
+            if self.verbose:
+                print(f"  [bridge:{self.game_id}] LEVEL +{gained} "
+                      f"L{self._last_levels}->{cur_levels} "
+                      f"concept={self._current_concept} step={self._step}")
             self._last_levels        = cur_levels
             self._steps_without_gain = 0
             self.ledger.record(self._current_concept, True,
@@ -280,12 +325,29 @@ class ConceptRungBridge:
         action_num, action_data, reason = self._get_action_for_concept(
             self._current_concept, context)
         self._concept_steps += 1
+        self._concept_step_counts[self._current_concept] = (
+            self._concept_step_counts.get(self._current_concept, 0) + 1)
 
         # Safety: ensure action is in available set
         if action_num not in avail:
             action_num  = _rb_random.choice(list(avail))
             action_data = None
             reason      = f'bridge:avail_fix from {self._current_concept}'
+
+        # Verbose: log every 20 steps so we can follow action stream
+        if self.verbose and self._step % 20 == 0:
+            cm = context.get('causal_map')
+            n_explored  = len(getattr(cm, '_explored', set()) or set()) if cm else 0
+            n_prod      = 0
+            if cm:
+                try:
+                    n_prod = len(cm.get_productive_targets() or [])
+                except Exception:
+                    pass
+            print(f"  [bridge:{self.game_id}] step={self._step} "
+                  f"concept={self._current_concept}({self._concept_steps}) "
+                  f"A{action_num} stagnant={self._steps_without_gain} "
+                  f"explored={n_explored} prod={n_prod} L={self._last_levels}")
 
         # Build metadata (CognitiveLoop reads rung_name, confidence, x/y)
         self.last_decision_metadata = {

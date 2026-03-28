@@ -1,0 +1,17 @@
+{
+  "id": "thezetaproject/bittertruth-ai-v2-arc-agi-3-conceptrungbridge",
+  "title": "BitterTruth-AI v2 ARC-AGI-3 (ConceptRungBridge)",
+  "code_file": "competition_notebook_v2.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": false,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "dataset_sources": [
+    "thezetaproject/bittertruth-ai",
+    "thezetaproject/bittertruth-knowledge"
+  ],
+  "competition_sources": ["arc-prize-2026-arc-agi-3"],
+  "kernel_sources": []
+}
