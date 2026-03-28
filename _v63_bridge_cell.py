@@ -53,6 +53,8 @@ class ConceptRungBridge:
         self._step               = 0
         self._last_score         = 0.0
         self._concept_cycle_idx  = 0  # for cycling within concept strategies
+        self._steps_without_gain = 0
+        self._last_levels        = 0
 
         self.last_decision_metadata = {}
 
@@ -255,17 +257,24 @@ class ConceptRungBridge:
             self._current_concept    = cands[0] if cands else 'navigation'
             self._concept_steps      = 0
             self._concept_cycle_idx  = 0
+            self._steps_without_gain = 0
+            self._last_levels        = 0
 
-        # Score improvement -> record success, stay on concept
-        cur_score = float(context.get('score', 0.0) or 0.0)
-        if cur_score > self._last_score:
-            self.signal_score(cur_score)
+        # Level completion -> record success, reset stagnation counter.
+        # Use obs.levels_completed directly — reliable, not context-dependent.
+        cur_levels = int(getattr(obs, 'levels_completed', 0) or 0)
+        if cur_levels > self._last_levels:
+            self._last_levels        = cur_levels
+            self._steps_without_gain = 0
+            self.ledger.record(self._current_concept, True,
+                               f'levels={cur_levels}')
+        else:
+            self._steps_without_gain = getattr(self, '_steps_without_gain', 0) + 1
 
-        # "experiment" strategy signals current approach is failing
-        # After enough steps -> rotate concept along graph edge
-        strategy = context.get('strategy', 'exploit')
-        if strategy == 'experiment' and self._concept_steps >= 6:
+        # Rotate concept after 30 non-productive actions (graph traversal)
+        if self._steps_without_gain >= 30:
             self.signal_concept_failed()
+            self._steps_without_gain = 0
 
         # Get action from current concept strategy
         action_num, action_data, reason = self._get_action_for_concept(
