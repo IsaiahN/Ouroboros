@@ -24,6 +24,23 @@ except ImportError:
 import random as _rb_random
 
 
+# Patch ConceptGraph to add probe_all node (runs after cell 10 defines ConceptGraph).
+# probe_all: systematically tries every action, reads last_was_productive from context
+# (pixel-diff based — works even when CausalMap is fully blind), then promotes to the
+# best matching concept based on which action types responded.
+def _patch_concept_graph():
+    try:
+        ConceptGraph.EDGES['probe_all'] = [
+            'navigation', 'toggle_puzzle', 'sequence_commit', 'coverage']
+        # wire existing nodes to fall back to probe_all when all else fails
+        for node, edges in ConceptGraph.EDGES.items():
+            if node != 'probe_all' and 'probe_all' not in edges:
+                edges.append('probe_all')
+    except Exception:
+        pass
+_patch_concept_graph()
+
+
 class ConceptRungBridge:
     """
     Bridges ConceptGraph traversal into CognitiveLoop SPEED 2 interface.
@@ -58,8 +75,10 @@ class ConceptRungBridge:
         self._last_levels        = 0
 
         # Per-concept step counts for summary
-        self._concept_step_counts  = {}
+        self._concept_step_counts   = {}
         self._last_classify_signals = {}
+        # probe_all state: tracks which actions produced frame changes
+        self._probe_results         = {}   # action -> bool (was_productive)
 
         self.last_decision_metadata = {}
 
@@ -245,6 +264,59 @@ class ConceptRungBridge:
                 pt = spell_slots[step % len(spell_slots)]
                 return 6, {'x': pt[0], 'y': pt[1]}, f'pattern:slot({pt[0]},{pt[1]})'
 
+        elif concept == 'probe_all':
+            # Systematically probe every available action: 3 steps each.
+            # Uses last_was_productive from context (pixel-diff, not CausalMap)
+            # so it works even when effects=0 the entire game.
+            # After one full cycle, promotes to the best matching concept.
+            sorted_avail = sorted(avail)
+            n_per        = 3
+            full_cycle   = len(sorted_avail) * n_per
+
+            # Record whether the PREVIOUS action was productive
+            last_prod = context.get('last_was_productive', False)
+            if self._concept_steps > 0 and last_prod:
+                prev_idx = ((self._concept_steps - 1) // n_per) % len(sorted_avail)
+                self._probe_results[sorted_avail[prev_idx]] = True
+
+            # After probing everything, promote to the best concept
+            if self._concept_steps >= full_cycle:
+                productive   = [a for a in sorted_avail if self._probe_results.get(a)]
+                move_prod    = [a for a in productive if a in {1, 2, 3, 4}]
+                click_prod   = [a for a in productive if a == 6]
+                commit_prod  = [a for a in productive if a not in {1, 2, 3, 4, 6}]
+
+                if click_prod and not move_prod:
+                    promoted = 'toggle_puzzle'
+                elif commit_prod and not move_prod:
+                    promoted = 'sequence_commit'
+                elif click_prod and move_prod:
+                    promoted = 'push_force'
+                elif move_prod:
+                    promoted = 'navigation'
+                else:
+                    promoted = 'navigation'   # nothing productive — best guess
+
+                success = bool(productive)
+                self.ledger.record('probe_all', success,
+                                   f'productive={productive} -> {promoted}')
+                if self.verbose:
+                    print(f"  [bridge:{self.game_id}] PROBE done "
+                          f"productive={productive} -> {promoted} "
+                          f"(step={self._step})")
+                self._current_concept   = promoted
+                self._concept_steps     = 0
+                self._concept_cycle_idx = 0
+                return self._get_action_for_concept(promoted, context)
+
+            # Still probing: return next action in round-robin
+            idx    = (self._concept_steps // n_per) % len(sorted_avail)
+            action = sorted_avail[idx]
+            phase  = self._concept_steps % n_per + 1
+            return action, None, (f'probe:A{action} '
+                                  f'({idx + 1}/{len(sorted_avail)} '
+                                  f'step {phase}/{n_per})')
+
         elif concept == 'push_force':
             # Select a target with click, then push it with movement.
             # Pattern: click target → move (×3) → click next target → move (×3) → ...
@@ -307,7 +379,8 @@ class ConceptRungBridge:
                 f'rotate at step={self._concept_steps}')
             nxt = self.graph.next_concepts(self._current_concept, self.ledger)
 
-            # Filter out concepts that cannot work given available actions
+            # Filter out concepts that cannot work given available actions.
+            # probe_all is always applicable — it works on any action set.
             avail     = self.available_actions
             has_click = 6 in avail
             has_move  = bool(set(avail) & {1, 2, 3, 4})
@@ -316,8 +389,9 @@ class ConceptRungBridge:
             move_only  = {'navigation', 'coverage', 'sequence_commit',
                           'traversal_ordering'}
             applicable = [c for c in nxt
-                          if not (not has_click and c in click_only)
-                          and not (not has_move  and c in move_only)]
+                          if c == 'probe_all'
+                          or (not (not has_click and c in click_only)
+                              and not (not has_move  and c in move_only))]
             chosen = (applicable or nxt or [None])[0]
 
             if chosen:
@@ -389,20 +463,36 @@ class ConceptRungBridge:
         # CausalMap learns effects over time; step 15 catches quick learners,
         # step 40 catches games that needed more exploration before signals emerge.
         if self._step in (15, 40) and self._last_levels == 0:
-            new_cands = self._classify_from_context(context)
-            if new_cands and new_cands[0] != self._current_concept:
-                old_concept = self._current_concept
-                self._current_concept   = new_cands[0]
-                self._concept_candidates = new_cands
+            cm        = context.get('causal_map')
+            n_effects = len(getattr(cm, '_effects', {}) or {}) if cm else 0
+
+            # If CausalMap is still completely blind after 15 steps, switch to
+            # probe_all which uses pixel-diff (last_was_productive) instead of
+            # CausalMap effects — the codex needs this node for blind games.
+            if n_effects == 0 and self._current_concept != 'probe_all':
+                if self.verbose:
+                    print(f"  [bridge:{self.game_id}] BLIND at step={self._step} "
+                          f"(effects=0) -> probe_all")
+                self._current_concept   = 'probe_all'
                 self._concept_steps     = 0
                 self._concept_cycle_idx = 0
-                if self.verbose:
-                    sigs = getattr(self, '_last_classify_signals', {})
-                    print(f"  [bridge:{self.game_id}] RECLASSIFY step=15 "
-                          f"{old_concept} -> {self._current_concept} "
-                          f"(n_coord={sigs.get('n_coord',0)} "
-                          f"n_objs={sigs.get('n_objs',0)} "
-                          f"behavioral={sigs.get('behavioral',[])})")
+                self._probe_results     = {}
+            else:
+                new_cands = self._classify_from_context(context)
+                if new_cands and new_cands[0] != self._current_concept:
+                    old_concept = self._current_concept
+                    self._current_concept    = new_cands[0]
+                    self._concept_candidates = new_cands
+                    self._concept_steps      = 0
+                    self._concept_cycle_idx  = 0
+                    if self.verbose:
+                        sigs = getattr(self, '_last_classify_signals', {})
+                        print(f"  [bridge:{self.game_id}] RECLASSIFY "
+                              f"step={self._step} "
+                              f"{old_concept} -> {self._current_concept} "
+                              f"(n_coord={sigs.get('n_coord',0)} "
+                              f"n_objs={sigs.get('n_objs',0)} "
+                              f"behavioral={sigs.get('behavioral',[])})")
 
         # Level completion -> record success, reset stagnation counter.
         # Use obs.levels_completed directly — reliable, not context-dependent.
