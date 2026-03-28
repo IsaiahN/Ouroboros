@@ -57,10 +57,9 @@ class ConceptRungBridge:
         self._steps_without_gain = 0
         self._last_levels        = 0
 
-        # Concept action log: list of (step, concept, action, reason) for summary
-        self._action_log         = []
         # Per-concept step counts for summary
-        self._concept_step_counts = {}
+        self._concept_step_counts  = {}
+        self._last_classify_signals = {}
 
         self.last_decision_metadata = {}
 
@@ -118,24 +117,42 @@ class ConceptRungBridge:
         has_movement = bool(set(avail) & {1, 2, 3, 4})
         has_click    = 6 in avail
 
+        # Commit-type actions: any action that is neither movement (1-4) nor click (6).
+        # e.g. action 5 in g50t/wa30, action 7 in sk48/lf52 — strong sequence_commit signal.
+        commit_cands = [a for a in avail if a not in {1, 2, 3, 4, 6}]
+        if commit_cands:
+            behavioral['commit_action'] = commit_cands[0]
+
         # Behavioral signals from CausalMap (H47/H49 effects)
-        cm = context.get('causal_map')
+        cm      = context.get('causal_map')
+        n_coord = 0
+        n_goals = 0
         if cm:
             effects = getattr(cm, '_effects', {}) or {}
             rules   = getattr(cm, '_rules',   []) or []
+            n_goals = len(getattr(cm, '_goal_cells', {}) or {})
             for r in rules:
                 desc = getattr(r, 'description', '') or ''
                 if any(kw in desc.lower() for kw in ('commit', 'ghost', 'phase', 'record')):
-                    behavioral['commit_action'] = 5
+                    behavioral['commit_action'] = behavioral.get('commit_action', 5)
                     break
+            # Count pixel-coordinate tuple keys: both values must be in [0,63]
+            # (excludes (action_num, color) pairs where action_num ≤ 7)
             n_coord = sum(1 for k in effects
                           if isinstance(k, tuple) and len(k) == 2
-                          and all(isinstance(v, (int, float)) for v in k))
+                          and all(isinstance(v, int) and 8 <= v <= 63 for v in k))
             if n_coord > 4:
-                behavioral['has_toggle'] = not has_movement
+                if not has_movement:
+                    # Click-only with coord effects → toggle/extension
+                    behavioral['has_toggle'] = True
+                elif has_click:
+                    # Movement AND click with coord effects → push_force
+                    behavioral['has_push'] = True
+                # movement-only with tuple effects: don't set has_push
 
         # Percept (visual structure signals)
         percept = context.get('percept')
+        n_objs  = 0
         if percept:
             vsd    = getattr(percept, 'visual_scene_dict', None) or {}
             n_objs = len(vsd.get('objects', []))
@@ -149,7 +166,21 @@ class ConceptRungBridge:
 
         class _FakeGame:
             pass
-        return ConceptGraph.classify(probe, behavioral, _FakeGame())
+        cands = ConceptGraph.classify(probe, behavioral, _FakeGame())
+
+        # Filter out concepts that are structurally impossible given available actions.
+        # Avoids wasting 30 steps on toggle/extension when the game has no click action.
+        click_concepts = {'toggle_puzzle', 'extension', 'pattern_input',
+                          'merge_elimination', 'push_force'}
+        if not has_click:
+            cands = [c for c in cands if c not in click_concepts] or cands
+
+        # Store signals for logging
+        self._last_classify_signals = {
+            'n_coord': n_coord, 'n_objs': n_objs, 'n_goals': n_goals,
+            'commit_cands': commit_cands, 'behavioral': list(behavioral.keys()),
+        }
+        return cands
 
     def _get_action_for_concept(self, concept: str, context: dict) -> tuple:
         """Returns (action_num, action_data_or_None, reason_str)."""
@@ -162,13 +193,20 @@ class ConceptRungBridge:
 
         if concept == 'sequence_commit':
             commit_cands = [a for a in avail if a not in [1, 2, 3, 4, 6]]
-            if self._concept_steps >= 3 and commit_cands:
-                return commit_cands[0], None, f'seq_commit:commit(step={self._concept_steps})'
+            if commit_cands:
+                # Explore for 8 moves, then try commit, then explore again.
+                # Pattern: 8 moves → commit → 8 moves → commit → ...
+                phase = self._concept_steps % 9
+                if phase == 8:
+                    return commit_cands[0], None, f'seq_commit:commit(step={self._concept_steps})'
+                if move_actions:
+                    act = move_actions[(self._concept_steps // 9 * 4 + phase) % len(move_actions)]
+                    return act, None, f'seq_commit:explore A{act} phase={phase}'
+                return commit_cands[0], None, 'seq_commit:commit_only'
+            # No commit action available — fall through to movement
             if move_actions:
                 act = move_actions[step % len(move_actions)]
-                return act, None, f'seq_commit:pre_commit A{act}'
-            if commit_cands:
-                return commit_cands[0], None, 'seq_commit:commit_only'
+                return act, None, f'seq_commit:move_only A{act}'
 
         elif concept in ('toggle_puzzle', 'merge_elimination'):
             if 6 in avail:
@@ -207,7 +245,34 @@ class ConceptRungBridge:
                 pt = spell_slots[step % len(spell_slots)]
                 return 6, {'x': pt[0], 'y': pt[1]}, f'pattern:slot({pt[0]},{pt[1]})'
 
-        # navigation / coverage / push_force / traversal_ordering / mixed_movement
+        elif concept == 'push_force':
+            # Select a target with click, then push it with movement.
+            # Pattern: click target → move (×3) → click next target → move (×3) → ...
+            if 6 in avail and cm:
+                try:
+                    prod = cm.get_productive_targets()
+                    if prod:
+                        phase = self._concept_steps % 4
+                        if phase == 0:
+                            idx = (self._concept_steps // 4) % len(prod)
+                            pos = prod[idx][0]
+                            return 6, {'x': pos[0], 'y': pos[1]}, f'push:select({pos[0]},{pos[1]})'
+                        if move_actions:
+                            act = move_actions[phase % len(move_actions)]
+                            return act, None, f'push:move A{act} phase={phase}'
+                except Exception:
+                    pass
+            # Fallback: click-cycle if no productive targets, then move
+            if 6 in avail and move_actions:
+                phase = self._concept_steps % 5
+                if phase == 0:
+                    gx = 8 + ((self._concept_steps // 5) % 7) * 8
+                    gy = 8 + ((self._concept_steps // 5) // 7 % 7) * 8
+                    return 6, {'x': gx, 'y': gy}, f'push:scan({gx},{gy})'
+                act = move_actions[phase % len(move_actions)]
+                return act, None, f'push:move A{act}'
+
+        # navigation / coverage / traversal_ordering / mixed_movement
         if move_actions:
             if cm and hasattr(cm, '_explored'):
                 explored  = set(getattr(cm, '_explored', set()))
@@ -233,20 +298,37 @@ class ConceptRungBridge:
         return 1, None, 'bridge:no_actions'
 
     def signal_concept_failed(self):
-        """Record failure and follow graph edge to next concept (cyclic traversal)."""
+        """Record failure and follow graph edge to next concept (cyclic traversal).
+        Skips concepts that are structurally impossible for this game's action set."""
         if self._current_concept:
             prev = self._current_concept
             self.ledger.record(
                 self._current_concept, False,
                 f'rotate at step={self._concept_steps}')
             nxt = self.graph.next_concepts(self._current_concept, self.ledger)
-            if nxt:
-                self._current_concept   = nxt[0]
+
+            # Filter out concepts that cannot work given available actions
+            avail     = self.available_actions
+            has_click = 6 in avail
+            has_move  = bool(set(avail) & {1, 2, 3, 4})
+            click_only = {'toggle_puzzle', 'extension', 'pattern_input',
+                          'merge_elimination', 'push_force'}
+            move_only  = {'navigation', 'coverage', 'sequence_commit',
+                          'traversal_ordering'}
+            applicable = [c for c in nxt
+                          if not (not has_click and c in click_only)
+                          and not (not has_move  and c in move_only)]
+            chosen = (applicable or nxt or [None])[0]
+
+            if chosen:
+                self._current_concept   = chosen
                 self._concept_steps     = 0
                 self._concept_cycle_idx = 0
+                skipped = [c for c in nxt if c not in applicable]
                 if self.verbose:
+                    skip_str = f' skip={skipped}' if skipped else ''
                     print(f"  [bridge:{self.game_id}] ROTATE {prev} -> {self._current_concept} "
-                          f"(step={self._step} stagnant={self._steps_without_gain})")
+                          f"(step={self._step} stagnant={self._steps_without_gain}{skip_str})")
             else:
                 if self.verbose:
                     print(f"  [bridge:{self.game_id}] ROTATE {prev} -> NONE (graph exhausted "
@@ -289,16 +371,38 @@ class ConceptRungBridge:
             self._concept_cycle_idx  = 0
             self._steps_without_gain = 0
             self._last_levels        = 0
-            # Log classification
-            cm      = context.get('causal_map')
-            percept = context.get('percept')
+            # Log classification with full signals
+            cm        = context.get('causal_map')
             n_effects = len(getattr(cm, '_effects', {}) or {}) if cm else 0
             n_rules   = len(getattr(cm, '_rules',   []) or []) if cm else 0
-            has_click = 6 in avail
+            sigs      = getattr(self, '_last_classify_signals', {})
             if self.verbose:
                 print(f"  [bridge:{self.game_id}] CLASSIFY avail={sorted(avail)} "
-                      f"click={has_click} effects={n_effects} rules={n_rules} "
-                      f"-> {cands[:3]}")
+                      f"click={6 in avail} effects={n_effects} rules={n_rules} "
+                      f"n_coord={sigs.get('n_coord',0)} n_objs={sigs.get('n_objs',0)} "
+                      f"n_goals={sigs.get('n_goals',0)} "
+                      f"commit_cands={sigs.get('commit_cands',[])} "
+                      f"behavioral={sigs.get('behavioral',[])} "
+                      f"-> {cands[:4]}")
+
+        # Re-classify at step 15 and step 40 if no level gain yet.
+        # CausalMap learns effects over time; step 15 catches quick learners,
+        # step 40 catches games that needed more exploration before signals emerge.
+        if self._step in (15, 40) and self._last_levels == 0:
+            new_cands = self._classify_from_context(context)
+            if new_cands and new_cands[0] != self._current_concept:
+                old_concept = self._current_concept
+                self._current_concept   = new_cands[0]
+                self._concept_candidates = new_cands
+                self._concept_steps     = 0
+                self._concept_cycle_idx = 0
+                if self.verbose:
+                    sigs = getattr(self, '_last_classify_signals', {})
+                    print(f"  [bridge:{self.game_id}] RECLASSIFY step=15 "
+                          f"{old_concept} -> {self._current_concept} "
+                          f"(n_coord={sigs.get('n_coord',0)} "
+                          f"n_objs={sigs.get('n_objs',0)} "
+                          f"behavioral={sigs.get('behavioral',[])})")
 
         # Level completion -> record success, reset stagnation counter.
         # Use obs.levels_completed directly — reliable, not context-dependent.
@@ -338,6 +442,7 @@ class ConceptRungBridge:
         if self.verbose and self._step % 20 == 0:
             cm = context.get('causal_map')
             n_explored  = len(getattr(cm, '_explored', set()) or set()) if cm else 0
+            n_goals_now = len(getattr(cm, '_goal_cells', {}) or {}) if cm else 0
             n_prod      = 0
             if cm:
                 try:
@@ -347,7 +452,8 @@ class ConceptRungBridge:
             print(f"  [bridge:{self.game_id}] step={self._step} "
                   f"concept={self._current_concept}({self._concept_steps}) "
                   f"A{action_num} stagnant={self._steps_without_gain} "
-                  f"explored={n_explored} prod={n_prod} L={self._last_levels}")
+                  f"explored={n_explored} prod={n_prod} goals={n_goals_now} "
+                  f"L={self._last_levels}")
 
         # Build metadata (CognitiveLoop reads rung_name, confidence, x/y)
         self.last_decision_metadata = {
