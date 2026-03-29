@@ -262,13 +262,17 @@ class ConceptRungBridge:
             pass
         cands = ConceptGraph.classify(probe, behavioral, _FakeGame())
 
-        # Prepend high-priority v67 primitives based on advanced CausalMap signals.
-        # These fire BEFORE the default mechanic-level concepts when their signals
-        # are present — e.g. self_toggle → read_grid+constraint_sat outranks toggle_puzzle.
+        # Prepend high-priority v67/v68 primitives based on advanced CausalMap signals.
         _prio = []
-        if behavioral.get('has_self_toggle'):
+        # Toggle games (has_toggle OR explicit self_toggle rule) → read_grid first.
+        # read_grid is zero-action; constraint_sat clicks only cells that need it.
+        # Do NOT prepend goal_seek for toggle games — _goal_cells are toggle targets,
+        # not physical navigation destinations, so navigating toward them wastes budget.
+        if behavioral.get('has_toggle') or behavioral.get('has_self_toggle'):
             _prio += ['read_grid', 'constraint_sat']
-        if behavioral.get('has_goal_cells') and 'goal_seek' not in cands:
+        elif behavioral.get('has_goal_cells') and 'goal_seek' not in cands:
+            # Navigation games with known goal positions → goal_seek before navigation.
+            # (elif: suppress goal_seek when has_toggle is set — wrong primitive for click games)
             _prio.insert(0, 'goal_seek')
         if behavioral.get('has_explored_map') and 'bfs_path' not in cands:
             _prio.append('bfs_path')
@@ -838,7 +842,9 @@ class ConceptRungBridge:
             # runs — 30 steps is far too few.  tr87/tu93 typically have 100-130 action
             # budgets; rotating every 30 steps to wrong concepts burns the entire budget.
             # The RECLASSIFY at step 15/40 still fires independently of this limit.
-            if self._current_concept == 'navigation':
+            if self._current_concept in ('navigation', 'bfs_path'):
+                # bfs_path follows same maze-traversal pattern as navigation —
+                # both need 100+ steps of continuous movement to make progress.
                 self._stagnation_limit = max(self._stagnation_limit, 200)
             # Log classification with full signals
             cm        = context.get('causal_map')
@@ -997,6 +1003,6 @@ class ConceptRungBridge:
                 f'[{self._current_concept}:{self._concept_steps}] {reason}')
 
 
-print("v67 ConceptRungBridge loaded")
+print("v68 ConceptRungBridge loaded")
 print(f"  CognitiveRouter available: {_CognitiveRouter is not None}")
 print(f"  Concept graph nodes: {list(ConceptGraph.EDGES.keys())}")
