@@ -1,4 +1,4 @@
-# -- v70: ConceptRungBridge -----------------------------------------------
+# -- v71: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # v67 adds search-algorithm primitives to the codex so the traversal system
@@ -217,8 +217,15 @@ class ConceptRungBridge:
                 if 'self_toggle' in desc.lower():
                     behavioral['has_self_toggle'] = True
                     break
-            # Known goal cells → goal_seek preferred over random wall-follow
-            if n_goals > 0 and has_movement:
+            # Known goal cells → goal_seek preferred over random wall-follow.
+            # Guard: warm-start injects exactly 50 hypothesis goals (H47) which
+            # are TOGGLE TARGETS, not navigation destinations.  Using goal_seek
+            # on these in a click-only game causes movement into walls → life loss.
+            # Only enable goal_seek when goals are organically learned (n_explored>5)
+            # OR when there are fewer than 50 goals (not the warm-start default).
+            _goals_organic = (n_goals > 0 and has_movement
+                              and (n_goals < 50 or n_explored > 5))
+            if _goals_organic:
                 behavioral['has_goal_cells'] = True
             # Explored map available → BFS navigation preferred over wall-follow
             if n_explored > 10 and has_movement:
@@ -577,12 +584,18 @@ class ConceptRungBridge:
             # Uses CausalMap._effects positions as the cell grid — these are the
             # ACTUAL positions the game responded to, not a guessed 8px grid.
             # Falls back to 8px grid if no effect positions are available yet.
-            _frame_rg = context.get('frame') or getattr(obs, 'frame', None)
+            _frame_rg = (context.get('frame')
+                         or getattr(obs, 'frame', None)
+                         or getattr(context.get('percept'), 'frame', None))
             _cm_rg    = context.get('causal_map')
             if _frame_rg is not None:
                 try:
                     import numpy as _np_rg
-                    _f = _np_rg.squeeze(_np_rg.array(_frame_rg))
+                    _f = _np_rg.array(_frame_rg)
+                    # Handle multi-channel frames: FT09=(5,64,64), VC33=(1,64,64).
+                    # np.squeeze leaves (5,64,64) as 3D (no unit dim) — take ch[0].
+                    if _f.ndim == 3:
+                        _f = _f[0]
                     if _f.ndim == 2:
                         # Prefer CausalMap effect positions (actual cell positions
                         # learned by the game — avoids guessing wrong grid spacing).
