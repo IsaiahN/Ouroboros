@@ -1,4 +1,4 @@
-# -- v63: ConceptRungBridge -----------------------------------------------
+# -- v64: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # Without evolved rung_affinity weights, this provides traversal via:
@@ -82,6 +82,9 @@ class ConceptRungBridge:
         # blind navigation state: wall-follower when CausalMap explored == 0
         self._nav_dir               = None  # current preferred direction (action int)
         self._nav_same_count        = 0     # consecutive productive steps in _nav_dir
+        # Dynamic stagnation limit — raised when probe finds high productivity
+        # (sequence games need more runway per concept than exploration games)
+        self._stagnation_limit      = 30
 
         self.last_decision_metadata = {}
 
@@ -216,14 +219,64 @@ class ConceptRungBridge:
         if concept == 'sequence_commit':
             commit_cands = [a for a in avail if a not in [1, 2, 3, 4, 6]]
             if commit_cands:
-                # Explore for 8 moves, then try commit, then explore again.
-                # Pattern: 8 moves → commit → 8 moves → commit → ...
-                phase = self._concept_steps % 9
-                if phase == 8:
-                    return commit_cands[0], None, f'seq_commit:commit(step={self._concept_steps})'
+                cm_inner = context.get('causal_map')
+                n_eff    = len(getattr(cm_inner, '_effects', {}) or {}) if cm_inner else 0
+                n_exp    = len(getattr(cm_inner, '_explored', set()) or set()) if cm_inner else 0
+                # Blind condition: CausalMap can't locate agent (explored==0) or learned
+                # nothing (n_eff==0).  Commit more frequently to maximise position coverage.
+                # Blind: 2 moves → commit every 3rd step.  Sighted: 8 moves every 9th.
+                commit_freq = 3 if (n_eff == 0 or n_exp == 0) else 9
+                phase = self._concept_steps % commit_freq
+                if phase == commit_freq - 1:
+                    return (commit_cands[0], None,
+                            f'seq_commit:commit(step={self._concept_steps},'
+                            f'blind={n_eff==0 or n_exp==0})')
+
+                # When click actions (6) are available but NO movement, use grid-scan
+                # clicks as the "exploration" component (e.g. su15 avail=[6,7]).
+                if not move_actions and 6 in avail:
+                    cols   = list(range(8, 64, 8))
+                    rows   = list(range(8, 64, 8))
+                    total  = len(cols) * len(rows)
+                    ci     = (self._concept_steps // commit_freq * (commit_freq - 1) + phase) % total
+                    gx     = cols[ci % len(cols)]
+                    gy     = rows[ci // len(cols)]
+                    return 6, {'x': gx, 'y': gy}, f'seq_commit:click_scan({gx},{gy}) phase={phase}'
+
+                # When BOTH movement and click are available, weave clicks into the
+                # sequence (e.g. sk48 avail=[1,2,3,4,6,7]).
+                # Pattern inside each commit_freq block: move, move, ..., click, commit.
+                # Every (commit_freq-2)th step does a grid click; last step is commit.
+                if move_actions and 6 in avail:
+                    if phase == commit_freq - 2:
+                        # click at a rotating grid position
+                        cols  = list(range(8, 64, 8))
+                        rows  = list(range(8, 64, 8))
+                        total = len(cols) * len(rows)
+                        ci    = (self._concept_steps // commit_freq) % total
+                        gx    = cols[ci % len(cols)]
+                        gy    = rows[ci // len(cols)]
+                        return 6, {'x': gx, 'y': gy}, f'seq_commit:mid_click({gx},{gy})'
+                    # Non-oscillating directional runs: same direction for 4 consecutive
+                    # blocks before switching, interleaved to avoid immediate cancellation
+                    # (old formula paired up+down which canceled out; new covers ground).
+                    _block = self._concept_steps // commit_freq
+                    _n = len(move_actions)
+                    _explore = ([move_actions[0], move_actions[2],
+                                 move_actions[1], move_actions[3]]
+                                if _n == 4 else move_actions)
+                    act = _explore[(_block // 4) % len(_explore)]
+                    return act, None, f'seq_commit:explore A{act} dir={_block//4 % len(_explore)} phase={phase}'
+
                 if move_actions:
-                    act = move_actions[(self._concept_steps // 9 * 4 + phase) % len(move_actions)]
-                    return act, None, f'seq_commit:explore A{act} phase={phase}'
+                    # Same non-oscillating formula for move-only+commit path (wa30/re86).
+                    _block = self._concept_steps // commit_freq
+                    _n = len(move_actions)
+                    _explore = ([move_actions[0], move_actions[2],
+                                 move_actions[1], move_actions[3]]
+                                if _n == 4 else move_actions)
+                    act = _explore[(_block // 4) % len(_explore)]
+                    return act, None, f'seq_commit:explore A{act} dir={_block//4 % len(_explore)} phase={phase}'
                 return commit_cands[0], None, 'seq_commit:commit_only'
             # No commit action available — fall through to movement
             if move_actions:
@@ -293,6 +346,10 @@ class ConceptRungBridge:
                     promoted = 'toggle_puzzle'
                 elif commit_prod and not move_prod:
                     promoted = 'sequence_commit'
+                elif commit_prod and move_prod:
+                    # Movement + commit action = sequence game (wa30, re86-style).
+                    # Commit needs to be tried at the right moment in a move sequence.
+                    promoted = 'sequence_commit'
                 elif click_prod and move_prod:
                     promoted = 'push_force'
                 elif move_prod:
@@ -303,9 +360,15 @@ class ConceptRungBridge:
                 success = bool(productive)
                 self.ledger.record('probe_all', success,
                                    f'productive={productive} -> {promoted}')
+                # When almost all actions are productive, give the next concept more
+                # runway — this is likely a sequence game where any move counts but
+                # winning requires a specific series.
+                if len(productive) >= len(sorted_avail) - 1:
+                    self._stagnation_limit = 80
                 if self.verbose:
                     print(f"  [bridge:{self.game_id}] PROBE done "
                           f"productive={productive} -> {promoted} "
+                          f"stagnation_limit={self._stagnation_limit} "
                           f"(step={self._step})")
                 self._current_concept   = promoted
                 self._concept_steps     = 0
@@ -383,9 +446,11 @@ class ConceptRungBridge:
                 self._nav_same_count = 0
             else:
                 self._nav_same_count += 1
-                # After 6 productive steps in same direction, turn to explore
-                # perpendicular — prevents running straight into a dead end
-                if self._nav_same_count >= 6:
+                # After 12 productive steps in same direction, turn to explore
+                # perpendicular — prevents running straight into a dead end.
+                # 12 (not 6) avoids thrashing in open-space games (wa30) where
+                # all directions are productive.
+                if self._nav_same_count >= 12:
                     idx = (move_actions.index(self._nav_dir)
                            if self._nav_dir in move_actions else 0)
                     self._nav_dir        = move_actions[(idx + 1) % len(move_actions)]
@@ -477,6 +542,11 @@ class ConceptRungBridge:
             self._concept_cycle_idx  = 0
             self._steps_without_gain = 0
             self._last_levels        = 0
+            # If commit actions detected at classify time, give more runway —
+            # placement/sequence games need more than 30 steps to find the trigger.
+            sigs_init = getattr(self, '_last_classify_signals', {})
+            if sigs_init.get('commit_cands'):
+                self._stagnation_limit = max(self._stagnation_limit, 60)
             # Log classification with full signals
             cm        = context.get('causal_map')
             n_effects = len(getattr(cm, '_effects', {}) or {}) if cm else 0
@@ -501,14 +571,22 @@ class ConceptRungBridge:
             # If CausalMap is still completely blind after 15 steps, switch to
             # probe_all which uses pixel-diff (last_was_productive) instead of
             # CausalMap effects — the codex needs this node for blind games.
-            if n_effects == 0 and self._current_concept != 'probe_all':
+            # Exception: sequence_commit with commit actions is already meaningful
+            # even with effects=0 (commit triggers level on correct state), so
+            # don't waste the budget on probe_all if we're already on the right concept.
+            avail_now    = context.get('available_actions') or self.available_actions
+            commit_now   = [a for a in avail_now if a not in {1, 2, 3, 4, 6}]
+            seq_ok       = (self._current_concept == 'sequence_commit' and bool(commit_now))
+            if n_effects == 0 and self._current_concept != 'probe_all' and not seq_ok:
                 if self.verbose:
                     print(f"  [bridge:{self.game_id}] BLIND at step={self._step} "
                           f"(effects=0) -> probe_all")
-                self._current_concept   = 'probe_all'
-                self._concept_steps     = 0
-                self._concept_cycle_idx = 0
-                self._probe_results     = {}
+                self._current_concept    = 'probe_all'
+                self._concept_steps      = 0
+                self._concept_cycle_idx  = 0
+                self._probe_results      = {}
+                self._steps_without_gain = 0   # fresh stagnation clock for probe
+                self._nav_dir            = None
             else:
                 new_cands = self._classify_from_context(context)
                 if new_cands and new_cands[0] != self._current_concept:
@@ -517,6 +595,14 @@ class ConceptRungBridge:
                     self._concept_candidates = new_cands
                     self._concept_steps      = 0
                     self._concept_cycle_idx  = 0
+                    self._steps_without_gain = 0   # fresh stagnation clock
+                    self._nav_dir            = None
+                    # Whenever we reclassify to a new concept, give it more runway —
+                    # the reclassified concept is likely better-matched and needs time
+                    # to succeed.  dc22/cd82/ar25 all need more than 60 steps to score.
+                    sigs_now = getattr(self, '_last_classify_signals', {})
+                    has_commit_sig = bool(sigs_now.get('commit_cands'))
+                    self._stagnation_limit = max(self._stagnation_limit, 100)
                     if self.verbose:
                         sigs = getattr(self, '_last_classify_signals', {})
                         print(f"  [bridge:{self.game_id}] RECLASSIFY "
@@ -542,10 +628,28 @@ class ConceptRungBridge:
         else:
             self._steps_without_gain = getattr(self, '_steps_without_gain', 0) + 1
 
-        # Rotate concept after 30 non-productive actions (graph traversal)
-        if self._steps_without_gain >= 30:
-            self.signal_concept_failed()
-            self._steps_without_gain = 0
+        # Rotate concept after _stagnation_limit non-productive actions (graph traversal).
+        # Raised to 80 when probe_all finds high productivity — sequence games need more runway.
+        if self._steps_without_gain >= self._stagnation_limit:
+            # For blind commit games (CausalMap explored==0 + commit action exists):
+            # extending the runway beats rotating to navigation/coverage which can't
+            # score either (they never press the commit action at all).
+            # Double the limit per extension, capped at 400.
+            cm_now   = context.get('causal_map')
+            n_exp_now = len(getattr(cm_now, '_explored', set()) or set()) if cm_now else 0
+            avail_now  = context.get('available_actions') or self.available_actions
+            commit_now = [a for a in avail_now if a not in {1, 2, 3, 4, 6}]
+            if (self._current_concept == 'sequence_commit' and commit_now
+                    and n_exp_now == 0 and self._stagnation_limit < 400):
+                self._stagnation_limit = min(self._stagnation_limit * 2, 400)
+                self._steps_without_gain = 0
+                if self.verbose:
+                    print(f"  [bridge:{self.game_id}] EXTEND stagnation_limit"
+                          f" -> {self._stagnation_limit}"
+                          f" (blind commit, step={self._step})")
+            else:
+                self.signal_concept_failed()
+                self._steps_without_gain = 0
 
         # Get action from current concept strategy
         action_num, action_data, reason = self._get_action_for_concept(
@@ -595,6 +699,6 @@ class ConceptRungBridge:
                 f'[{self._current_concept}:{self._concept_steps}] {reason}')
 
 
-print("v63 ConceptRungBridge loaded")
+print("v64 ConceptRungBridge loaded")
 print(f"  CognitiveRouter available: {_CognitiveRouter is not None}")
 print(f"  Concept graph nodes: {list(ConceptGraph.EDGES.keys())}")
