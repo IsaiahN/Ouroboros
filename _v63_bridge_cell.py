@@ -1,4 +1,4 @@
-# -- v71: ConceptRungBridge -----------------------------------------------
+# -- v72: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # v67 adds search-algorithm primitives to the codex so the traversal system
@@ -584,9 +584,18 @@ class ConceptRungBridge:
             # Uses CausalMap._effects positions as the cell grid — these are the
             # ACTUAL positions the game responded to, not a guessed 8px grid.
             # Falls back to 8px grid if no effect positions are available yet.
-            _frame_rg = (context.get('frame')
-                         or getattr(obs, 'frame', None)
-                         or getattr(context.get('percept'), 'frame', None))
+            # Use explicit None checks — never boolean-test numpy arrays
+            # (numpy raises "truth value ambiguous" when used with `or`).
+            # Priority: context['percept'].frame (already _to_numpy'd, 100%
+            # reliable) > obs.frame (raw SDK frame) > context['frame'] (absent).
+            _frame_rg = None
+            _percept_rg = context.get('percept')
+            if _percept_rg is not None:
+                _frame_rg = getattr(_percept_rg, 'frame', None)
+            if _frame_rg is None:
+                _frame_rg = getattr(obs, 'frame', None)
+            if _frame_rg is None:
+                _frame_rg = context.get('frame')
             _cm_rg    = context.get('causal_map')
             if _frame_rg is not None:
                 try:
