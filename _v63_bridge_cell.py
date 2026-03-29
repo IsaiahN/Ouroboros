@@ -1,4 +1,4 @@
-# -- v64: ConceptRungBridge -----------------------------------------------
+# -- v65: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # Without evolved rung_affinity weights, this provides traversal via:
@@ -171,8 +171,15 @@ class ConceptRungBridge:
                     # Click-only with coord effects → toggle/extension
                     behavioral['has_toggle'] = True
                 elif has_click:
-                    # Movement AND click with coord effects → push_force
-                    behavioral['has_push'] = True
+                    # Movement AND click with coord effects.
+                    # No dedicated commit action → game is a click-scan puzzle
+                    # (dc22/ka59-style): toggle_puzzle uses the full budget on clicks.
+                    # push_force wastes 3 of every 4 actions on movement.
+                    # Commit action present → push_force (sequence + commit needed).
+                    if commit_cands:
+                        behavioral['has_push'] = True
+                    else:
+                        behavioral['has_toggle'] = True
                 # movement-only with tuple effects: don't set has_push
 
         # Percept (visual structure signals)
@@ -635,12 +642,14 @@ class ConceptRungBridge:
             # extending the runway beats rotating to navigation/coverage which can't
             # score either (they never press the commit action at all).
             # Double the limit per extension, capped at 400.
-            cm_now   = context.get('causal_map')
+            cm_now    = context.get('causal_map')
             n_exp_now = len(getattr(cm_now, '_explored', set()) or set()) if cm_now else 0
+            n_eff_now = len(getattr(cm_now, '_effects', {}) or {}) if cm_now else 0
             avail_now  = context.get('available_actions') or self.available_actions
             commit_now = [a for a in avail_now if a not in {1, 2, 3, 4, 6}]
             if (self._current_concept == 'sequence_commit' and commit_now
-                    and n_exp_now == 0 and self._stagnation_limit < 400):
+                    and n_exp_now == 0 and n_eff_now == 0
+                    and self._stagnation_limit < 400):
                 self._stagnation_limit = min(self._stagnation_limit * 2, 400)
                 self._steps_without_gain = 0
                 if self.verbose:
@@ -699,6 +708,6 @@ class ConceptRungBridge:
                 f'[{self._current_concept}:{self._concept_steps}] {reason}')
 
 
-print("v64 ConceptRungBridge loaded")
+print("v65 ConceptRungBridge loaded")
 print(f"  CognitiveRouter available: {_CognitiveRouter is not None}")
 print(f"  Concept graph nodes: {list(ConceptGraph.EDGES.keys())}")
