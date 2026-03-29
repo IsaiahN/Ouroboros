@@ -79,6 +79,9 @@ class ConceptRungBridge:
         self._last_classify_signals = {}
         # probe_all state: tracks which actions produced frame changes
         self._probe_results         = {}   # action -> bool (was_productive)
+        # blind navigation state: wall-follower when CausalMap explored == 0
+        self._nav_dir               = None  # current preferred direction (action int)
+        self._nav_same_count        = 0     # consecutive productive steps in _nav_dir
 
         self.last_decision_metadata = {}
 
@@ -346,24 +349,51 @@ class ConceptRungBridge:
 
         # navigation / coverage / traversal_ordering / mixed_movement
         if move_actions:
-            if cm and hasattr(cm, '_explored'):
-                explored  = set(getattr(cm, '_explored', set()))
-                agent_pos = getattr(cm, '_agent_pos', None)
-                if agent_pos is None and hasattr(cm, '_all_positions'):
-                    pos_set = getattr(cm, '_all_positions', set())
-                    if pos_set:
-                        agent_pos = next(iter(pos_set))
-                if agent_pos:
-                    dirs = {1:(0,-5), 2:(0,5), 3:(-5,0), 4:(5,0)}
-                    for a in move_actions:
-                        if a not in dirs:
-                            continue
-                        dx, dy = dirs[a]
-                        npos = (agent_pos[0]+dx, agent_pos[1]+dy)
-                        if npos not in explored:
-                            return a, None, f'{concept}:unexplored({npos[0]},{npos[1]})'
-            act = move_actions[step % len(move_actions)]
-            return act, None, f'{concept}:cycle A{act}'
+            explored  = set(getattr(cm, '_explored', set())) if cm else set()
+            agent_pos = getattr(cm, '_agent_pos', None) if cm else None
+            if not agent_pos and cm and hasattr(cm, '_all_positions'):
+                pos_set = getattr(cm, '_all_positions', set())
+                if pos_set:
+                    agent_pos = next(iter(pos_set))
+
+            if agent_pos and explored:
+                # CausalMap has position data — BFS toward unexplored cell
+                dirs = {1:(0,-5), 2:(0,5), 3:(-5,0), 4:(5,0)}
+                for a in move_actions:
+                    if a not in dirs:
+                        continue
+                    dx, dy = dirs[a]
+                    npos = (agent_pos[0]+dx, agent_pos[1]+dy)
+                    if npos not in explored:
+                        return a, None, f'{concept}:unexplored({npos[0]},{npos[1]})'
+
+            # CausalMap dark (explored==0) — adaptive wall-following.
+            # Uses last_was_productive (pixel-diff) to detect walls without
+            # needing CausalMap position data.
+            if self._nav_dir is None or self._nav_dir not in move_actions:
+                self._nav_dir       = move_actions[0]
+                self._nav_same_count = 0
+
+            last_prod = context.get('last_was_productive', True)
+            if not last_prod:
+                # Hit a wall — rotate to next direction clockwise
+                idx = (move_actions.index(self._nav_dir)
+                       if self._nav_dir in move_actions else 0)
+                self._nav_dir        = move_actions[(idx + 1) % len(move_actions)]
+                self._nav_same_count = 0
+            else:
+                self._nav_same_count += 1
+                # After 6 productive steps in same direction, turn to explore
+                # perpendicular — prevents running straight into a dead end
+                if self._nav_same_count >= 6:
+                    idx = (move_actions.index(self._nav_dir)
+                           if self._nav_dir in move_actions else 0)
+                    self._nav_dir        = move_actions[(idx + 1) % len(move_actions)]
+                    self._nav_same_count = 0
+
+            return self._nav_dir, None, (
+                f'{concept}:wall_follow A{self._nav_dir} '
+                f'run={self._nav_same_count} prod={last_prod}')
 
         if avail:
             return _rb_random.choice(list(avail)), None, f'{concept}:random_fallback'
@@ -398,6 +428,8 @@ class ConceptRungBridge:
                 self._current_concept   = chosen
                 self._concept_steps     = 0
                 self._concept_cycle_idx = 0
+                self._nav_dir           = None  # fresh wall-follow for new concept
+                self._nav_same_count    = 0
                 skipped = [c for c in nxt if c not in applicable]
                 if self.verbose:
                     skip_str = f' skip={skipped}' if skipped else ''
