@@ -1,5 +1,19 @@
-# -- v66: ConceptRungBridge -----------------------------------------------
+# -- v67: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
+#
+# v67 adds search-algorithm primitives to the codex so the traversal system
+# can compose them to solve games it hasn't seen before:
+#
+#   PERCEPTION:    read_grid     — frame scan → cell_state_map
+#   CONSTRAINT:    constraint_sat— CSP solver (lights-out, self_toggle games)
+#   NAVIGATION:    goal_seek     — greedy move toward _goal_cells
+#                  bfs_path      — BFS in explored map toward frontier/goal
+#   LOCAL SEARCH:  hill_climb    — probe all actions, exploit most productive
+#   PUSH PLANNING: sokoban_bfs   — navigate + commit toward detected goal cells
+#
+# Pipeline architecture: _pipeline_context persists shared state across concept
+# rotations within a single game session (e.g. cell_states survives navigation
+# → constraint_sat rotation). Cleared on level gain (new level = new state).
 #
 # Without evolved rung_affinity weights, this provides traversal via:
 #   EphemeralLedger  - records which concepts fail/succeed THIS session
@@ -22,6 +36,7 @@ except ImportError:
     pass
 
 import random as _rb_random
+from collections import deque as _rb_deque
 
 
 # Patch ConceptGraph to add probe_all node (runs after cell 10 defines ConceptGraph).
@@ -30,9 +45,36 @@ import random as _rb_random
 # best matching concept based on which action types responded.
 def _patch_concept_graph():
     try:
+        # probe_all: deep fallback — probes every action via pixel-diff
         ConceptGraph.EDGES['probe_all'] = [
             'navigation', 'toggle_puzzle', 'sequence_commit', 'coverage']
-        # wire existing nodes to fall back to probe_all when all else fails
+
+        # --- v67 search-algorithm primitive nodes ----------------------------
+        # goal_seek: greedy movement toward known _goal_cells (informed search)
+        ConceptGraph.EDGES['goal_seek']     = ['navigation', 'bfs_path', 'coverage']
+        # bfs_path: BFS in explored map toward frontier/goal (uninformed search)
+        ConceptGraph.EDGES['bfs_path']      = ['goal_seek', 'navigation', 'coverage']
+        # read_grid: frame-scan perception — transitions to constraint_sat
+        ConceptGraph.EDGES['read_grid']     = ['constraint_sat', 'toggle_puzzle', 'navigation']
+        # constraint_sat: CSP solver for self_toggle games (loops read_grid)
+        ConceptGraph.EDGES['constraint_sat'] = ['read_grid', 'toggle_puzzle', 'sequence_commit']
+        # hill_climb: local search — probe all actions, exploit most productive
+        ConceptGraph.EDGES['hill_climb']    = ['navigation', 'coverage', 'probe_all']
+        # sokoban_bfs: push-goal planning with movement + commit
+        ConceptGraph.EDGES['sokoban_bfs']   = ['navigation', 'sequence_commit', 'coverage']
+
+        # Hook new primitives into existing graph edges
+        _nav = ConceptGraph.EDGES.setdefault('navigation', [])
+        if 'goal_seek' not in _nav:
+            _nav.append('goal_seek')
+        _tog = ConceptGraph.EDGES.setdefault('toggle_puzzle', [])
+        if 'read_grid' not in _tog:
+            _tog.append('read_grid')
+        _probe = ConceptGraph.EDGES.setdefault('probe_all', [])
+        if 'hill_climb' not in _probe:
+            _probe.append('hill_climb')
+
+        # Wire all nodes to fall back to probe_all when all else fails
         for node, edges in ConceptGraph.EDGES.items():
             if node != 'probe_all' and 'probe_all' not in edges:
                 edges.append('probe_all')
@@ -85,6 +127,12 @@ class ConceptRungBridge:
         # Dynamic stagnation limit — raised when probe finds high productivity
         # (sequence games need more runway per concept than exploration games)
         self._stagnation_limit      = 30
+
+        # Pipeline context: shared state across concept rotations within one game.
+        # Persists through signal_concept_failed() — only cleared on level gain.
+        # Stores: cell_states (read_grid), _sat_targets (constraint_sat),
+        #         _bfs_path (bfs_path), _hc_scores (hill_climb), etc.
+        self._pipeline_context      = {}
 
         self.last_decision_metadata = {}
 
@@ -149,18 +197,32 @@ class ConceptRungBridge:
             behavioral['commit_action'] = commit_cands[0]
 
         # Behavioral signals from CausalMap (H47/H49 effects)
-        cm      = context.get('causal_map')
-        n_coord = 0
-        n_goals = 0
+        cm         = context.get('causal_map')
+        n_coord    = 0
+        n_goals    = 0
+        n_explored = 0
         if cm:
-            effects = getattr(cm, '_effects', {}) or {}
-            rules   = getattr(cm, '_rules',   []) or []
-            n_goals = len(getattr(cm, '_goal_cells', {}) or {})
+            effects    = getattr(cm, '_effects', {}) or {}
+            rules      = getattr(cm, '_rules',   []) or []
+            n_goals    = len(getattr(cm, '_goal_cells', {}) or {})
+            n_explored = len(getattr(cm, '_explored',   set()) or set())
             for r in rules:
                 desc = getattr(r, 'description', '') or ''
                 if any(kw in desc.lower() for kw in ('commit', 'ghost', 'phase', 'record')):
                     behavioral['commit_action'] = behavioral.get('commit_action', 5)
                     break
+            # Self-toggle rule → read_grid + constraint_sat path (lights-out solver)
+            for r in rules:
+                desc = getattr(r, 'description', '') or ''
+                if 'self_toggle' in desc.lower():
+                    behavioral['has_self_toggle'] = True
+                    break
+            # Known goal cells → goal_seek preferred over random wall-follow
+            if n_goals > 0 and has_movement:
+                behavioral['has_goal_cells'] = True
+            # Explored map available → BFS navigation preferred over wall-follow
+            if n_explored > 10 and has_movement:
+                behavioral['has_explored_map'] = True
             # Count pixel-coordinate tuple keys: both values must be in [0,63]
             # (excludes (action_num, color) pairs where action_num ≤ 7)
             n_coord = sum(1 for k in effects
@@ -200,16 +262,36 @@ class ConceptRungBridge:
             pass
         cands = ConceptGraph.classify(probe, behavioral, _FakeGame())
 
+        # Prepend high-priority v67 primitives based on advanced CausalMap signals.
+        # These fire BEFORE the default mechanic-level concepts when their signals
+        # are present — e.g. self_toggle → read_grid+constraint_sat outranks toggle_puzzle.
+        _prio = []
+        if behavioral.get('has_self_toggle'):
+            _prio += ['read_grid', 'constraint_sat']
+        if behavioral.get('has_goal_cells') and 'goal_seek' not in cands:
+            _prio.insert(0, 'goal_seek')
+        if behavioral.get('has_explored_map') and 'bfs_path' not in cands:
+            _prio.append('bfs_path')
+        if _prio:
+            _seen_p, _merged = set(), []
+            for _c in _prio + cands:
+                if _c not in _seen_p:
+                    _seen_p.add(_c)
+                    _merged.append(_c)
+            cands = _merged
+
         # Filter out concepts that are structurally impossible given available actions.
         # Avoids wasting 30 steps on toggle/extension when the game has no click action.
         click_concepts = {'toggle_puzzle', 'extension', 'pattern_input',
-                          'merge_elimination', 'push_force'}
+                          'merge_elimination', 'push_force',
+                          'read_grid', 'constraint_sat'}
         if not has_click:
             cands = [c for c in cands if c not in click_concepts] or cands
 
         # Store signals for logging
         self._last_classify_signals = {
             'n_coord': n_coord, 'n_objs': n_objs, 'n_goals': n_goals,
+            'n_explored': n_explored,
             'commit_cands': commit_cands, 'behavioral': list(behavioral.keys()),
         }
         return cands
@@ -416,6 +498,204 @@ class ConceptRungBridge:
                     return 6, {'x': gx, 'y': gy}, f'push:scan({gx},{gy})'
                 act = move_actions[phase % len(move_actions)]
                 return act, None, f'push:move A{act}'
+
+        elif concept == 'goal_seek':
+            # Informed search: greedy movement toward nearest known goal cell.
+            # Uses CausalMap._goal_cells learned from H47 score-correlation.
+            # Falls back to navigation wall-follow if no goal/position known.
+            _cm_gs  = context.get('causal_map')
+            _goals  = dict(getattr(_cm_gs, '_goal_cells', {}) or {}) if _cm_gs else {}
+            _apos   = getattr(_cm_gs, '_agent_pos', None) if _cm_gs else None
+            if _goals and _apos and move_actions:
+                _ax, _ay = _apos
+                _nearest = min(_goals.keys(),
+                               key=lambda p: abs(p[0]-_ax)+abs(p[1]-_ay))
+                _gx, _gy = _nearest
+                _dirs_gs = {1:(0,-5), 2:(0,5), 3:(-5,0), 4:(5,0)}
+                _best_a, _best_d = None, float('inf')
+                for _a in move_actions:
+                    if _a not in _dirs_gs:
+                        continue
+                    _ndx, _ndy = _dirs_gs[_a]
+                    _d = abs(_ax+_ndx-_gx) + abs(_ay+_ndy-_gy)
+                    if _d < _best_d:
+                        _best_d, _best_a = _d, _a
+                if _best_a is not None:
+                    return (_best_a, None,
+                            f'goal_seek:A{_best_a} toward({_gx},{_gy})'
+                            f' from({_ax},{_ay}) dist={abs(_ax-_gx)+abs(_ay-_gy)}')
+            # Fallthrough: no goal/pos → treat as navigation below
+
+        elif concept == 'bfs_path':
+            # Uninformed BFS: find shortest path in CausalMap explored space
+            # toward nearest goal cell or unexplored frontier cell.
+            _cm_bfs  = context.get('causal_map')
+            _exp     = set(getattr(_cm_bfs, '_explored', set()) or set()) if _cm_bfs else set()
+            _apos_b  = getattr(_cm_bfs, '_agent_pos', None) if _cm_bfs else None
+            _goals_b = dict(getattr(_cm_bfs, '_goal_cells', {}) or {}) if _cm_bfs else {}
+            if _apos_b and move_actions:
+                _dirs_b = {1:(0,-5), 2:(0,5), 3:(-5,0), 4:(5,0)}
+                if _goals_b:
+                    _targets_b = set(_goals_b.keys())
+                else:
+                    _targets_b = {(_px+_dx, _py+_dy)
+                                  for _px, _py in _exp
+                                  for _dx, _dy in _dirs_b.values()
+                                  if (_px+_dx, _py+_dy) not in _exp}
+                # Use cached path or compute new BFS path
+                if not self._pipeline_context.get('_bfs_path') and _targets_b and _exp:
+                    _q  = _rb_deque([(_apos_b, [])])
+                    _vis = {_apos_b}
+                    _found_b = None
+                    while _q and not _found_b:
+                        _pos_b, _path_b = _q.popleft()
+                        for _a, (_dx, _dy) in _dirs_b.items():
+                            if _a not in move_actions:
+                                continue
+                            _npos = (_pos_b[0]+_dx, _pos_b[1]+_dy)
+                            if _npos in _targets_b:
+                                _found_b = _path_b + [_a]
+                                break
+                            if _npos in _exp and _npos not in _vis:
+                                _vis.add(_npos)
+                                _q.append((_npos, _path_b + [_a]))
+                    if _found_b:
+                        self._pipeline_context['_bfs_path'] = _found_b
+                _bfs_p = self._pipeline_context.get('_bfs_path', [])
+                if _bfs_p:
+                    _act_b = _bfs_p.pop(0)
+                    self._pipeline_context['_bfs_path'] = _bfs_p
+                    return _act_b, None, f'bfs_path:A{_act_b} remaining={len(_bfs_p)}'
+            # Fallthrough: no explored map or path → treat as navigation below
+
+        elif concept == 'read_grid':
+            # Zero-action perception: reads cell states from current frame directly,
+            # then immediately transitions to constraint_sat.  No game actions needed.
+            _frame_rg = context.get('frame')
+            if _frame_rg is not None:
+                try:
+                    import numpy as _np_rg
+                    _f = _np_rg.squeeze(_np_rg.array(_frame_rg))
+                    if _f.ndim == 2:
+                        _gc = list(range(8, 60, 8))   # 7 grid columns across 64px
+                        _gr = list(range(8, 60, 8))   # 7 grid rows
+                        _cs = {(_gx, _gy): int(_f[_gy, _gx])
+                               for _gx in _gc for _gy in _gr
+                               if _gy < _f.shape[0] and _gx < _f.shape[1]}
+                        self._pipeline_context['cell_states'] = _cs
+                        if self.verbose:
+                            _clrs = sorted(set(_cs.values()))
+                            print(f"  [bridge:{self.game_id}] read_grid:"
+                                  f" {len(_cs)} cells scanned, colors={_clrs}")
+                except Exception as _e_rg:
+                    if self.verbose:
+                        print(f"  [bridge:{self.game_id}] read_grid: frame error {_e_rg}")
+            # Immediately transition to constraint_sat — no action emitted here.
+            self._current_concept    = 'constraint_sat'
+            self._concept_steps      = 0
+            self._concept_cycle_idx  = 0
+            self._pipeline_context.pop('_sat_targets', None)
+            self._pipeline_context.pop('_sat_idx',     None)
+            return self._get_action_for_concept('constraint_sat', context)
+
+        elif concept == 'constraint_sat':
+            # Constraint satisfaction: click every cell not at the minimum (off) color.
+            # Works for self_toggle games (lights-out): each click flips only that cell.
+            # Loop: click all targets → re-read grid for next level configuration.
+            if '_sat_targets' not in self._pipeline_context:
+                _cs_sat = self._pipeline_context.get('cell_states', {})
+                if not _cs_sat:
+                    # No cell data yet — trigger read_grid first
+                    self._current_concept    = 'read_grid'
+                    self._concept_steps      = 0
+                    self._concept_cycle_idx  = 0
+                    return self._get_action_for_concept('read_grid', context)
+                _min_c   = min(_cs_sat.values())
+                _targets = [(x, y) for (x, y), c in sorted(_cs_sat.items()) if c != _min_c]
+                self._pipeline_context['_sat_targets'] = _targets
+                self._pipeline_context['_sat_idx']     = 0
+                if self.verbose:
+                    print(f"  [bridge:{self.game_id}] constraint_sat:"
+                          f" {len(_targets)} cells to toggle (non-{_min_c})")
+            _targets = self._pipeline_context['_sat_targets']
+            _idx_s   = self._pipeline_context.get('_sat_idx', 0)
+            if _idx_s >= len(_targets):
+                # All targets clicked — re-read for next level
+                if self.verbose:
+                    print(f"  [bridge:{self.game_id}] constraint_sat DONE"
+                          f" → re-reading grid for next level")
+                for _pk in ('_sat_targets', '_sat_idx', 'cell_states'):
+                    self._pipeline_context.pop(_pk, None)
+                self._current_concept    = 'read_grid'
+                self._concept_steps      = 0
+                self._concept_cycle_idx  = 0
+                return self._get_action_for_concept('read_grid', context)
+            self._pipeline_context['_sat_idx'] = _idx_s + 1
+            _tx, _ty = _targets[_idx_s]
+            if 6 in avail:
+                return (6, {'x': _tx, 'y': _ty},
+                        f'constraint_sat:click({_tx},{_ty})'
+                        f' {_idx_s+1}/{len(_targets)}')
+            return _rb_random.choice(list(avail)), None, 'constraint_sat:no_click_action'
+
+        elif concept == 'hill_climb':
+            # Local search: probe each action N times, exploit whichever produced
+            # the most pixel changes (last_was_productive).  Works even when
+            # CausalMap is completely blind (effects=0).
+            if '_hc_scores' not in self._pipeline_context:
+                self._pipeline_context['_hc_scores']      = {}
+                self._pipeline_context['_hc_last_action'] = None
+            _hc_s  = self._pipeline_context['_hc_scores']
+            _last_a = self._pipeline_context.get('_hc_last_action')
+            _prod_h = context.get('last_was_productive', False)
+            if _last_a is not None:
+                _hc_s[_last_a] = _hc_s.get(_last_a, 0) + (1 if _prod_h else 0)
+            _n_probe  = 2
+            _unprobed = [a for a in sorted(avail)
+                         if _hc_s.get(a, -1) < _n_probe - 1]
+            if _unprobed:
+                _act_h = _unprobed[0]
+                self._pipeline_context['_hc_last_action'] = _act_h
+                return _act_h, None, f'hill_climb:probe A{_act_h} scores={_hc_s}'
+            if _hc_s:
+                _best_h = max(_hc_s, key=_hc_s.get)
+                if _hc_s[_best_h] > 0:
+                    self._pipeline_context['_hc_last_action'] = _best_h
+                    return _best_h, None, f'hill_climb:exploit A{_best_h} score={_hc_s[_best_h]}'
+            _act_h = _rb_random.choice(list(avail))
+            self._pipeline_context['_hc_last_action'] = _act_h
+            return _act_h, None, 'hill_climb:random'
+
+        elif concept == 'sokoban_bfs':
+            # Push-goal planning: navigate toward goal cells, commit when adjacent.
+            # Covers wa30/re86-style push games where commit fires after positioning.
+            # Currently: greedy movement + proximity-triggered commit.
+            _cm_sk    = context.get('causal_map')
+            _goals_sk = dict(getattr(_cm_sk, '_goal_cells', {}) or {}) if _cm_sk else {}
+            _apos_sk  = getattr(_cm_sk, '_agent_pos', None) if _cm_sk else None
+            _commit_sk = [a for a in avail if a not in {1, 2, 3, 4, 6}]
+            if _goals_sk and _apos_sk and move_actions:
+                _ax_s, _ay_s = _apos_sk
+                _near_sk = min(_goals_sk.keys(),
+                               key=lambda p: abs(p[0]-_ax_s)+abs(p[1]-_ay_s))
+                _gx_s, _gy_s = _near_sk
+                _dist_sk = abs(_ax_s-_gx_s) + abs(_ay_s-_gy_s)
+                if _dist_sk <= 6 and _commit_sk:
+                    return (_commit_sk[0], None,
+                            f'sokoban_bfs:commit dist={_dist_sk} goal=({_gx_s},{_gy_s})')
+                _dirs_sk = {1:(0,-5), 2:(0,5), 3:(-5,0), 4:(5,0)}
+                _best_as, _best_ds = None, float('inf')
+                for _a in move_actions:
+                    if _a not in _dirs_sk:
+                        continue
+                    _ndx, _ndy = _dirs_sk[_a]
+                    _d = abs(_ax_s+_ndx-_gx_s) + abs(_ay_s+_ndy-_gy_s)
+                    if _d < _best_ds:
+                        _best_ds, _best_as = _d, _a
+                if _best_as is not None:
+                    return _best_as, None, (f'sokoban_bfs:A{_best_as}'
+                                            f' toward({_gx_s},{_gy_s})')
+            # Fallthrough to navigation
 
         # navigation / coverage / traversal_ordering / mixed_movement
         if move_actions:
@@ -638,6 +918,9 @@ class ConceptRungBridge:
             self._steps_without_gain = 0
             self.ledger.record(self._current_concept, True,
                                f'levels={cur_levels}')
+            # Clear level-specific pipeline state — new level = new cell layout
+            for _pk in ('cell_states', '_sat_targets', '_sat_idx', '_bfs_path'):
+                self._pipeline_context.pop(_pk, None)
         else:
             self._steps_without_gain = getattr(self, '_steps_without_gain', 0) + 1
 
@@ -714,6 +997,6 @@ class ConceptRungBridge:
                 f'[{self._current_concept}:{self._concept_steps}] {reason}')
 
 
-print("v66 ConceptRungBridge loaded")
+print("v67 ConceptRungBridge loaded")
 print(f"  CognitiveRouter available: {_CognitiveRouter is not None}")
 print(f"  Concept graph nodes: {list(ConceptGraph.EDGES.keys())}")
