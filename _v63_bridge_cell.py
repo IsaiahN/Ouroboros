@@ -1,4 +1,4 @@
-# -- v72: ConceptRungBridge -----------------------------------------------
+# -- v73: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # v67 adds search-algorithm primitives to the codex so the traversal system
@@ -611,10 +611,13 @@ class ConceptRungBridge:
                         # Filter: len(effects[pos]) >= 2 discards cursor-scan artifacts
                         # (ft09 has 766 single-effect positions; real cells affect 2+ colors).
                         _effects_rg = getattr(_cm_rg, '_effects', {}) or {} if _cm_rg else {}
+                        # Filter to coordinate-tuple keys only.
+                        # Do NOT call len() on values — they may be TileEffect objects
+                        # (not lists/sets) which raise TypeError on len().
+                        # Pixel values read from frame provide the cell state directly.
                         _pos_rg = [k for k in _effects_rg
                                    if isinstance(k, tuple) and len(k) == 2
-                                   and all(isinstance(v, int) and 0 <= v < 64 for v in k)
-                                   and len(_effects_rg.get(k, [])) >= 2]
+                                   and all(isinstance(v, int) and 0 <= v < 64 for v in k)]
                         if not _pos_rg:
                             # Fallback: 8px grid scan
                             _gc = list(range(8, 60, 8))
