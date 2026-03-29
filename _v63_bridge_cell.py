@@ -1,4 +1,4 @@
-# -- v75: ConceptRungBridge -----------------------------------------------
+# -- v76: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # v67 adds search-algorithm primitives to the codex so the traversal system
@@ -621,17 +621,15 @@ class ConceptRungBridge:
                         _n_effects_rg = len(_pos_rg)
                         if not _pos_rg or len(_pos_rg) > 100:
                             # Too many positions = cursor scan artifacts (ft09: 800+).
-                            # ft09 game grid: 32-unit coord * 2px/unit = pixel position.
-                            # x is always offset-4 (4,12,20,28,36,44,52).
-                            # y alternates: even game-y → offset-4, odd → offset-6.
-                            # Combined x-offset4 × (y-off4 + y-off6) = 7×14 = 98 positions.
-                            # This covers ALL ft09 level patterns in a single fallback scan.
-                            _gx = list(range(4, 57, 8))   # x: 4,12,20,28,36,44,52
-                            _gy4 = list(range(4, 57, 8))  # y offset-4: 4,12,20,28,36,44,52
-                            _gy6 = list(range(6, 57, 8))  # y offset-6: 6,14,22,30,38,46,54
-                            _gy = sorted(set(_gy4 + _gy6))  # 14 combined y values
-                            _pos_rg = [(_gx_i, _gy_j) for _gx_i in _gx for _gy_j in _gy]
-                            _rg_src = f'grid98(was {_n_effects_rg} effects)'
+                            # ft09 cell centers: game_coord*2 + 1 → pixel = (game+1)*2
+                            # = 2*10+2=22, 2*14+2=30, 2*18+2=38... all ≡ 6 (mod 8).
+                            # Verified from DB replay coords: (38,38),(38,46),(54,46)...
+                            # ALL are offset-6 (38%8=6, 46%8=6, 54%8=6 ✓).
+                            # Self-toggle game (irw=[[0,0,0],[0,1,0],[0,0,0]]) so clicking
+                            # all on-cells (non-mode at correct positions) wins the level.
+                            _gc = list(range(6, 57, 8))   # 6,14,22,30,38,46,54 (7 values)
+                            _pos_rg = [(_gx_i, _gy_j) for _gx_i in _gc for _gy_j in _gc]
+                            _rg_src = f'grid49(was {_n_effects_rg} effects)'
                         else:
                             _rg_src = f'effects({_n_effects_rg})'
                         _cs = {(_gx, _gy): int(_f[_gy, _gx])
@@ -686,8 +684,8 @@ class ConceptRungBridge:
                     print(f"  [bridge:{self.game_id}] constraint_sat:"
                           f" {len(_targets)} cells to toggle (non-mode={_mode_c})")
                 # Give constraint_sat enough runway to complete a full click pass.
-                # Up to 98 positions in grid, ~50 non-mode targets + re-read; use 180.
-                self._stagnation_limit = max(self._stagnation_limit, 180)
+                # Up to 49 grid positions, some levels have 40+ targets; use 120.
+                self._stagnation_limit = max(self._stagnation_limit, 120)
             _targets = self._pipeline_context['_sat_targets']
             _idx_s   = self._pipeline_context.get('_sat_idx', 0)
             if _idx_s >= len(_targets):
@@ -699,14 +697,16 @@ class ConceptRungBridge:
                           f" pass={_sat_pass} → re-reading grid for next level")
                 if _sat_pass >= 3:
                     # 3 full passes with no level gain — this strategy doesn't work.
-                    # Rotate to a different concept (sequence_commit or hill_climb).
+                    # Jump directly to toggle_puzzle (NOT back through read_grid, which
+                    # would create an infinite read_grid ↔ constraint_sat loop).
                     if self.verbose:
                         print(f"  [bridge:{self.game_id}] constraint_sat:"
-                              f" {_sat_pass} passes, no level — rotating concept")
+                              f" {_sat_pass} passes, no level -- forcing toggle_puzzle")
                     for _pk in ('_sat_targets', '_sat_idx', 'cell_states', '_sat_pass'):
                         self._pipeline_context.pop(_pk, None)
-                    self.signal_concept_failed()
-                    return _rb_random.choice(list(avail)), None, 'constraint_sat:max_passes_failed'
+                    self._current_concept = 'toggle_puzzle'
+                    self._concept_steps   = 0
+                    return self._get_action_for_concept('toggle_puzzle', context)
                 for _pk in ('_sat_targets', '_sat_idx', 'cell_states'):
                     self._pipeline_context.pop(_pk, None)
                 self._current_concept    = 'read_grid'
