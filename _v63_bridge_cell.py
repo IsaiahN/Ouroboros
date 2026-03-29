@@ -1,4 +1,4 @@
-# -- v65: ConceptRungBridge -----------------------------------------------
+# -- v66: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # Without evolved rung_affinity weights, this provides traversal via:
@@ -554,6 +554,12 @@ class ConceptRungBridge:
             sigs_init = getattr(self, '_last_classify_signals', {})
             if sigs_init.get('commit_cands'):
                 self._stagnation_limit = max(self._stagnation_limit, 60)
+            # Navigation concept (pure maze traversal) needs long continuous wall-follow
+            # runs — 30 steps is far too few.  tr87/tu93 typically have 100-130 action
+            # budgets; rotating every 30 steps to wrong concepts burns the entire budget.
+            # The RECLASSIFY at step 15/40 still fires independently of this limit.
+            if self._current_concept == 'navigation':
+                self._stagnation_limit = max(self._stagnation_limit, 200)
             # Log classification with full signals
             cm        = context.get('causal_map')
             n_effects = len(getattr(cm, '_effects', {}) or {}) if cm else 0
@@ -708,6 +714,6 @@ class ConceptRungBridge:
                 f'[{self._current_concept}:{self._concept_steps}] {reason}')
 
 
-print("v65 ConceptRungBridge loaded")
+print("v66 ConceptRungBridge loaded")
 print(f"  CognitiveRouter available: {_CognitiveRouter is not None}")
 print(f"  Concept graph nodes: {list(ConceptGraph.EDGES.keys())}")
