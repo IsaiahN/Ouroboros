@@ -1,4 +1,4 @@
-# -- v67: ConceptRungBridge -----------------------------------------------
+# -- v70: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # v67 adds search-algorithm primitives to the codex so the traversal system
@@ -577,7 +577,7 @@ class ConceptRungBridge:
             # Uses CausalMap._effects positions as the cell grid — these are the
             # ACTUAL positions the game responded to, not a guessed 8px grid.
             # Falls back to 8px grid if no effect positions are available yet.
-            _frame_rg = context.get('frame')
+            _frame_rg = context.get('frame') or getattr(obs, 'frame', None)
             _cm_rg    = context.get('causal_map')
             if _frame_rg is not None:
                 try:
@@ -586,10 +586,13 @@ class ConceptRungBridge:
                     if _f.ndim == 2:
                         # Prefer CausalMap effect positions (actual cell positions
                         # learned by the game — avoids guessing wrong grid spacing).
+                        # Filter: len(effects[pos]) >= 2 discards cursor-scan artifacts
+                        # (ft09 has 766 single-effect positions; real cells affect 2+ colors).
                         _effects_rg = getattr(_cm_rg, '_effects', {}) or {} if _cm_rg else {}
                         _pos_rg = [k for k in _effects_rg
                                    if isinstance(k, tuple) and len(k) == 2
-                                   and all(isinstance(v, int) and 0 <= v < 64 for v in k)]
+                                   and all(isinstance(v, int) and 0 <= v < 64 for v in k)
+                                   and len(_effects_rg.get(k, [])) >= 2]
                         if not _pos_rg:
                             # Fallback: 8px grid scan
                             _gc = list(range(8, 60, 8))
@@ -623,11 +626,20 @@ class ConceptRungBridge:
             if '_sat_targets' not in self._pipeline_context:
                 _cs_sat = self._pipeline_context.get('cell_states', {})
                 if not _cs_sat:
-                    # No cell data yet — trigger read_grid first
-                    self._current_concept    = 'read_grid'
-                    self._concept_steps      = 0
-                    self._concept_cycle_idx  = 0
-                    return self._get_action_for_concept('read_grid', context)
+                    # No cell data yet — do a direct grid scan click (NOT read_grid
+                    # recursion: that would create an infinite loop when frame is None).
+                    # Fallback: systematically scan grid positions until read_grid succeeds.
+                    if 6 in avail:
+                        _cols_fb = list(range(8, 64, 8))
+                        _rows_fb = list(range(8, 64, 8))
+                        _total_fb = len(_cols_fb) * len(_rows_fb)
+                        _idx_fb  = self._concept_steps % _total_fb
+                        _gx_fb   = _cols_fb[_idx_fb % len(_cols_fb)]
+                        _gy_fb   = _rows_fb[_idx_fb // len(_cols_fb)]
+                        return 6, {'x': _gx_fb, 'y': _gy_fb}, (
+                            f'constraint_sat:no_data_scan({_gx_fb},{_gy_fb})'
+                            f' step={self._concept_steps}')
+                    return _rb_random.choice(list(avail)), None, 'constraint_sat:no_data'
                 # Target color = most common color (mode) = the "cleared/off" state.
                 # Using min would pick up black border pixels (color 0) not the game bg.
                 from collections import Counter as _Counter
@@ -908,7 +920,15 @@ class ConceptRungBridge:
                 self._nav_dir            = None
             else:
                 new_cands = self._classify_from_context(context)
-                if new_cands and new_cands[0] != self._current_concept:
+                # Guard: don't reclassify away from constraint_sat or read_grid
+                # mid-pipeline — they must complete their loop uninterrupted.
+                # Also skip if current concept is already in top-2 new candidates
+                # (reclassifying to same concept wastes steps_without_gain counter).
+                _pipeline_concepts = {'constraint_sat', 'read_grid'}
+                _skip_reclassify = (
+                    self._current_concept in _pipeline_concepts
+                    or self._current_concept in (new_cands[:2] if new_cands else []))
+                if new_cands and new_cands[0] != self._current_concept and not _skip_reclassify:
                     old_concept = self._current_concept
                     self._current_concept    = new_cands[0]
                     self._concept_candidates = new_cands
