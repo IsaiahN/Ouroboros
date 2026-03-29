@@ -1,4 +1,4 @@
-# -- v73: ConceptRungBridge -----------------------------------------------
+# -- v74: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # v67 adds search-algorithm primitives to the codex so the traversal system
@@ -618,11 +618,16 @@ class ConceptRungBridge:
                         _pos_rg = [k for k in _effects_rg
                                    if isinstance(k, tuple) and len(k) == 2
                                    and all(isinstance(v, int) and 0 <= v < 64 for v in k)]
-                        if not _pos_rg:
-                            # Fallback: 8px grid scan
+                        _n_effects_rg = len(_pos_rg)
+                        if not _pos_rg or len(_pos_rg) > 100:
+                            # Too many positions = cursor scan artifacts (ft09: 800+)
+                            # Fall back to sparse 8px grid (49 positions)
                             _gc = list(range(8, 60, 8))
                             _gr = list(range(8, 60, 8))
                             _pos_rg = [(_gx, _gy) for _gx in _gc for _gy in _gr]
+                            _rg_src = f'grid(was {_n_effects_rg} effects)'
+                        else:
+                            _rg_src = f'effects({_n_effects_rg})'
                         _cs = {(_gx, _gy): int(_f[_gy, _gx])
                                for _gx, _gy in _pos_rg
                                if _gy < _f.shape[0] and _gx < _f.shape[1]}
@@ -630,8 +635,7 @@ class ConceptRungBridge:
                         if self.verbose:
                             _clrs = sorted(set(_cs.values()))
                             print(f"  [bridge:{self.game_id}] read_grid:"
-                                  f" {len(_cs)} cells from"
-                                  f" {'effects' if _effects_rg else 'grid'},"
+                                  f" {len(_cs)} cells from {_rg_src},"
                                   f" colors={_clrs}")
                 except Exception as _e_rg:
                     if self.verbose:
@@ -681,10 +685,22 @@ class ConceptRungBridge:
             _targets = self._pipeline_context['_sat_targets']
             _idx_s   = self._pipeline_context.get('_sat_idx', 0)
             if _idx_s >= len(_targets):
-                # All targets clicked — re-read for next level
+                # All targets clicked — check pass count before re-reading
+                _sat_pass = self._pipeline_context.get('_sat_pass', 0) + 1
+                self._pipeline_context['_sat_pass'] = _sat_pass
                 if self.verbose:
                     print(f"  [bridge:{self.game_id}] constraint_sat DONE"
-                          f" → re-reading grid for next level")
+                          f" pass={_sat_pass} → re-reading grid for next level")
+                if _sat_pass >= 3:
+                    # 3 full passes with no level gain — this strategy doesn't work.
+                    # Rotate to a different concept (sequence_commit or hill_climb).
+                    if self.verbose:
+                        print(f"  [bridge:{self.game_id}] constraint_sat:"
+                              f" {_sat_pass} passes, no level — rotating concept")
+                    for _pk in ('_sat_targets', '_sat_idx', 'cell_states', '_sat_pass'):
+                        self._pipeline_context.pop(_pk, None)
+                    self.signal_concept_failed()
+                    return _rb_random.choice(list(avail)), None, 'constraint_sat:max_passes_failed'
                 for _pk in ('_sat_targets', '_sat_idx', 'cell_states'):
                     self._pipeline_context.pop(_pk, None)
                 self._current_concept    = 'read_grid'
