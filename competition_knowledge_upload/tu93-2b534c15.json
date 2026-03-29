@@ -1,0 +1,1006 @@
+{
+  "game_id": "tu93-2b534c15",
+  "causal_map": {
+    "(24,22)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 2,
+      "conf": 0.0
+    },
+    "(23,21)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 2,
+      "conf": 0.0
+    },
+    "(19,33)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 4,
+      "conf": 0.0
+    },
+    "(24,13)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 4,
+      "conf": 0.0
+    },
+    "(25,31)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 3,
+      "conf": 0.0
+    },
+    "(10,25)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(12,33)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(17,54)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(45,54)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(38,54)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 5,
+      "conf": 0.0
+    },
+    "(10,28)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 3,
+      "conf": 0.0
+    },
+    "(31,31)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(22,22)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(28,27)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(13,34)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 4,
+      "conf": 0.0
+    },
+    "(25,30)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(31,54)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(45,39)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(28,31)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(10,40)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(22,34)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(22,31)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(13,28)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 1,
+      "conf": 0.0
+    },
+    "(13,25)": {
+      "affected": [
+        [
+          0,
+          0
+        ]
+      ],
+      "transitions": {
+        "(0,0)": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "obs": 3,
+      "conf": 0.0
+    }
+  },
+  "rules": [],
+  "color_cycles": {},
+  "win_templates": {},
+  "goal_cells": {},
+  "goal_source": "",
+  "winning_sequences": {
+    "1": [
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      }
+    ],
+    "2": [
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      }
+    ],
+    "3": [
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      }
+    ],
+    "4": [
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      }
+    ],
+    "5": [
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      }
+    ],
+    "7": [
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      }
+    ],
+    "6": [
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 4,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 2,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 1,
+        "data": {}
+      },
+      {
+        "action": 3,
+        "data": {}
+      }
+    ]
+  }
+}
