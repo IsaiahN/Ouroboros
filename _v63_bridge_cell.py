@@ -573,24 +573,38 @@ class ConceptRungBridge:
             # Fallthrough: no explored map or path → treat as navigation below
 
         elif concept == 'read_grid':
-            # Zero-action perception: reads cell states from current frame directly,
-            # then immediately transitions to constraint_sat.  No game actions needed.
+            # Zero-action perception: reads cell states from current frame.
+            # Uses CausalMap._effects positions as the cell grid — these are the
+            # ACTUAL positions the game responded to, not a guessed 8px grid.
+            # Falls back to 8px grid if no effect positions are available yet.
             _frame_rg = context.get('frame')
+            _cm_rg    = context.get('causal_map')
             if _frame_rg is not None:
                 try:
                     import numpy as _np_rg
                     _f = _np_rg.squeeze(_np_rg.array(_frame_rg))
                     if _f.ndim == 2:
-                        _gc = list(range(8, 60, 8))   # 7 grid columns across 64px
-                        _gr = list(range(8, 60, 8))   # 7 grid rows
+                        # Prefer CausalMap effect positions (actual cell positions
+                        # learned by the game — avoids guessing wrong grid spacing).
+                        _effects_rg = getattr(_cm_rg, '_effects', {}) or {} if _cm_rg else {}
+                        _pos_rg = [k for k in _effects_rg
+                                   if isinstance(k, tuple) and len(k) == 2
+                                   and all(isinstance(v, int) and 0 <= v < 64 for v in k)]
+                        if not _pos_rg:
+                            # Fallback: 8px grid scan
+                            _gc = list(range(8, 60, 8))
+                            _gr = list(range(8, 60, 8))
+                            _pos_rg = [(_gx, _gy) for _gx in _gc for _gy in _gr]
                         _cs = {(_gx, _gy): int(_f[_gy, _gx])
-                               for _gx in _gc for _gy in _gr
+                               for _gx, _gy in _pos_rg
                                if _gy < _f.shape[0] and _gx < _f.shape[1]}
                         self._pipeline_context['cell_states'] = _cs
                         if self.verbose:
                             _clrs = sorted(set(_cs.values()))
                             print(f"  [bridge:{self.game_id}] read_grid:"
-                                  f" {len(_cs)} cells scanned, colors={_clrs}")
+                                  f" {len(_cs)} cells from"
+                                  f" {'effects' if _effects_rg else 'grid'},"
+                                  f" colors={_clrs}")
                 except Exception as _e_rg:
                     if self.verbose:
                         print(f"  [bridge:{self.game_id}] read_grid: frame error {_e_rg}")
@@ -614,13 +628,19 @@ class ConceptRungBridge:
                     self._concept_steps      = 0
                     self._concept_cycle_idx  = 0
                     return self._get_action_for_concept('read_grid', context)
-                _min_c   = min(_cs_sat.values())
-                _targets = [(x, y) for (x, y), c in sorted(_cs_sat.items()) if c != _min_c]
+                # Target color = most common color (mode) = the "cleared/off" state.
+                # Using min would pick up black border pixels (color 0) not the game bg.
+                from collections import Counter as _Counter
+                _mode_c  = _Counter(_cs_sat.values()).most_common(1)[0][0]
+                _targets = [(x, y) for (x, y), c in sorted(_cs_sat.items()) if c != _mode_c]
                 self._pipeline_context['_sat_targets'] = _targets
                 self._pipeline_context['_sat_idx']     = 0
                 if self.verbose:
                     print(f"  [bridge:{self.game_id}] constraint_sat:"
-                          f" {len(_targets)} cells to toggle (non-{_min_c})")
+                          f" {len(_targets)} cells to toggle (non-mode={_mode_c})")
+                # Give constraint_sat enough runway to complete a full click pass.
+                # 49 cells max + re-read overhead = ~60 steps minimum; use 120.
+                self._stagnation_limit = max(self._stagnation_limit, 120)
             _targets = self._pipeline_context['_sat_targets']
             _idx_s   = self._pipeline_context.get('_sat_idx', 0)
             if _idx_s >= len(_targets):
@@ -1003,6 +1023,6 @@ class ConceptRungBridge:
                 f'[{self._current_concept}:{self._concept_steps}] {reason}')
 
 
-print("v68 ConceptRungBridge loaded")
+print("v69 ConceptRungBridge loaded")
 print(f"  CognitiveRouter available: {_CognitiveRouter is not None}")
 print(f"  Concept graph nodes: {list(ConceptGraph.EDGES.keys())}")
