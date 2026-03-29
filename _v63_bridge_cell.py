@@ -1,4 +1,4 @@
-# -- v74: ConceptRungBridge -----------------------------------------------
+# -- v75: ConceptRungBridge -----------------------------------------------
 # Wires the mainline CognitiveRouter (SPEED 2) into the concept graph.
 #
 # v67 adds search-algorithm primitives to the codex so the traversal system
@@ -620,12 +620,18 @@ class ConceptRungBridge:
                                    and all(isinstance(v, int) and 0 <= v < 64 for v in k)]
                         _n_effects_rg = len(_pos_rg)
                         if not _pos_rg or len(_pos_rg) > 100:
-                            # Too many positions = cursor scan artifacts (ft09: 800+)
-                            # Fall back to sparse 8px grid (49 positions)
-                            _gc = list(range(8, 60, 8))
-                            _gr = list(range(8, 60, 8))
-                            _pos_rg = [(_gx, _gy) for _gx in _gc for _gy in _gr]
-                            _rg_src = f'grid(was {_n_effects_rg} effects)'
+                            # Too many positions = cursor scan artifacts (ft09: 800+).
+                            # ft09 game grid: 32-unit coord * 2px/unit = pixel position.
+                            # x is always offset-4 (4,12,20,28,36,44,52).
+                            # y alternates: even game-y → offset-4, odd → offset-6.
+                            # Combined x-offset4 × (y-off4 + y-off6) = 7×14 = 98 positions.
+                            # This covers ALL ft09 level patterns in a single fallback scan.
+                            _gx = list(range(4, 57, 8))   # x: 4,12,20,28,36,44,52
+                            _gy4 = list(range(4, 57, 8))  # y offset-4: 4,12,20,28,36,44,52
+                            _gy6 = list(range(6, 57, 8))  # y offset-6: 6,14,22,30,38,46,54
+                            _gy = sorted(set(_gy4 + _gy6))  # 14 combined y values
+                            _pos_rg = [(_gx_i, _gy_j) for _gx_i in _gx for _gy_j in _gy]
+                            _rg_src = f'grid98(was {_n_effects_rg} effects)'
                         else:
                             _rg_src = f'effects({_n_effects_rg})'
                         _cs = {(_gx, _gy): int(_f[_gy, _gx])
@@ -680,8 +686,8 @@ class ConceptRungBridge:
                     print(f"  [bridge:{self.game_id}] constraint_sat:"
                           f" {len(_targets)} cells to toggle (non-mode={_mode_c})")
                 # Give constraint_sat enough runway to complete a full click pass.
-                # 49 cells max + re-read overhead = ~60 steps minimum; use 120.
-                self._stagnation_limit = max(self._stagnation_limit, 120)
+                # Up to 98 positions in grid, ~50 non-mode targets + re-read; use 180.
+                self._stagnation_limit = max(self._stagnation_limit, 180)
             _targets = self._pipeline_context['_sat_targets']
             _idx_s   = self._pipeline_context.get('_sat_idx', 0)
             if _idx_s >= len(_targets):
