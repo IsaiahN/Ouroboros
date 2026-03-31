@@ -1234,6 +1234,8 @@ class CognitiveLoop:
         self._actions_taken += 1
         self._current_frame = cf
         self._frames.append(cf)
+        if len(self._frames) > 200:
+            self._frames = self._frames[-200:]
 
         # NOTE: Don't print cf.to_log_line() here — frame_changed is not yet known.
         # The caller should print AFTER calling record_result().
@@ -1762,12 +1764,10 @@ class CognitiveLoop:
                                 if self._cursor_directional_no_move >= 4:
                                     self._cursor_mode = True
                                     cf.map_update += " [CURSOR MODE DETECTED]"
-                            elif old_pos is None:
-                                # Position never established despite directional actions
-                                self._cursor_directional_no_move += 1
-                                if self._cursor_directional_no_move >= 6:
-                                    self._cursor_mode = True
-                                    cf.map_update += " [CURSOR MODE DETECTED]"
+                            # v36: removed old_pos is None → cursor_mode path.
+                            # If position was never established, player localizer
+                            # failed — don't assume cursor mode, it's likely a
+                            # movement game with unusual visual style.
 
                         # H39b: Track LS20 config changes on movement
                         if self._ls20_config is not None:
